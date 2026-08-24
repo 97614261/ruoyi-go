@@ -1,0 +1,48 @@
+server:
+  port: 8080
+  # debug | release | test
+  mode: debug
+  readTimeout: 30s
+  writeTimeout: 60s
+  shutdownTimeout: 10s
+  # 超过该耗时的请求单独记 warn 日志。
+  # 配合日志等级过滤，这就是一份免费的性能报告 —— 上监控之前性价比最高的手段。
+  slowRequestThreshold: 500ms
+  # 跨域白名单，默认为空即不放行任何跨域请求。
+  # 前端走 Vite 代理（开发）或 Nginx 反代（生产）时是同源的，不需要配。
+  # 真要跨域访问时在这里列出完整来源，例如：
+  #   allowedOrigins: ["http://localhost:5173"]
+  allowedOrigins: []
+
+mysql:
+  # 与 RuoYi Java 版共用同一个库，表结构来自 sql/ry_20260417.sql
+  dsn: "root:aaa111!!@tcp(127.0.0.1:3306)/ry-vue?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai"
+  maxOpenConns: 50
+  maxIdleConns: 10
+  connMaxLifetime: 1h
+  # 超过该耗时的 SQL 记 warn 日志
+  slowThreshold: 200ms
+
+redis:
+  addr: "127.0.0.1:6379"
+  password: ""
+  db: 0
+  poolSize: 20
+
+jwt:
+  # 生产环境必须改，且从环境变量注入，不要提交到仓库
+  secret: "abcdefghijklmnopqrstuvwxyz"
+  # 会话有效期，对齐 Java 版的 token.expireTime=30 分钟
+  expireTime: 30m
+  # 剩余有效期不足该值时自动续期（刷新 Redis TTL，不换 token）
+  refreshWindow: 20m
+  header: "Authorization"
+
+captcha:
+  # math 数字计算 / char 字符
+  # 是否启用不在这里配，读 sys_config 的 sys.account.captchaEnabled
+  type: math
+
+log:
+  # debug | info | warn | error
+  level: debug

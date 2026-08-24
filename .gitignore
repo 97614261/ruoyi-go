@@ -1,0 +1,27 @@
+# 编译产物
+/bin/
+/dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# 测试
+*.test
+*.out
+coverage.*
+# 测试结果由 scripts/test.ps1 生成，不进版本库
+/test/results/
+
+# 本地配置与运行时数据（禁止提交，可能含数据库密码、密钥）
+configs/application.local.yml
+configs/*.local.yml
+/logs/
+/uploadPath/
+.env
+
+# IDE
+.idea/
+*.iml
+.vscode/
