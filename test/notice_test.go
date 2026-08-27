@@ -117,9 +117,9 @@ func TestNoticeListTopContract(t *testing.T) {
 			t.Errorf("顶栏公告项应带 isRead 字段，实际字段=%v", topKeys(item))
 			break
 		}
-		// 顶栏只显示标题，不该把 longblob 正文也捞出来
-		if content, ok := item["noticeContent"]; ok && content != "" {
-			t.Errorf("顶栏公告不该返回正文（noticeContent），那是 longblob，白白浪费带宽")
+		// Java 的 SysNotice 会序列化该字段，但 listTop 查询不读取正文，值应为 null。
+		if content, ok := item["noticeContent"]; !ok || content != nil {
+			t.Errorf("顶栏公告的 noticeContent 应存在且为 null，实际=%v（字段存在=%v）", content, ok)
 			break
 		}
 	}
@@ -146,20 +146,23 @@ func TestNoticeMarkRead(t *testing.T) {
 	mustOK(t, doPost(t, "/system/notice/markRead?noticeId="+idPath(id), nil), "重复标记已读")
 }
 
-// TestNoticeMarkReadAll 全部标记已读后未读数归零。
-func TestNoticeMarkReadAll(t *testing.T) {
-	createNotice(t, newNoticePayload("readall"))
+// TestNoticeMarkReadAllWithoutIDsDoesNothing 对齐 Java：ids 缺失或为空时，
+// Convert.toLongArray 得到空数组，SysNoticeReadServiceImpl.markReadBatch 直接返回。
+// 前端正常调用始终带 ids；不带参数只用于锁定后端边界行为。
+func TestNoticeMarkReadAllWithoutIDsDoesNothing(t *testing.T) {
+	id := createNotice(t, newNoticePayload("readall-empty"))
 
-	mustOK(t, doPost(t, "/system/notice/markReadAll", nil), "全部标记已读")
+	mustOK(t, doPost(t, "/system/notice/markReadAll", nil), "不带 ids 批量标记")
 
 	r := doGet(t, "/system/notice/listTop")
-	mustOK(t, r, "全部已读后的顶栏公告")
-	if unread, _ := r.Raw["unreadCount"].(float64); unread != 0 {
-		t.Errorf("全部标记已读后未读数应为 0，实际 %v", unread)
+	mustOK(t, r, "不带 ids 标记后的顶栏公告")
+	item := findBy(dataArray(t, r, "顶栏公告"), "noticeId", id)
+	if item == nil {
+		t.Fatalf("新建公告 %d 应出现在顶栏列表", id)
 	}
-
-	// 没有未读时再点一次也不能报错
-	mustOK(t, doPost(t, "/system/notice/markReadAll", nil), "无未读时再次全部标记")
+	if read, _ := item["isRead"].(bool); read {
+		t.Error("Java 在 ids 为空时不做任何操作，公告不应被标记为已读")
+	}
 }
 
 // TestNoticeReadUsers 已读用户列表。
@@ -259,6 +262,25 @@ func TestNoticeDetailNeedsNoPermission(t *testing.T) {
 
 	// 顶栏列表同样是所有人可见
 	mustOK(t, request(http.MethodGet, "/system/notice/listTop", token, nil), "普通用户查顶栏公告")
+}
+
+// TestNoticeReadUsersNeedsListPermission 对齐 Java SysNoticeController：
+// 已读用户列表明确要求 system:notice:list，不能因为顶栏公告相关接口免权限，
+// 就把这个管理端接口也一起放开。
+func TestNoticeReadUsersNeedsListPermission(t *testing.T) {
+	id := createNotice(t, newNoticePayload("readusersperm"))
+	mustOK(t, doPost(t, "/system/notice/markRead?noticeId="+idPath(id), nil), "管理员标记公告已读")
+
+	userBody := newUserPayload("readusersperm")
+	userBody["roleIds"] = []int64{} // 明确不给任何角色和公告权限
+	createUser(t, userBody)
+	token := mustLogin(t, fmt.Sprint(userBody["userName"]))
+
+	r := request(http.MethodGet,
+		"/system/notice/readUsers/list?pageNum=1&pageSize=10&noticeId="+idPath(id), token, nil)
+	if r.Code != 403 {
+		t.Fatalf("无 system:notice:list 权限时 Java 会返回 403，Go 实际 code=%d，msg=%q", r.Code, r.Msg)
+	}
 }
 
 // TestNoticeValidation 公告的字段校验。

@@ -27,7 +27,7 @@ func GetRolePermission(user *model.SysUser) []string {
 // GetMenuPermission 取用户的权限标识集合，并按角色回填 role.Permissions。
 //
 // 对应 Java 版 SysPermissionService.getMenuPermission，注意两点：
-//  1. 有角色时按“每个启用角色”分别查权限，顺便把结果塞回 role.Permissions，
+//  1. 有角色时批量查询全部启用角色的权限，再按角色回填 role.Permissions，
 //     数据权限过滤要用；停用角色直接跳过。
 //  2. 没有任何角色时才退回按用户维度查一次。
 //
@@ -50,17 +50,25 @@ func GetMenuPermission(ctx context.Context, user *model.SysUser) ([]string, erro
 		return sortedKeys(set), nil
 	}
 
+	roleIDs := make([]int64, 0, len(user.Roles))
+	for i := range user.Roles {
+		if user.Roles[i].Status == model.StatusNormal {
+			roleIDs = append(roleIDs, user.Roles[i].RoleID)
+		}
+	}
+	permsByRole, err := repository.SelectMenuPermsByRoleIDs(ctx, roleIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	for i := range user.Roles {
 		role := &user.Roles[i]
 		if role.Status != model.StatusNormal {
+			role.Permissions = nil
 			continue
 		}
-		perms, err := repository.SelectMenuPermsByRoleID(ctx, role.RoleID)
-		if err != nil {
-			return nil, err
-		}
 		roleSet := make(map[string]struct{})
-		for _, p := range perms {
+		for _, p := range permsByRole[role.RoleID] {
 			addSplit(roleSet, p)
 			addSplit(set, p)
 		}

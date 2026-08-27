@@ -92,17 +92,10 @@ func MarkNoticeRead(ctx context.Context, userID, noticeID int64) error {
 	return repository.MarkNoticeRead(ctx, userID, []int64{noticeID}, time.Now())
 }
 
-// MarkNoticeReadBatch 批量标记已读，noticeIDs 为空时标记全部未读。
+// MarkNoticeReadBatch 批量标记已读。noticeIDs 为空时与 Java 一致，直接成功。
 func MarkNoticeReadBatch(ctx context.Context, userID int64, noticeIDs []int64) error {
 	if len(noticeIDs) == 0 {
-		unread, err := repository.SelectUnreadNoticeIDs(ctx, userID)
-		if err != nil {
-			return err
-		}
-		noticeIDs = unread
-	}
-	if len(noticeIDs) == 0 {
-		return nil // 本来就没有未读，不算错误
+		return nil
 	}
 	return repository.MarkNoticeRead(ctx, userID, noticeIDs, time.Now())
 }

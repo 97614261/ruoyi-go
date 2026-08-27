@@ -73,7 +73,16 @@ func TestPostCRUD(t *testing.T) {
 	assertField(t, detail, "postSort", 0, "改后（排序 0 不能被 GORM 跳过）")
 	assertField(t, detail, "postName", testPrefix+"岗位改名", "改后")
 	assertField(t, detail, "status", "1", "改后（状态改回 0/1 不能被跳过）")
-	assertField(t, detail, "updateBy", "admin", "改后")
+
+	// 【updateBy 在详情里必须是 null，不能断言成 "admin"】
+	// Java 的 selectPostVo 没 select update_by / update_time，
+	// 详情接口输出的就是 null。这行原来断言 "admin" ——
+	// 那是照着当时 Go 自己的输出写的，把不对齐固化成了"期望"。
+	//
+	// 「修改时要把操作人写进 update_by」这个行为仍然要验，
+	// 但既然没有任何接口暴露它，就只能到数据库层去看，见下面这句。
+	assertJavaNull(t, detail, "改后查岗位", "updateBy", "updateTime")
+	assertColumn(t, "sys_post", "update_by", "post_id", id, "admin")
 
 	// --- 改：不传 remark 时，原备注要保留（对齐 Java 的 <if test="remark != null">）---
 	noRemark := omit(updated, "remark")
@@ -208,9 +217,9 @@ func TestPostSortWhitelist(t *testing.T) {
 	// 合法字段
 	mustOK(t, doGet(t, "/system/post/list?pageNum=1&pageSize=10&orderByColumn=postSort&isAsc=ascending"), "按 postSort 升序")
 
-	// 非法字段：应被忽略，接口照常返回而不是 500。
-	// 【注意】必须 URL 编码 —— httptest.NewRequest 是按 HTTP 报文格式解析的，
-	// 裸空格会破坏请求行导致 panic，那是测试自己的问题不是接口的问题。
+	// 非法字段：应被忽略（退回默认排序），接口照常返回而不是 500。
+	// 【必须 URL 编码】httptest.NewRequest 按 HTTP 报文格式解析请求行，
+	// 裸空格会把它切坏并 panic —— 那是测试自己的问题，不是接口的问题。
 	injections := []string{
 		"post_sort; DROP TABLE sys_post",
 		"post_sort) UNION SELECT 1,2,3--",
@@ -220,6 +229,67 @@ func TestPostSortWhitelist(t *testing.T) {
 	for _, injection := range injections {
 		path := "/system/post/list?pageNum=1&pageSize=10&orderByColumn=" + url.QueryEscape(injection)
 		mustOK(t, doGet(t, path), "非法排序字段 "+injection+" 应被忽略")
+	}
+}
+
+// TestPostPagingStable 排序字段大量并列时，逐页读取不能重复也不能遗漏。
+//
+// 【这是最容易被忽略的一类 bug】
+// LIMIT + OFFSET 在排序键有并列值时，两次查询的行序是未定义的 ——
+// MySQL 完全可以在第 1 页和第 2 页返回同一行，同时漏掉另一行。
+// 症状是"某条记录在列表里怎么都找不到"，翻回上一页又出现了，
+// 极难复现、也没有任何报错。
+//
+// 造 7 条 postSort 完全相同的数据，用 pageSize=2 逐页读完，
+// 断言取到的 ID 集合与总数一致、且无重复。
+func TestPostPagingStable(t *testing.T) {
+	const count = 7
+	created := make(map[int64]bool, count)
+	for i := 0; i < count; i++ {
+		body := newPostPayload(fmt.Sprintf("paging%d", i))
+		// 全部用同一个排序值，制造并列
+		body["postSort"] = 50
+		created[createPost(t, body)] = true
+	}
+
+	// 只看本次造的这批：带上前缀条件，避免库里其它岗位干扰
+	const pageSize = 2
+	base := fmt.Sprintf("/system/post/list?pageSize=%d&postName=%s&orderByColumn=postSort&isAsc=ascending",
+		pageSize, url.QueryEscape(testPrefix+"岗位paging"))
+
+	seen := make(map[int64]int)
+	total := -1
+	for pageNum := 1; pageNum <= count+2; pageNum++ {
+		r := doGet(t, fmt.Sprintf("%s&pageNum=%d", base, pageNum))
+		mustOK(t, r, fmt.Sprintf("第 %d 页", pageNum))
+
+		if total < 0 {
+			if n, ok := r.Raw["total"].(float64); ok {
+				total = int(n)
+			}
+		}
+		rows := pageRows(t, r, fmt.Sprintf("第 %d 页", pageNum))
+		if len(rows) == 0 {
+			break
+		}
+		for _, row := range rows {
+			seen[idOf(t, row, "postId")]++
+		}
+	}
+
+	if total != count {
+		t.Fatalf("total 应为 %d，实际 %d —— 查询条件没圈住本次造的数据", count, total)
+	}
+
+	for id, times := range seen {
+		if times > 1 {
+			t.Errorf("岗位 %d 在翻页中出现了 %d 次 —— 排序不稳定导致重复", id, times)
+		}
+	}
+	for id := range created {
+		if seen[id] == 0 {
+			t.Errorf("岗位 %d 逐页读完一次都没出现 —— 排序不稳定导致漏行", id)
+		}
 	}
 }
 

@@ -103,18 +103,29 @@ func run() error {
 		slog.Info("收到退出信号，开始优雅关闭")
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
-	defer cancel()
-
-	// 先停调度器再停 HTTP：反过来的话，正在跑的定时任务会在
-	// 数据库连接已经关掉之后才发现自己没法写日志
-	service.StopScheduler(shutdownCtx)
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	if err := shutdownComponents(cfg.Server.ShutdownTimeout, srv.Shutdown, service.StopScheduler); err != nil {
 		return fmt.Errorf("优雅关闭超时: %w", err)
 	}
 	slog.Info("服务已退出")
 	return nil
+}
+
+// shutdownComponents 先停止接收新请求，再等待调度任务结束。
+// 两个组件使用独立超时，避免前一个耗尽 deadline 后，后一个收到已过期的 context。
+func shutdownComponents(
+	timeout time.Duration,
+	shutdownHTTP func(context.Context) error,
+	stopScheduler func(context.Context),
+) error {
+	httpCtx, cancelHTTP := context.WithTimeout(context.Background(), timeout)
+	httpErr := shutdownHTTP(httpCtx)
+	cancelHTTP()
+
+	schedulerCtx, cancelScheduler := context.WithTimeout(context.Background(), timeout)
+	stopScheduler(schedulerCtx)
+	cancelScheduler()
+
+	return httpErr
 }
 
 func initLogger(level string) {

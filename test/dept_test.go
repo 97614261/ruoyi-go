@@ -69,6 +69,37 @@ func TestDeptCRUD(t *testing.T) {
 	mustFail(t, doGet(t, path), "", "删除后再查")
 }
 
+// TestDeptUpdateSort 保存部门排序的请求格式和批量更新结果。
+func TestDeptUpdateSort(t *testing.T) {
+	firstID := createDept(t, newDeptPayload(rootDeptID, "sort_1"))
+	secondID := createDept(t, newDeptPayload(rootDeptID, "sort_2"))
+
+	mustOK(t, doPut(t, "/system/dept/updateSort", map[string]any{
+		"deptIds":   idPath(firstID) + "," + idPath(secondID),
+		"orderNums": "2,1",
+	}), "保存部门排序")
+
+	first := dataObject(t, doGet(t, "/system/dept/"+idPath(firstID)), "查询第一个部门排序")
+	second := dataObject(t, doGet(t, "/system/dept/"+idPath(secondID)), "查询第二个部门排序")
+	assertField(t, first, "orderNum", 2, "部门排序更新后")
+	assertField(t, second, "orderNum", 1, "部门排序更新后")
+
+	cases := []struct {
+		name string
+		body map[string]any
+		want string
+	}{
+		{"ID 与排序数量不一致", map[string]any{"deptIds": idPath(firstID) + "," + idPath(secondID), "orderNums": "1"}, "排序参数不匹配"},
+		{"部门 ID 非数字", map[string]any{"deptIds": "invalid", "orderNums": "1"}, "排序参数格式错误"},
+		{"排序值非数字", map[string]any{"deptIds": idPath(firstID), "orderNums": "invalid"}, "排序参数格式错误"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mustFail(t, doPut(t, "/system/dept/updateSort", tc.body), tc.want, tc.name)
+		})
+	}
+}
+
 // TestDeptAncestorsRebuild 改上级部门时，子孙的 ancestors 必须同步重算。
 //
 // ancestors 是冗余字段，数据权限的"本部门及以下"完全依赖它。

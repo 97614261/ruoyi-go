@@ -6,6 +6,206 @@
 
 ---
 
+## 2026-08-26 登录权限按角色批量查询，禁止恢复循环查库
+
+**当前边界**：`GetMenuPermission` 先收集全部启用角色 ID，一次查询角色与菜单关联，
+再按角色回填 `role.Permissions`。无角色用户仍按用户维度查询一次。
+
+**为什么**：旧实现每个角色执行一次 SQL，登录和 `/getInfo` 的查询次数随角色数增长，
+并在连接池繁忙时放大等待。批量查询不改变停用角色跳过、多角色权限取并集的语义。
+
+**禁止回退**：不得为了贴近 Java 的调用形态恢复按角色循环查询；修改时必须同时验证
+总权限集合和每个角色的 `Permissions`。
+
+**相关位置**：`internal/service/permission.go`、`internal/repository/menu.go`
+
+---
+
+## 2026-08-26 在线会话使用 SCAN + MGET，日志不记录会话 key
+
+**当前边界**：在线列表和权限刷新按 SCAN 批次执行 MGET；同一用户的权限在一次刷新中
+只计算一次。Redis 读取或反序列化失败只记录错误和批次数量，不记录
+`login_tokens:<uuid>`。
+
+**为什么**：逐 key GET 会产生 O(N) 次网络往返；完整 key 含会话 UUID，写入日志违反
+Token 不落日志的约束。MGET 保留 SCAN 的非阻塞特性，同时明显减少 Redis 往返。
+
+**禁止回退**：不得改回 KEYS 或逐 key GET，也不得把完整会话 key 塞进日志或错误文本。
+如果在线规模继续增长，再引入 user/role 到 session 的反向索引，不盲目增大批次。
+
+**相关位置**：`pkg/redisx/redisx.go`、`internal/service/token.go`、
+`internal/service/online.go`
+
+---
+
+## 2026-08-26 Java 契约响应改为逐字段构造
+
+**当前边界**：`java_contract.go` 用强类型逐字段 map 构造器复制模型 JSON 字段，再应用
+Java 特有的 null、空数组和 Fastjson 参数标记。
+
+**为什么**：旧实现每次响应先 Marshal 再 Unmarshal，最终写响应时还要再次 Marshal；
+两次转换错误都被忽略，模型出现不可序列化字段时会静默返回空对象。
+
+**禁止回退**：不得恢复 JSON 往返转换。模型字段变化时同步更新构造器、
+`CONVENTIONS.md` 的接口清单和契约测试。
+
+**相关位置**：`internal/handler/java_contract.go`、
+`internal/handler/java_contract_test.go`、`docs/CONVENTIONS.md`
+
+---
+
+## 2026-08-26 HTTP 与调度器使用独立关闭超时
+
+**当前边界**：收到退出信号后先关闭 HTTP 监听并等待请求，再使用新的 timeout context
+停止调度器；数据库和 Redis 在两者之后关闭。
+
+**为什么**：旧实现共用一个 context，调度任务耗尽 deadline 后，HTTP Shutdown 会立刻
+收到过期 context。独立预算保证其中一个组件超时不会跳过另一个组件的关闭流程。
+
+**禁止回退**：不得让 HTTP 与调度器复用已经消耗过的 timeout context；即使 HTTP
+关闭失败，也必须尝试停止调度器。
+
+**相关位置**：`cmd/server/main.go`、`cmd/server/main_test.go`
+
+---
+
+## 2026-08-24 测试 Redis 清理必须精确登记并验证，不能扫全库
+
+**当前边界**：接口测试在请求发生时登记本轮创建的会话、验证码和防重复提交 key；
+密码错误计数只清 `pwd_err_cnt:zz_test_*`，限流只清 httptest 固定来源
+`192.0.2.1` 对应的键。收尾逐个删除并用 `EXISTS` 验证，任一步失败都会把
+`TestMain` 的退出码改为失败。`cmd/contractcheck` 同样记录两端自己的会话和验证码，
+无论对拍成功还是发现差异都做精确清理。
+
+**为什么**：旧实现只清限流键，完整回归会留下上百个 `login_tokens:*`；
+第一次补丁改成逐个调用 `/logout`，但该接口为保证前端能退出，Redis 删除失败也固定
+返回成功，测试仍然会假绿。另一方面，直接扫描并删除全部 `login_tokens:*`、
+`captcha_codes:*` 会把同一开发 Redis 上真实用户的会话一起删掉。
+
+**禁止回退**：
+
+- 禁止在测试收尾使用 `FLUSHDB`、`KEYS + DEL` 或删除整个业务前缀。
+- 禁止忽略清理错误；“有 TTL 最终会过期”不能作为测试污染的处理方式。
+- 新增会写 Redis 的中间件时，测试辅助层必须同时登记它创建的精确 key。
+- 双端对拍的 Java 与 Go 仍必须使用不同 Redis DB；精确清理不能替代序列化隔离。
+
+**相关位置**：`test/main_test.go`、`test/helper_test.go`、`cmd/contractcheck/main.go`、
+`scripts/test.ps1`、`docs/CONVENTIONS.md` 第 7 节
+
+---
+
+## 2026-08-24 分页必须有唯一兜底列，统一走 `pg.Stable`
+
+**当前边界**：13 处分页查询全部保证行序唯一，分两种写法：
+
+- **11 处**接受前端排序，用 `page.Query.Stable(fallback, tiebreaker)`：
+
+  ```go
+  db.Order(pg.Stable("r.role_sort, r.role_id", "r.role_id"))
+  ```
+
+  前端没传 `orderByColumn` → 用 `fallback`；传了 → `<用户指定的>, <tiebreaker>`。
+  `tiebreaker` 必须是**唯一列**（通常是主键），单列、不带方向，
+  **不接受空串**（没有"为空就不追加"的分支，那等于给绕过稳定排序开口子）。
+
+- **2 处**不接受前端排序，直接在 SQL 里写死确定性排序：
+  公告已读用户按 `read_time DESC, user_id` 两级排序（`read_time` 不唯一，
+  必须补主键）；角色授权用户按唯一主键 `user_id` 单列排序（本身已确定，
+  不需要再追加）。
+
+**为什么**：`LIMIT + OFFSET` 在两种情况下行序都是未定义的 ——
+没有 `ORDER BY`，以及**排序键存在并列值**。两种情况下翻页都可能
+**重复某行或漏掉某行**。
+
+症状极其难查：没有任何报错，用户只会说"某条记录在列表里找不到"，
+翻回上一页又出现了。日志、监控、测试全是正常的。
+
+并列不是小概率事件：`role_sort` / `dict_sort` / `post_sort` 新建时默认同值；
+`sys_notice_read.read_time` 精度到秒，一条公告推送后大批人同时点开，
+并列几乎必然发生。
+
+**改之前的真实状况**（13 处分页）：
+
+| | 状况 |
+|---|---|
+| 角色授权用户 | 始终按唯一 `user_id` 排序，**本来就是稳定的** |
+| 其余 12 处 | 至少存在一条不稳定路径 |
+
+那 12 处细分：
+
+- **11 个支持前端排序的接口** —— 默认路径多数按唯一主键排（`config_id`、`job_id`
+  这些本身就确定），但**用户一旦点表头改用非唯一字段排序**（`postSort`、
+  `roleSort`、`createTime`…），就没有主键兜底了。风险在这条路径上，不在默认路径。
+- **岗位列表** —— 更糟，前端没传排序时**完全不加 `ORDER BY`**，默认路径就不稳定。
+- **公告已读用户** —— 只按非唯一的 `read_time` 排序，而且不接受前端排序，
+  也就是说它**唯一的那条路径就是不稳定的**。
+
+**与 Java 的差异是有意的**：Java 的 mapper 多数只写单列排序甚至完全不排序
+（`SysPostMapper.xml` 全文没有 `order by`），并列时行序由执行计划决定。
+加兜底列会让双端对拍在有并列值时报差异。
+
+**禁止回退**：
+
+- **不要靠去掉兜底列来消掉对拍差异。** 行序不属于接口契约 ——
+  前端依赖的是字段和结构。复刻"未定义行为"不是对齐，是把缺陷搬过来。
+- 不要为了少传一个参数去解析 `fallback` 字符串（见下一条）。
+
+**一个判断方法**：Java 到底有没有排序，要看 **service 转调到哪条 SQL**，
+不能只看 mapper 里有没有同名 select。`selectRoleAll()` 转调的是 `selectRoleList`，
+那条才带 `order by r.role_sort`。曾据此误删过 `SelectRoleAll` 的排序，
+**而且双端对拍没发现** —— 种子数据里 `role_id` 和 `role_sort` 恰好同序，
+样本把差异盖住了。对应回归见 `test/role_test.go` 的 `TestRoleAllOrderedBySort`，
+它刻意让两者反序。
+
+**相关位置**：`pkg/page/page.go` 的 `Stable`、`pkg/page/page_test.go`、
+`internal/repository/*.go`、`test/post_test.go` 的 `TestPostPagingStable`、
+@CONVENTIONS.md 第四节
+
+---
+
+## 2026-08-24 不要从 SQL 片段里解析结构，让调用方显式传
+
+**当前边界**：`Stable(fallback, tiebreaker string)` 收两个参数。
+**禁止**改回单参数版本去推断兜底列。
+
+**为什么**：单参数版本是这么写的 ——
+
+```go
+tiebreaker := strings.Fields(fallback)[0]   // 想从 "info_id DESC" 里取出 "info_id"
+```
+
+它对 `"info_id DESC"` 有效，对 `"r.role_sort, r.role_id"` 切出来是
+**`"r.role_sort,"`**，带着逗号。拼完是：
+
+```sql
+ORDER BY r.role_sort asc, r.role_sort,
+```
+
+末尾多一个逗号，MySQL 直接语法错误，接口返回 500。
+角色列表和字典数据列表只要前端点一下表头排序就会中。
+
+**这个 bug 的形状值得记住**：注释里写下了一个假设（"fallback 是单列或单列带方向"），
+然后在**同一次改动里**自己写了多列 fallback，破坏了自己的假设。
+调用方本来就知道主键叫什么，多传一个参数的成本远低于解析的脆弱性。
+
+**为什么全量测试没抓到**：`pkg/page` 当时**一个测试都没有**，
+而接口测试里没有任何用例给角色/字典列表传 `orderByColumn` ——
+默认路径走的是 `fallback` 分支，正好绕开了出错的那一半。
+
+现已补 `pkg/page/page_test.go`，其中专门有一条断言：
+**排序表达式不能以逗号结尾、不能有连续逗号**。
+
+**禁止回退**：
+
+- 不要为了"接口更简洁"把两个参数合成一个。
+- 新增分页查询时两个参数都要显式写，即使它们相同（如 `Stable("post_id", "post_id")`）。
+- 纯函数包（`pkg/` 下）新增可复用工具时必须同时补表格驱动单测 ——
+  接口测试覆盖不到分支组合。
+
+**相关位置**：`pkg/page/page.go`、`pkg/page/page_test.go`
+
+---
+
 ## 2026-08-24 接口测试必须照前端的契约写，不能照自己的实现写
 
 **当前边界**：写接口测试时，**参数放在哪（body / query）、叫什么名字，必须去翻

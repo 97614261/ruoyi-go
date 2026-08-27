@@ -92,10 +92,9 @@ func SelectRolePage(ctx context.Context, query model.RoleQuery, pg page.Query, s
 		return []model.SysRole{}, 0, nil
 	}
 
-	orderBy := pg.OrderBy
-	if orderBy == "" {
-		orderBy = "r.role_sort"
-	}
+	// role_sort 常有并列（默认都建成同一个值），必须带主键兜底。
+	// 与 SelectRoleAll 的 "role_sort, role_id" 保持一致
+	orderBy := pg.Stable("r.role_sort, r.role_id", "r.role_id")
 
 	var list []model.SysRole
 	err := roleListDB(ctx, query, scope).
@@ -146,7 +145,21 @@ func SelectRoleAll(ctx context.Context) ([]model.SysRole, error) {
 	var list []model.SysRole
 	err := DB(ctx).
 		Where("del_flag = ?", model.DelFlagExist).
-		Order("role_sort").
+		// 【必须按 role_sort 排，别再当成"多余的排序"删掉】
+		// Java 的 selectRoleAll() 不是一条独立 SQL，它转调 selectRoleList：
+		//   SysRoleServiceImpl.java:112
+		//     return SpringUtils.getAopProxy(this).selectRoleList(new SysRole());
+		// 而 SysRoleMapper.xml 的 selectRoleList 结尾有 `order by r.role_sort`。
+		//
+		// 曾经以"mapper 里没有同名 select、所以 Java 没排序"为由删过这一行，
+		// 双端对拍还通过了 —— 因为种子数据里 role_id 和 role_sort 恰好同序，
+		// 样本把差异盖住了。判断 Java 有没有排序要看 service 转调到哪条 SQL。
+		//
+		// 追加的 role_id 比 Java 严一点：Java 只写了 role_sort，
+		// 并列时行序由执行计划决定。这里让它确定下来，
+		// 代价是双端对拍在有并列 role_sort 时会报差异 —— 那是预期的，
+		// **不要靠去掉 role_id 来消差异**。
+		Order("role_sort, role_id").
 		Find(&list).Error
 	if err != nil {
 		return nil, fmt.Errorf("查询全部角色失败: %w", err)

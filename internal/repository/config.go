@@ -61,10 +61,8 @@ func SelectConfigPage(ctx context.Context, query model.ConfigQuery, pg page.Quer
 		return []model.SysConfig{}, 0, nil
 	}
 
-	orderBy := pg.OrderBy
-	if orderBy == "" {
-		orderBy = "config_id"
-	}
+	// 兜底主键，保证翻页行序确定，见 page.Query.Stable
+	orderBy := pg.Stable("config_id", "config_id")
 
 	var list []model.SysConfig
 	err := db.Order(orderBy).Offset(pg.Offset()).Limit(pg.PageSize).Find(&list).Error

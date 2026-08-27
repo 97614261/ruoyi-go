@@ -29,7 +29,7 @@ func DictDataByType(c *gin.Context) {
 			list = found
 		}
 	}
-	response.OkData(c, list)
+	response.OkData(c, contractCachedDictData(list))
 }
 
 // DictDataList GET /system/dict/data/list
@@ -46,7 +46,7 @@ func DictDataList(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.Page(c, list, total)
+	response.Page(c, contractDictData(list), total)
 }
 
 // DictDataExport POST /system/dict/data/export
@@ -80,7 +80,8 @@ func DictDataGet(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.OkData(c, data)
+	// selectDictDataById 走的是 selectDictDataVo，没选 update_by / update_time
+	response.OkData(c, contractDictDatum(*data))
 }
 
 // DictDataAdd POST /system/dict/data
@@ -141,7 +142,7 @@ func DictTypeList(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.Page(c, list, total)
+	response.Page(c, contractDictTypes(list), total)
 }
 
 // DictTypeExport POST /system/dict/type/export
@@ -170,7 +171,7 @@ func DictTypeOptionSelect(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.OkData(c, list)
+	response.OkData(c, contractDictTypes(list))
 }
 
 // DictTypeRefreshCache DELETE /system/dict/type/refreshCache
@@ -194,7 +195,8 @@ func DictTypeGet(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.OkData(c, dictType)
+	// selectDictTypeById 走的是 selectDictTypeVo，没选 update_by / update_time
+	response.OkData(c, contractDictType(*dictType))
 }
 
 // DictTypeAdd POST /system/dict/type

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -62,6 +63,40 @@ func request(method, path, token string, body any) response {
 		Header: rec.Header(),
 	}
 	// 二进制响应（导出）解析不了 JSON，属正常
+	if err := json.Unmarshal(result.Body, &result.Raw); err == nil {
+		if code, ok := result.Raw["code"].(float64); ok {
+			result.Code = int(code)
+		}
+		result.Msg, _ = result.Raw["msg"].(string)
+	}
+	trackRequestRedisKeys(method, path, token, result)
+	return result
+}
+
+// requestMultipart 上传单个文件，字段名与文件名由调用方指定。
+func requestMultipart(method, path, token, fieldName, fileName string, data []byte) response {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile(fieldName, fileName)
+	if err != nil {
+		panic(fmt.Sprintf("创建 multipart 文件字段失败: %v", err))
+	}
+	if _, err = part.Write(data); err != nil {
+		panic(fmt.Sprintf("写入 multipart 文件失败: %v", err))
+	}
+	if err = writer.Close(); err != nil {
+		panic(fmt.Sprintf("结束 multipart 请求体失败: %v", err))
+	}
+
+	req := httptest.NewRequest(method, path, &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	rec := httptest.NewRecorder()
+	engine.ServeHTTP(rec, req)
+
+	result := response{Status: rec.Code, Body: rec.Body.Bytes(), Header: rec.Header()}
 	if err := json.Unmarshal(result.Body, &result.Raw); err == nil {
 		if code, ok := result.Raw["code"].(float64); ok {
 			result.Code = int(code)

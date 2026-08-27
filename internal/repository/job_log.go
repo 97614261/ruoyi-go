@@ -48,11 +48,9 @@ func SelectJobLogPage(ctx context.Context, query model.JobLogQuery, pg page.Quer
 		return []model.SysJobLog{}, 0, nil
 	}
 
-	orderBy := pg.OrderBy
-	if orderBy == "" {
-		// 默认倒序：日志页面永远是最新的最有用
-		orderBy = "job_log_id DESC"
-	}
+	// 默认倒序：日志页面永远是最新的最有用。
+	// 指定排序时追加 job_log_id 兜底，见 page.Query.Stable
+	orderBy := pg.Stable("job_log_id DESC", "job_log_id")
 
 	var list []model.SysJobLog
 	err := jobLogListDB(ctx, query).

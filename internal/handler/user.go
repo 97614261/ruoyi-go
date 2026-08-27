@@ -28,7 +28,7 @@ func UserList(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.Page(c, list, total)
+	response.Page(c, contractUserList(list), total)
 }
 
 // UserExport POST /system/user/export
@@ -131,7 +131,10 @@ func UserGet(c *gin.Context) {
 
 	if raw == "" || raw == "/" {
 		// 新增场景：没有 data，也没有 postIds / roleIds
-		result.Put("roles", filterAssignableRoles(roles, 0)).Put("posts", posts).JSON(c)
+		result.
+			Put("roles", contractRoles(filterAssignableRoles(roles, 0))).
+			Put("posts", contractPosts(posts)).
+			JSON(c)
 		return
 	}
 
@@ -152,11 +155,11 @@ func UserGet(c *gin.Context) {
 	}
 
 	result.
-		Put("data", user).
+		Put("data", contractUser(*user, true)).
 		Put("postIds", postIDs).
 		Put("roleIds", roleIDs).
-		Put("roles", filterAssignableRoles(roles, userID)).
-		Put("posts", posts).
+		Put("roles", contractRoles(filterAssignableRoles(roles, userID))).
+		Put("posts", contractPosts(posts)).
 		JSON(c)
 }
 

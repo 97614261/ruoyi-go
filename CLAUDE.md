@@ -69,7 +69,9 @@ docs/
 1. **响应必须走 `pkg/response`**，禁止在 handler 里手写 `c.JSON` 拼裸 map
 2. **所有列表接口必须分页**，`pageSize` 硬上限 100，超出则截断而不是报错
 3. **所有 DB / Redis / HTTP 调用必须带 `context.Context` 和超时**，禁止 `context.TODO()` 进主干代码
-4. **只有 repository 层能持有 `*gorm.DB`**
+4. **只有 repository 层能获取、保存或直接操作 `*gorm.DB`**。`internal/datascope`
+   可以构造 GORM Scope；service 可以组合和传递 `func(*gorm.DB) *gorm.DB` 类型的
+   Scope，但不得获取数据库连接、调用 GORM 查询方法或直接执行 SQL
 5. **禁止用 panic 控制流程**，错误一律用 error 返回；middleware 统一 recover 并返回 500
 6. **循环里禁止查库**，遇到 N+1 用批量查询或 `Preload`
 7. **密码只用 bcrypt**，禁止出现在任何日志、响应、错误信息里；Cookie、Token 同理

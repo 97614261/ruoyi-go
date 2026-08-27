@@ -24,7 +24,7 @@ func RoleList(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.Page(c, list, total)
+	response.Page(c, contractRoles(list), total)
 }
 
 // RoleExport POST /system/role/export
@@ -53,7 +53,7 @@ func RoleOptionSelect(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.OkData(c, list)
+	response.OkData(c, contractRoles(list))
 }
 
 // RoleDeptTree GET /system/role/deptTree/:roleId
@@ -180,7 +180,8 @@ func RoleGet(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.OkData(c, role)
+	// selectRoleById 走的是 selectRoleVo，没选 create_by / update_by / update_time
+	response.OkData(c, contractRole(*role))
 }
 
 // RoleAdd POST /system/role

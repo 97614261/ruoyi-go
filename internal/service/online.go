@@ -2,17 +2,12 @@ package service
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"log/slog"
 	"sort"
 	"strings"
 
-	"github.com/redis/go-redis/v9"
-
 	"ruoyi-go/internal/model"
 	"ruoyi-go/pkg/page"
-	"ruoyi-go/pkg/redisx"
 	"ruoyi-go/pkg/types"
 )
 
@@ -32,24 +27,10 @@ func ListOnlineUsers(ctx context.Context, query model.OnlineQuery, pg page.Query
 		truncated bool
 	)
 
-	err := redisx.ScanKeys(ctx, redisx.KeyLoginToken, 200, func(key string) error {
+	err := scanLoginUsers(ctx, 200, func(loginUser *model.LoginUser) error {
 		if len(all) >= maxOnlineScan {
 			truncated = true
-			return nil
-		}
-		raw, err := redisx.C().Get(ctx, key).Bytes()
-		if errors.Is(err, redis.Nil) {
-			return nil // 迭代期间刚好过期
-		}
-		if err != nil {
-			slog.Warn("读取会话失败，跳过", "key", key, "err", err)
-			return nil
-		}
-
-		var loginUser model.LoginUser
-		if err := json.Unmarshal(raw, &loginUser); err != nil {
-			slog.Warn("会话反序列化失败，跳过", "key", key, "err", err)
-			return nil
+			return errStopLoginScan
 		}
 
 		item := model.UserOnline{

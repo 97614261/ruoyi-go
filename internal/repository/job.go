@@ -40,10 +40,7 @@ func SelectJobPage(ctx context.Context, query model.JobQuery, pg page.Query) ([]
 		return []model.SysJob{}, 0, nil
 	}
 
-	orderBy := pg.OrderBy
-	if orderBy == "" {
-		orderBy = "job_id"
-	}
+	orderBy := pg.Stable("job_id", "job_id")
 
 	var list []model.SysJob
 	err := jobListDB(ctx, query).

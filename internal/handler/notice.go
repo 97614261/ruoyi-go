@@ -47,7 +47,7 @@ func NoticeList(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.Page(c, list, total)
+	response.Page(c, contractNotices(list), total)
 }
 
 // NoticeGet GET /system/notice/:noticeId
@@ -131,11 +131,7 @@ func NoticeMarkRead(c *gin.Context) {
 // Java 是 `markReadAll(String ids)`，都走查询串。
 // 顶栏"全部已读"传的是当前下拉里那几条的 ID，逗号拼接。
 //
-// 【ids 为空时的行为与 Java 不同，是有意的】
-// Java 的 markReadBatch 对空数组直接 return，等于什么都不做；
-// 这里标记该用户全部未读公告。前端在 ids 为空时会提前返回、根本不发请求，
-// 所以这条路径只有直接调 API 才走得到 —— 而一个叫 markReadAll 的接口
-// 收到"没指定哪几条"时把全部标记已读，比静默什么都不做更符合直觉。
+// ids 为空时与 Java 一致：传空数组给 service，直接成功且不修改阅读状态。
 func NoticeMarkReadAll(c *gin.Context) {
 	loginUser := middleware.CurrentUser(c)
 

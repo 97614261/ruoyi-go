@@ -17,15 +17,19 @@ package apitest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"ruoyi-go/internal/config"
 	"ruoyi-go/internal/repository"
@@ -51,6 +55,15 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	code := m.Run()
+	purgeTestData()
+	if err := purgeTestRowsPhysical(); err != nil {
+		fmt.Fprintf(os.Stderr, "测试收尾清理失败: %v\n", err)
+		code = 1
+	}
+	if err := purgeRedisArtifacts(); err != nil {
+		fmt.Fprintf(os.Stderr, "Redis 测试数据收尾清理失败: %v\n", err)
+		code = 1
+	}
 	teardown()
 	os.Exit(code)
 }
@@ -70,6 +83,9 @@ func setup() error {
 
 	if err := repository.Init(cfg.MySQL); err != nil {
 		return err
+	}
+	if err := purgeTestRowsPhysical(); err != nil {
+		return fmt.Errorf("清理历史测试数据失败: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -100,7 +116,9 @@ func setup() error {
 	// 上一轮如果中途失败，t.Cleanup 可能没跑完，残留数据会让这一轮
 	// 撞唯一性约束。开跑前先清干净，保证每次运行都是幂等的。
 	purgeTestData()
-	purgeRateLimit()
+	if err := purgeRateLimit(); err != nil {
+		return fmt.Errorf("清理测试限流键失败: %w", err)
+	}
 	return nil
 }
 
@@ -112,12 +130,15 @@ func setup() error {
 // 报的是"访问过于频繁"而不是被测的那个错误 —— 排查时极具误导性。
 //
 // 不改限流阈值来迁就测试：那是生产配置，不该被测试牵着走。
-func purgeRateLimit() {
-	ctx := context.Background()
-	_ = redisx.ScanKeys(ctx, redisx.KeyRateLimit+"*", 200, func(key string) error {
-		redisx.C().Del(ctx, key)
-		return nil
-	})
+func purgeRateLimit() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	keys := []string{
+		redisx.RateLimitKey("captcha:192.0.2.1"),
+		redisx.RateLimitKey("login:192.0.2.1"),
+		redisx.RateLimitKey("register:192.0.2.1"),
+	}
+	return deleteRedisKeys(ctx, keys)
 }
 
 // purgeTestData 删除所有以 testPrefix 开头的测试数据。
@@ -150,9 +171,15 @@ func purgeTestData() {
 
 // purgeFlat 清理分页列表里的测试数据。
 func purgeFlat(listPath, idKey, nameKey, deletePrefix string) {
-	for _, item := range collectTestItems(listPath, "rows", nameKey) {
-		if id, ok := numericID(item[idKey]); ok {
-			request(http.MethodDelete, deletePrefix+id, adminToken, nil)
+	for round := 0; round < 100; round++ {
+		items := collectTestItems(listPath, "rows", nameKey)
+		if len(items) == 0 {
+			return
+		}
+		for _, item := range items {
+			if id, ok := numericID(item[idKey]); ok {
+				request(http.MethodDelete, deletePrefix+id, adminToken, nil)
+			}
 		}
 	}
 }
@@ -204,6 +231,74 @@ func numericID(raw any) (string, bool) {
 	return strconv.FormatInt(int64(number), 10), true
 }
 
+// purgeTestRowsPhysical 只物理删除精确 zz_test_ 前缀的数据。
+//
+// 业务删除接口对用户、角色和部门使用逻辑删除。接口测试如果只调用删除接口，
+// 物理表会持续膨胀，并最终让唯一性、排序和双端对拍结果漂移。这里位于 test
+// 包，先删关联表、再删主表，不会进入生产代码路径。
+func purgeTestRowsPhysical() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	steps := []string{
+		"DELETE nr FROM sys_notice_read nr LEFT JOIN sys_notice n ON n.notice_id = nr.notice_id LEFT JOIN sys_user u ON u.user_id = nr.user_id WHERE LEFT(n.notice_title, 8) = 'zz_test_' OR LEFT(u.user_name, 8) = 'zz_test_' OR LEFT(u.nick_name, 8) = 'zz_test_'",
+		"DELETE ur FROM sys_user_role ur LEFT JOIN sys_user u ON u.user_id = ur.user_id LEFT JOIN sys_role r ON r.role_id = ur.role_id WHERE LEFT(u.user_name, 8) = 'zz_test_' OR LEFT(u.nick_name, 8) = 'zz_test_' OR LEFT(r.role_name, 8) = 'zz_test_' OR LEFT(r.role_key, 8) = 'zz_test_'",
+		"DELETE up FROM sys_user_post up LEFT JOIN sys_user u ON u.user_id = up.user_id LEFT JOIN sys_post p ON p.post_id = up.post_id WHERE LEFT(u.user_name, 8) = 'zz_test_' OR LEFT(u.nick_name, 8) = 'zz_test_' OR LEFT(p.post_name, 8) = 'zz_test_' OR LEFT(p.post_code, 8) = 'zz_test_'",
+		"DELETE rd FROM sys_role_dept rd LEFT JOIN sys_role r ON r.role_id = rd.role_id LEFT JOIN sys_dept d ON d.dept_id = rd.dept_id WHERE LEFT(r.role_name, 8) = 'zz_test_' OR LEFT(r.role_key, 8) = 'zz_test_' OR LEFT(d.dept_name, 8) = 'zz_test_'",
+		"DELETE rm FROM sys_role_menu rm LEFT JOIN sys_role r ON r.role_id = rm.role_id LEFT JOIN sys_menu m ON m.menu_id = rm.menu_id WHERE LEFT(r.role_name, 8) = 'zz_test_' OR LEFT(r.role_key, 8) = 'zz_test_' OR LEFT(m.menu_name, 8) = 'zz_test_'",
+		"DELETE FROM sys_job_log WHERE LEFT(job_name, 8) = 'zz_test_' OR LEFT(job_group, 8) = 'zz_test_'",
+		"DELETE FROM sys_logininfor WHERE LEFT(user_name, 8) = 'zz_test_'",
+		"DELETE FROM sys_oper_log WHERE LEFT(oper_name, 8) = 'zz_test_'",
+		"DELETE FROM sys_notice WHERE LEFT(notice_title, 8) = 'zz_test_'",
+		"DELETE FROM sys_dict_data WHERE LEFT(dict_label, 8) = 'zz_test_' OR LEFT(dict_type, 8) = 'zz_test_'",
+		"DELETE FROM sys_dict_type WHERE LEFT(dict_name, 8) = 'zz_test_' OR LEFT(dict_type, 8) = 'zz_test_'",
+		"DELETE FROM sys_config WHERE LEFT(config_name, 8) = 'zz_test_' OR LEFT(config_key, 8) = 'zz_test_'",
+		"DELETE FROM sys_job WHERE LEFT(job_name, 8) = 'zz_test_' OR LEFT(job_group, 8) = 'zz_test_'",
+		"DELETE FROM sys_user WHERE LEFT(user_name, 8) = 'zz_test_' OR LEFT(nick_name, 8) = 'zz_test_'",
+		"DELETE FROM sys_role WHERE LEFT(role_name, 8) = 'zz_test_' OR LEFT(role_key, 8) = 'zz_test_'",
+		"DELETE FROM sys_post WHERE LEFT(post_name, 8) = 'zz_test_' OR LEFT(post_code, 8) = 'zz_test_'",
+		"DELETE FROM sys_dept WHERE LEFT(dept_name, 8) = 'zz_test_'",
+		"DELETE FROM sys_menu WHERE LEFT(menu_name, 8) = 'zz_test_'",
+	}
+
+	checks := []struct {
+		name  string
+		query string
+	}{
+		{"用户", "SELECT COUNT(*) FROM sys_user WHERE LEFT(user_name, 8) = 'zz_test_' OR LEFT(nick_name, 8) = 'zz_test_'"},
+		{"角色", "SELECT COUNT(*) FROM sys_role WHERE LEFT(role_name, 8) = 'zz_test_' OR LEFT(role_key, 8) = 'zz_test_'"},
+		{"岗位", "SELECT COUNT(*) FROM sys_post WHERE LEFT(post_name, 8) = 'zz_test_' OR LEFT(post_code, 8) = 'zz_test_'"},
+		{"部门", "SELECT COUNT(*) FROM sys_dept WHERE LEFT(dept_name, 8) = 'zz_test_'"},
+		{"菜单", "SELECT COUNT(*) FROM sys_menu WHERE LEFT(menu_name, 8) = 'zz_test_'"},
+		{"参数", "SELECT COUNT(*) FROM sys_config WHERE LEFT(config_name, 8) = 'zz_test_' OR LEFT(config_key, 8) = 'zz_test_'"},
+		{"字典类型", "SELECT COUNT(*) FROM sys_dict_type WHERE LEFT(dict_name, 8) = 'zz_test_' OR LEFT(dict_type, 8) = 'zz_test_'"},
+		{"字典数据", "SELECT COUNT(*) FROM sys_dict_data WHERE LEFT(dict_label, 8) = 'zz_test_' OR LEFT(dict_type, 8) = 'zz_test_'"},
+		{"公告", "SELECT COUNT(*) FROM sys_notice WHERE LEFT(notice_title, 8) = 'zz_test_'"},
+		{"任务", "SELECT COUNT(*) FROM sys_job WHERE LEFT(job_name, 8) = 'zz_test_' OR LEFT(job_group, 8) = 'zz_test_'"},
+		{"任务日志", "SELECT COUNT(*) FROM sys_job_log WHERE LEFT(job_name, 8) = 'zz_test_' OR LEFT(job_group, 8) = 'zz_test_'"},
+		{"登录日志", "SELECT COUNT(*) FROM sys_logininfor WHERE LEFT(user_name, 8) = 'zz_test_'"},
+		{"操作日志", "SELECT COUNT(*) FROM sys_oper_log WHERE LEFT(oper_name, 8) = 'zz_test_'"},
+	}
+
+	return repository.Transaction(ctx, func(tx *gorm.DB) error {
+		for _, statement := range steps {
+			if err := tx.Exec(statement).Error; err != nil {
+				return err
+			}
+		}
+		for _, check := range checks {
+			var remaining int64
+			if err := tx.Raw(check.query).Scan(&remaining).Error; err != nil {
+				return err
+			}
+			if remaining != 0 {
+				return fmt.Errorf("%s仍残留 %d 条 %s 数据", testPrefix, remaining, check.name)
+			}
+		}
+		return nil
+	})
+}
+
 func teardown() {
 	_ = repository.Close()
 	_ = redisx.Close()
@@ -241,5 +336,98 @@ func loginAs(username, password string) (string, error) {
 	if token == "" {
 		return "", fmt.Errorf("登录响应里没有 token")
 	}
+
+	claims, err := service.ParseToken(token)
+	if err != nil {
+		return "", fmt.Errorf("解析测试会话失败: %w", err)
+	}
+	trackRedisKey(redisx.LoginTokenKey(claims.LoginUserKey))
 	return token, nil
+}
+
+// testRedisKeys 只登记本轮测试能精确归属的 key，避免清理共享 Redis 时
+// 误删开发人员的验证码、会话或防重复提交状态。
+var (
+	testRedisKeysMu sync.Mutex
+	testRedisKeys   = make(map[string]struct{})
+)
+
+func trackRedisKey(key string) {
+	if key == "" {
+		return
+	}
+	testRedisKeysMu.Lock()
+	testRedisKeys[key] = struct{}{}
+	testRedisKeysMu.Unlock()
+}
+
+// trackRequestRedisKeys 记录验证码和防重复提交中间件可能写入的精确 key。
+func trackRequestRedisKeys(method, path, token string, result response) {
+	cleanPath, _, _ := strings.Cut(path, "?")
+	if method == http.MethodGet && cleanPath == "/captchaImage" {
+		if uuid, _ := result.Raw["uuid"].(string); uuid != "" {
+			trackRedisKey(redisx.CaptchaKey(uuid))
+		}
+	}
+	if method != http.MethodPost && method != http.MethodPut {
+		return
+	}
+	identity := "192.0.2.1"
+	if token != "" {
+		identity = "Bearer " + token
+	}
+	sum := sha256.Sum256([]byte(identity + "|" + method + "|" + cleanPath))
+	trackRedisKey(redisx.RepeatSubmitKey(hex.EncodeToString(sum[:16])))
+}
+
+// purgeRedisArtifacts 删除本轮登记的 key 和明确属于 zz_test_ 账号的密码计数，
+// 并在删除后逐项验证；Redis 故障不能再被静默当成测试成功。
+func purgeRedisArtifacts() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	testRedisKeysMu.Lock()
+	keys := make([]string, 0, len(testRedisKeys))
+	for key := range testRedisKeys {
+		keys = append(keys, key)
+	}
+	testRedisKeys = make(map[string]struct{})
+	testRedisKeysMu.Unlock()
+
+	if err := redisx.ScanKeys(ctx, redisx.KeyPwdErrCnt+testPrefix+"*", 100, func(key string) error {
+		keys = append(keys, key)
+		return nil
+	}); err != nil {
+		return fmt.Errorf("扫描测试密码计数失败: %w", err)
+	}
+	keys = append(keys,
+		redisx.RateLimitKey("captcha:192.0.2.1"),
+		redisx.RateLimitKey("login:192.0.2.1"),
+		redisx.RateLimitKey("register:192.0.2.1"),
+	)
+	return deleteRedisKeys(ctx, keys)
+}
+
+func deleteRedisKeys(ctx context.Context, keys []string) error {
+	unique := make(map[string]struct{}, len(keys))
+	for _, key := range keys {
+		if key != "" {
+			unique[key] = struct{}{}
+		}
+	}
+	for key := range unique {
+		if err := redisx.C().Del(ctx, key).Err(); err != nil {
+			return fmt.Errorf("删除 %s 失败: %w", key, err)
+		}
+	}
+	for key := range unique {
+		exists, err := redisx.C().Exists(ctx, key).Result()
+		if err != nil {
+			return fmt.Errorf("验证 %s 失败: %w", key, err)
+		}
+		if exists != 0 {
+			return fmt.Errorf("%s 删除后仍存在", key)
+		}
+	}
+	return nil
 }

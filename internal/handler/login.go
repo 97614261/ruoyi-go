@@ -134,7 +134,7 @@ func GetInfo(c *gin.Context) {
 	}
 
 	response.New(response.CodeSuccess, response.MsgSuccess).
-		Put("user", user).
+		Put("user", contractLoginUser(*user)).
 		Put("roles", roles).
 		Put("permissions", permissions).
 		Put("pwdChrtype", chrtype).

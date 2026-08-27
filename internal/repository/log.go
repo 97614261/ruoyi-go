@@ -43,10 +43,7 @@ func SelectLogininforPage(ctx context.Context, query model.LogininforQuery, pg p
 		return []model.SysLogininfor{}, 0, nil
 	}
 
-	orderBy := pg.OrderBy
-	if orderBy == "" {
-		orderBy = "info_id DESC"
-	}
+	orderBy := pg.Stable("info_id DESC", "info_id")
 
 	var list []model.SysLogininfor
 	if err := db.Order(orderBy).Offset(pg.Offset()).Limit(pg.PageSize).Find(&list).Error; err != nil {
@@ -132,10 +129,7 @@ func SelectOperLogPage(ctx context.Context, query model.OperLogQuery, pg page.Qu
 		return []model.SysOperLog{}, 0, nil
 	}
 
-	orderBy := pg.OrderBy
-	if orderBy == "" {
-		orderBy = "oper_id DESC"
-	}
+	orderBy := pg.Stable("oper_id DESC", "oper_id")
 
 	var list []model.SysOperLog
 	if err := db.Order(orderBy).Offset(pg.Offset()).Limit(pg.PageSize).Find(&list).Error; err != nil {

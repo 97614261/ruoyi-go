@@ -113,21 +113,34 @@ func SelectMenuByID(ctx context.Context, menuID int64) (*model.SysMenu, error) {
 	return &menu, nil
 }
 
-// SelectMenuPermsByRoleID 查角色的权限标识。
-//
-// 注意这里只过滤菜单状态，不过滤角色状态 —— 角色是否启用由调用方判断。
-func SelectMenuPermsByRoleID(ctx context.Context, roleID int64) ([]string, error) {
-	var perms []string
-	err := DB(ctx).
-		Table("sys_menu m").
-		Joins("LEFT JOIN sys_role_menu rm ON m.menu_id = rm.menu_id").
-		Where("m.status = ?", model.StatusNormal).
-		Where("rm.role_id = ?", roleID).
-		Pluck("DISTINCT IFNULL(m.perms, '')", &perms).Error
-	if err != nil {
-		return nil, fmt.Errorf("查询角色 %d 的权限标识失败: %w", roleID, err)
+// SelectMenuPermsByRoleIDs 批量查询多个角色的权限标识，避免登录时按角色循环查库。
+// 返回结果按角色 ID 分组；没有菜单权限的角色不会出现在 map 中。
+func SelectMenuPermsByRoleIDs(ctx context.Context, roleIDs []int64) (map[int64][]string, error) {
+	result := make(map[int64][]string, len(roleIDs))
+	if len(roleIDs) == 0 {
+		return result, nil
 	}
-	return perms, nil
+
+	type rolePermission struct {
+		RoleID int64  `gorm:"column:role_id"`
+		Perm   string `gorm:"column:perms"`
+	}
+	var rows []rolePermission
+	err := DB(ctx).
+		Table("sys_role_menu rm").
+		Select("rm.role_id, IFNULL(m.perms, '') AS perms").
+		Joins("INNER JOIN sys_menu m ON m.menu_id = rm.menu_id").
+		Where("m.status = ?", model.StatusNormal).
+		Where("rm.role_id IN ?", roleIDs).
+		Distinct().
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("批量查询角色权限标识失败: %w", err)
+	}
+	for _, row := range rows {
+		result[row.RoleID] = append(result[row.RoleID], row.Perm)
+	}
+	return result, nil
 }
 
 // SelectMenuPermsByUserID 查用户的权限标识。

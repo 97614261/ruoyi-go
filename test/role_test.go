@@ -188,6 +188,42 @@ func TestRoleAuthUser(t *testing.T) {
 	}
 }
 
+// TestRoleAuthUserCancelAll 批量取消授权使用 query 参数，并一次移除全部指定用户。
+func TestRoleAuthUserCancelAll(t *testing.T) {
+	roleID := createRole(t, newRolePayload("cancelall"))
+	firstBody := newUserPayload("cancelall_1")
+	secondBody := newUserPayload("cancelall_2")
+	firstID := createUser(t, firstBody)
+	secondID := createUser(t, secondBody)
+	userIDs := idPath(firstID) + "," + idPath(secondID)
+
+	mustOK(t, doPut(t, "/system/role/authUser/selectAll?roleId="+idPath(roleID)+"&userIds="+userIDs, nil), "批量授权两个用户")
+
+	users := []struct {
+		id   int64
+		name string
+	}{
+		{firstID, fmt.Sprint(firstBody["userName"])},
+		{secondID, fmt.Sprint(secondBody["userName"])},
+	}
+	for _, user := range users {
+		if !inAuthUserList(t, "allocatedList", roleID, user.name, user.id) {
+			t.Fatalf("批量授权后用户 %d 应出现在已分配列表里", user.id)
+		}
+	}
+
+	mustOK(t, doPut(t, "/system/role/authUser/cancelAll?roleId="+idPath(roleID)+"&userIds="+userIDs, nil), "批量取消两个用户授权")
+
+	for _, user := range users {
+		if inAuthUserList(t, "allocatedList", roleID, user.name, user.id) {
+			t.Errorf("批量取消后用户 %d 不该还在已分配列表里", user.id)
+		}
+		if !inAuthUserList(t, "unallocatedList", roleID, user.name, user.id) {
+			t.Errorf("批量取消后用户 %d 应回到未分配列表里", user.id)
+		}
+	}
+}
+
 // inAuthUserList 判断某个用户在不在角色的已分配/未分配列表里。
 //
 // 【必须带 userName 条件精确查，不能拉一页回来比对】
@@ -269,4 +305,53 @@ func TestRoleOptionSelect(t *testing.T) {
 	r := doGet(t, "/system/role/optionselect")
 	mustOK(t, r, "角色下拉")
 	dataArray(t, r, "角色下拉")
+}
+
+// TestRoleAllOrderedBySort 「全部角色」必须按 roleSort 排序。
+//
+// 【必须让 roleId 顺序和 roleSort 顺序相反，否则测了等于没测】
+// 种子数据里 role_id 1,2 恰好对应 role_sort 1,2，两种顺序重合 ——
+// 就算 SelectRoleAll 完全不排序，按物理顺序返回也能碰巧通过。
+// 之前 Java/Go 双端对拍就是这么漏掉这个 bug 的。
+//
+// 所以这里先建 roleSort 大的、再建 roleSort 小的：
+// 后建的 roleId 更大，但必须排在前面。
+//
+// 依据：Java 的 selectRoleAll() 不是独立 SQL，它转调 selectRoleList
+// （SysRoleServiceImpl.java:112），而那条 mapper 结尾有 order by r.role_sort。
+func TestRoleAllOrderedBySort(t *testing.T) {
+	later := payload(newRolePayload("sortlater"))
+	later["roleSort"] = 90
+	laterID := createRole(t, later)
+
+	earlier := payload(newRolePayload("sortearlier"))
+	earlier["roleSort"] = 10
+	earlierID := createRole(t, earlier)
+
+	// 后建的 roleId 更大，这是构造这个用例的前提
+	if earlierID <= laterID {
+		t.Fatalf("测试前提不成立：后建角色的 roleId(%d) 应大于先建的(%d)", earlierID, laterID)
+	}
+
+	// 新增用户弹窗返回的 roles 走的就是 SelectRoleAll
+	r := doGet(t, "/system/user")
+	mustOK(t, r, "新增用户弹窗")
+	roles := toObjects(t, r.Raw["roles"], "候选角色")
+
+	posEarlier, posLater := -1, -1
+	for i, role := range roles {
+		switch idOf(t, role, "roleId") {
+		case earlierID:
+			posEarlier = i
+		case laterID:
+			posLater = i
+		}
+	}
+	if posEarlier < 0 || posLater < 0 {
+		t.Fatalf("两个测试角色都应出现在候选列表里，实际位置 %d / %d", posEarlier, posLater)
+	}
+	if posEarlier > posLater {
+		t.Errorf("roleSort=10 的角色应排在 roleSort=90 的前面，实际位置 %d > %d —— "+
+			"SelectRoleAll 丢了 ORDER BY role_sort", posEarlier, posLater)
+	}
 }

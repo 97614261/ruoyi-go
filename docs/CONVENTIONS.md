@@ -149,6 +149,182 @@ StreamWriter 确实在流式写，它只是 churn 很凶，堆峰值仍随行数
 代价是只能顺序写、不能回头改单元格。
 注意它降低的是**峰值增长的斜率**，不是把内存变成常数（见上一条的实测）。
 
+### 6. Java 响应契约转换层（`internal/handler/java_contract.go`）
+
+有一批接口的响应**不是直接序列化 Go 模型**，而是先过一层逐字段 map 转换，
+复刻 Java 那边的三类可观察差异：
+
+| 差异 | 来源 |
+|---|---|
+| 某些字段固定为 `null` | Java 的 MyBatis `selectXxxVo` 根本没 select 那一列，Jackson 就输出 `null`；Go 从数据库把整行读回来了，直接序列化会输出真实值 |
+| `children` / `roles` 固定为 `[]` | Java 实体里是 `new ArrayList<>()`，永远不是 `null` |
+| `params: {"@type":"java.util.HashMap"}` | 登录会话和字典缓存是 Fastjson 反序列化出来的，空 HashMap 带类型标记 |
+
+#### 受影响的接口（改这些模型时必须同步检查转换）
+
+| 转换函数 | 用在哪 | 抹成 null / 固定值的字段 |
+|---|---|---|
+| `contractRole` / `contractRoles` | 角色列表、角色下拉、用户表单里的候选角色、**角色详情** | `createBy`、`updateBy`、`updateTime` |
+| `contractPost` / `contractPosts` | 岗位列表、岗位下拉、用户表单里的候选岗位、**岗位详情** | `updateBy`、`updateTime` |
+| `contractDept` / `contractDeptList` | 部门列表、排除子部门列表 | `parentName`、`updateBy`、`updateTime`、`remark`；`children` = `[]` |
+| **`contractDeptDetail`** | **部门详情（选列与列表不同，见下）** | `createBy`、`createTime`、`delFlag`、`updateBy`、`updateTime`、`remark`；`children` = `[]`；**`parentName` 有值时输出真实值、无父级时输出 `null`** |
+| `contractMenu` / `contractMenuList` | 菜单列表、**菜单详情** | `parentName`、`createBy`、`updateBy`、`updateTime`、`remark`；`children` = `[]`；`perms` 为 nil 时输出 `""` |
+| `contractDictType` / `contractDictTypes` | 字典类型列表、字典类型下拉、**字典类型详情** | `updateBy`、`updateTime` |
+| `contractDictDatum` / `contractDictData` | 字典数据列表、**字典数据详情** | `updateBy`、`updateTime` |
+| `contractCachedDictData` | **按类型查字典**（走 Redis 缓存） | 同上，另加 `params` 类型标记；`cssClass` 空串输出 `null` |
+| `contractUserList` | 用户列表 | `pwdUpdateDate`、`updateBy`、`updateTime`；`roles` = `[]`；删掉 `userType` |
+| `contractUser(user, true)` | 用户详情 | 删掉 `userType`；`roleId` = `null`；填充 `roles` 和 `dept` |
+| `contractLoginUser` | **`/getInfo` 的 `user`** | 在 `contractUser` 基础上加 `params` 标记，空 `avatar` / `updateBy` 输出 `null` |
+| `contractEmbeddedRole` | 用户对象里内嵌的角色 | `SysUserMapper.RoleResult` 只填 6 个业务字段，其余抹掉 |
+| `contractUserDept` | 用户对象里内嵌的部门 | 非 full 时只保留 `deptId`/`deptName`/`leader` |
+| `contractNotices` | 公告管理列表 | 无字段改写，仅统一出口 |
+
+#### 详情接口容易被漏掉
+
+这层转换最初只铺了列表和下拉，**6 个详情接口全漏了** ——
+岗位、字典类型、字典数据、角色、菜单、部门。表现是新增后 `updateBy` 是 `""`、
+修改后是 `"admin"`，而 Java 恒为 `null`。
+
+不带转换的详情只剩两个，因为它们的 `selectVo` 是**全选**的：
+
+| 接口 | 为什么不用转换 |
+|---|---|
+| `GET /system/notice/{noticeId}` | `selectNoticeVo` 选了全部列，含 `update_by` / `update_time` |
+| `GET /system/config/{configId}` | `selectConfigVo` 同上 |
+
+**不要"顺手"把这两个也抹掉** —— 它们的 `updateBy` 该有值就得有值，
+测试里有反向断言压着（`TestNoticeAndConfigDetailKeepValues`）。
+
+⚠️ **部门是唯一一处「详情和列表选列不同」的接口。**
+Java 的 `selectDeptById` 没有 `include selectDeptVo`，而是单独写了一条 SQL：
+比列表**少了** `create_by` / `create_time` / `del_flag`，
+**多了** `parent_name`（子查询取父部门名）。两个方向都有差异，
+所以它有独立的 `contractDeptDetail`，不能复用 `contractDept`。
+
+#### 五条硬约束
+
+1. **给上表这些实体加字段、或改 repository 的 select 列时，必须同步检查
+   `java_contract.go`。** 漏改的表现是响应里多出一个 Java 没有的字段，
+   或者本该为 `null` 的字段冒出真实值。`TestContractBaseMapsMatchModelJSON` 会拦住
+   模型新增字段却漏改基础 map，但判断 Java 的选列和 `null` 语义仍要靠定点断言与双端对拍。
+2. **判断某个字段该不该抹成 `null`，去打开 Java 的 mapper xml 看它 select 了哪些列**，
+   不要凭直觉，也不要照抄实体定义 —— 实体有那个字段不代表查询填充了它。
+3. **只在响应层转换。** 数据库模型保持适合写入和校验的 Go 类型（指针、`types.Time` 等），
+   不要为了对齐响应去改模型。
+4. **改任何响应字段前，先 `grep` 测试里对该字段的断言。**
+   `assertField(t, detail, "updateBy", ...)` 这类断言散落在各个测试文件里，
+   只盯着 handler 和新写的测试就会漏。给岗位详情挂转换那次就撞了 ——
+   `post_test.go` 里压着一条 `updateBy == "admin"`，那是照着改之前
+   Go 自己的输出写的，把不对齐固化成了"期望"。
+5. **被转换抹掉的字段，如果背后有真实行为，要落到数据库层去验。**
+   `sys_post.update_by` 现在不通过岗位接口暴露，但「修改时要记录操作人」这件事还在 ——
+   用 `assertColumn(t, "sys_post", "update_by", "post_id", id, "admin")` 直接查库。
+   这是**唯一**该绕开接口去断言的场景，别拿它当常规手段。
+
+#### 唯一可靠的验证手段是双端对拍
+
+见下方 `cmd/contractcheck`。这层转换是靠人工比对 Java 源码写出来的，
+**没有对拍就没有保障**。
+
+### 7. 双端对拍工具 `cmd/contractcheck`
+
+真起 Java 和 Go 两个服务，对同一批请求逐字段比较响应。
+
+```powershell
+# 1. 两端必须用不同的 Redis DB
+#    Go 用 DB 0，Java 用 DB 1 —— 两边的 value 序列化格式不同
+#    （Java 走 Fastjson 带 @type），共用一个 DB 会互相读坏对方的
+#    会话、验证码和配置缓存。
+
+# 2. 起 Java（端口 8081）
+java -Xmx512m -jar ..\RuoYi-Vue-master\ruoyi-admin\target\ruoyi-admin.jar `
+     --server.port=8081 `
+     --spring.data.redis.database=1
+
+# 3. 起 Go（端口 8080，用配置里的 Redis DB 0）
+go run ./cmd/server
+
+# 4. 对拍（手动启动双服务时）
+go run ./cmd/contractcheck                       # 36 个核心 GET（23 个固定路径 + 13 个动态路径）
+go run ./cmd/contractcheck -file-probes          # 加 4 项上传 / Excel 探针
+go run ./cmd/contractcheck -write-probes         # 加 7 项非持久化错误场景
+go run ./cmd/contractcheck -crud-probes          # 加 10 组、60 项一次性 CRUD
+go run ./cmd/contractcheck -permission-probes    # 加 18 项数据/功能权限
+go run ./cmd/contractcheck -validation-probes    # 加 16 项字段校验和 JSON 类型
+
+# 5. 推荐：一键启动、对拍、停止和清理
+.\scripts\contractcheck.ps1 -All -AllowDifferences
+
+# 6. 重新生成完整路由/权限/探针覆盖清单
+go run ./cmd/routeaudit -java-root ..\RuoYi-Vue-master
+```
+
+期望输出：
+
+```text
+SUMMARY matched=36 different=0 total=36 percent=100.00%
+```
+
+有差异时进程返回非零，可以直接进 CI。
+
+默认 36 个探针由 **23 个固定路径 + 13 个动态路径**组成。动态部分覆盖
+**11 个详情接口和 2 个角色树接口**；工具先读取两端列表，自动找出双方共有的 ID，
+再请求同一条记录，禁止把种子库里的 `1`、`2`、`100`、`103` 写死到探针里。
+这依赖两端连接**同一个 MySQL**，Redis 则必须继续使用不同 DB。
+
+**判定口径**：比较的是规范化后的 JSON，不是只看 `code=200`。
+字段缺失、`null` 与空串、数字与字符串的类型差异、数组顺序变化都会判失败。
+验证码图片、UUID、token、登录 IP/时间这类动态字段已登记为忽略。
+
+`-crud-probes` 覆盖用户、角色、部门、菜单、岗位、参数、字典类型、字典数据、公告、
+定时任务共 **10 组、60 项**，每组固定比较新增、新增后详情、修改、修改后详情、删除、
+删除后详情。测试值使用 `zz_contract_` 前缀；部门父 ID 和字典类型从当前库动态解析。
+两端共用 MySQL 时，唯一字段必须使用不同值；工具只忽略两端必然不同的动态 ID、
+唯一测试值和时间字段。
+
+`-permission-probes` 创建一次性部门、角色和用户，比较五种数据范围（全部、自定义、
+本部门、本部门及以下、仅本人）下的用户/角色/部门列表，共 15 项；再比较无功能权限
+访问三个列表，共 **18 项**。角色菜单权限从当前菜单动态读取。每次切换 `dataScope`
+后必须重新登录两端，不能复用 Redis 中缓存旧权限的会话。
+
+`-validation-probes` 共 **16 项**，同时输出两种摘要：`VALIDATION_PROBE_SUMMARY`
+是响应字段、类型和值的严格比较；`VALIDATION_SEMANTIC_SUMMARY` 只判断非法输入是否被
+双方拒绝。错误文案不同会导致严格口径不一致，但不应误报为校验语义放行。任何一端
+意外写入的数据必须按本次唯一值定位并回收。
+
+正常结束、发现差异和初始化失败都必须清理本次创建的业务记录、验证码和登录会话，
+禁止使用 `FLUSHDB` 或前缀全删。`scripts/contractcheck.ps1` 会检查端口，从 Go DSN
+读取当前 MySQL 连接（不输出密码），给 Java 临时注入同库连接，隔离两端 Redis DB，
+构建临时可执行文件，并在 `finally` 中停止精确进程和删除临时文件。
+文件探针运行时，两端上传根目录也必须指向该次运行目录，随运行目录一起删除，不能污染
+Go 或 Java 的默认 `uploadPath`。
+`-AllowDifferences` 仅用于记录已知差异；要求完全一致的 CI 不应传该开关。
+
+`cmd/routeaudit` 静态提取 Go 路由和 Java Controller，统一尾斜杠与路径参数名，比较
+HTTP 方法、结构化路径和权限标识，并标注上述探针覆盖。代码生成器、Swagger 内存演示
+接口和 dev/test Profile 必须列在报告排除项中，不能混入业务接口对齐率。
+
+### 测试和 Race Detector
+
+```powershell
+.\scripts\test.ps1 -Unit
+.\scripts\test.ps1 -Unit -Race -CCompiler D:\path\to\gcc.exe
+```
+
+普通结果写入 `test/results/summary.log` 和 `latest.log`；Race 结果单独写入
+`summary-race.log` 和 `latest-race.log`，不能互相覆盖。Windows 上 `-Race`
+会启用 CGO，并把 `-CCompiler` 所在目录临时加入 `PATH`，因为 GCC 还要调用同目录的
+`as.exe`。脚本退出时必须恢复 `CGO_ENABLED`、`CC` 和 `PATH`。
+
+接口测试只清理自己能精确归属的 Redis key：登录后从 JWT 记录会话 key，
+验证码响应记录 UUID，防重复提交按同一算法记录 key；密码错误计数只扫描
+`pwd_err_cnt:zz_test_*`，限流只清理 httptest 固定 IP `192.0.2.1` 的三个键。
+删除后必须逐项 `EXISTS` 验证，清理失败要让整个测试进程失败。
+
+**换库或换环境后**：详情样本 ID 会从两端列表自动解析，无需修改探针常量；
+如果新库缺少某类可选记录（例如没有根部门或子部门），应补足测试数据，
+或重新审查该探针的查询路径和语义前提，**不要改业务代码去迎合旧数据**。
+
 ### 状态码
 
 | code | 含义 |
@@ -234,6 +410,65 @@ Go 侧写的是自己的 JSON。
 | `isAsc` | `asc` / `desc` |
 
 `orderByColumn` 直连 SQL 是注入面，每个接口必须显式声明允许排序的列。
+
+### 分页必须行序确定：`pg.Stable(默认排序, 唯一兜底列)`
+
+```go
+// ✓ 两个参数都要显式写，即使相同
+err := db.Order(pg.Stable("post_id", "post_id")).
+    Offset(pg.Offset()).Limit(pg.PageSize).Find(&list).Error
+
+// ✓ 默认排序可以是多列、可以带方向；兜底列必须是单列且唯一
+pg.Stable("r.role_sort, r.role_id", "r.role_id")
+pg.Stable("info_id DESC", "info_id")
+
+// ✗ 前端没传排序时不加 ORDER BY
+if pg.OrderBy != "" { db = db.Order(pg.OrderBy) }
+
+// ✗ 只按业务列排，并列值时行序未定义
+orderBy := "role_sort"
+```
+
+| 参数 | 含义 | 约束 |
+|---|---|---|
+| `fallback` | 前端没传 `orderByColumn` 时用的完整排序 | 可多列、可带方向 |
+| `tiebreaker` | 追加在用户指定排序后面的兜底列 | **单列、唯一、不带方向** |
+
+行为：没传排序 → `fallback`；传了 → `<用户指定的>, <tiebreaker>`。
+
+**不要试图从 `fallback` 里解析出兜底列。** 这里踩过坑：
+原先只收一个参数、用 `strings.Fields(fallback)[0]` 推断，
+遇到多列 fallback `"r.role_sort, r.role_id"` 切出来是 `"r.role_sort,"`（带逗号），
+拼出 `ORDER BY r.role_sort asc, r.role_sort,` 直接 SQL 语法错误、接口 500。
+调用方本来就知道主键叫什么。
+
+**`tiebreaker` 传空串不会被容忍** —— 没有"为空就不追加"的分支。
+留那个口子等于给"绕过稳定排序"开一条不报错的路；真忘了传，SQL 会立刻报错。
+
+不接受前端排序的分页查询不走 `Stable`，直接在 SQL 里写死确定性排序，
+判断标准是**最终排序里必须含唯一列**：
+
+- 公告已读用户 `ORDER BY r.read_time DESC, u.user_id` ——
+  `read_time` 精度到秒会并列，必须补主键
+- 角色授权用户 `ORDER BY u.user_id` ——
+  单列即唯一，已经确定，不需要再追加
+
+**为什么两种情况都要管**：`LIMIT + OFFSET` 在「没有 ORDER BY」和「排序键有并列值」
+两种情况下，行顺序都是未定义的 —— 翻页可能**重复某行或漏掉某行**。
+症状是"某条记录在列表里怎么都找不到，翻回上一页又出现了"，
+没有任何报错，极难复现。
+
+`dict_sort`、`role_sort`、`post_sort` 这类列大量并列（新建时默认都是同一个值），
+是最容易踩到的。
+
+**与 Java 的差异是有意的**：Java 的 mapper 多数只写单列排序甚至完全不排序。
+加主键兜底会让双端对拍在有并列值时报差异 —— 那是预期的，
+**不要靠去掉兜底列来消差异**。行序不属于接口契约，前端依赖的是字段和结构。
+
+> 判断 Java 到底有没有排序，要看 **service 转调到哪条 SQL**，不能只看 mapper 里
+> 有没有同名 select。例如 `selectRoleAll()` 转调的是 `selectRoleList`，
+> 那条才带 `order by r.role_sort`。曾经据此误删过排序，而且双端对拍没发现 ——
+> 因为种子数据里 `role_id` 和 `role_sort` 恰好同序，样本把差异盖住了。
 
 ---
 

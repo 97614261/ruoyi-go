@@ -23,13 +23,10 @@ func SelectPostPage(ctx context.Context, query model.PostQuery, pg page.Query) (
 		return []model.SysPost{}, 0, nil
 	}
 
-	orderBy := pg.OrderBy
-	if orderBy == "" {
-		orderBy = "post_sort"
-	}
-
+	// Java 的 SysPostMapper.xml 全文没有 order by，但行顺序不属于接口契约，
+	// 不该把"翻页可能重复/漏行"这个缺陷一起复刻过来。详见 page.Query.Stable
 	var list []model.SysPost
-	err := db.Order(orderBy).
+	err := db.Order(pg.Stable("post_id", "post_id")).
 		Offset(pg.Offset()).
 		Limit(pg.PageSize).
 		Find(&list).Error
@@ -43,7 +40,6 @@ func SelectPostPage(ctx context.Context, query model.PostQuery, pg page.Query) (
 func SelectPostList(ctx context.Context, query model.PostQuery) ([]model.SysPost, error) {
 	var list []model.SysPost
 	err := postFilter(DB(ctx).Model(&model.SysPost{}), query).
-		Order("post_sort").
 		Find(&list).Error
 	if err != nil {
 		return nil, fmt.Errorf("查询岗位列表失败: %w", err)
@@ -80,7 +76,7 @@ func SelectPostByID(ctx context.Context, postID int64) (*model.SysPost, error) {
 // SelectPostAll 查全部岗位，供下拉选择使用。
 func SelectPostAll(ctx context.Context) ([]model.SysPost, error) {
 	var list []model.SysPost
-	err := DB(ctx).Order("post_sort").Find(&list).Error
+	err := DB(ctx).Find(&list).Error
 	if err != nil {
 		return nil, fmt.Errorf("查询全部岗位失败: %w", err)
 	}

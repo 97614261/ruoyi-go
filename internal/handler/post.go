@@ -26,7 +26,7 @@ func PostList(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.Page(c, list, total)
+	response.Page(c, contractPosts(list), total)
 }
 
 // PostExport POST /system/post/export
@@ -62,7 +62,7 @@ func PostOptionSelect(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.OkData(c, list)
+	response.OkData(c, contractPosts(list))
 }
 
 // PostGet GET /system/post/:postId
@@ -77,7 +77,8 @@ func PostGet(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.OkData(c, post)
+	// selectPostById 走的是 selectPostVo，没选 update_by / update_time
+	response.OkData(c, contractPost(*post))
 }
 
 // PostAdd POST /system/post

@@ -49,7 +49,9 @@ func Import[T any](r io.Reader, sheetName string) ([]T, []RowError, error) {
 		return nil, nil, fmt.Errorf("读取工作表 %s 失败: %w", sheetName, err)
 	}
 	if len(rows) < 2 {
-		return nil, nil, fmt.Errorf("Excel 中没有数据行")
+		// 只有表头仍是合法工作簿。交给业务层区分“文件损坏”和“没有业务
+		// 数据”，这样用户导入接口能与 Java 一样返回明确的空数据提示。
+		return []T{}, nil, nil
 	}
 
 	var sample T

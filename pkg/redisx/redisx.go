@@ -58,7 +58,7 @@ func Close() error {
 	return client.Close()
 }
 
-// ScanKeys 按前缀迭代 key。
+// ScanKeys 按前缀逐个迭代 key。
 //
 // 【重要】Java 版 TokenService.refreshPermissionByRoleId 用的是 KEYS 命令
 // （见 TokenService.java:243），KEYS 会阻塞整个 Redis 实例，在线用户多时
@@ -66,6 +66,18 @@ func Close() error {
 //
 // fn 返回 error 时中止迭代。
 func ScanKeys(ctx context.Context, prefix string, batch int64, fn func(key string) error) error {
+	return ScanKeyBatches(ctx, prefix, batch, func(keys []string) error {
+		for _, key := range keys {
+			if err := fn(key); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// ScanKeyBatches 按 SCAN 返回的批次迭代 key，供 MGET/Pipeline 批量读取使用。
+func ScanKeyBatches(ctx context.Context, prefix string, batch int64, fn func(keys []string) error) error {
 	if batch <= 0 {
 		batch = 100
 	}
@@ -75,8 +87,8 @@ func ScanKeys(ctx context.Context, prefix string, batch int64, fn func(key strin
 		if err != nil {
 			return fmt.Errorf("SCAN %s* 失败: %w", prefix, err)
 		}
-		for _, k := range keys {
-			if err := fn(k); err != nil {
+		if len(keys) > 0 {
+			if err := fn(keys); err != nil {
 				return err
 			}
 		}

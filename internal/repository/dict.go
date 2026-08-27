@@ -52,10 +52,9 @@ func SelectDictDataPage(ctx context.Context, query model.DictDataQuery, pg page.
 		return []model.SysDictData{}, 0, nil
 	}
 
-	orderBy := pg.OrderBy
-	if orderBy == "" {
-		orderBy = "dict_sort"
-	}
+	// dict_sort 大量并列（同一字典下常常全是 0），没有主键兜底翻页必乱。
+	// 见 page.Query.Stable
+	orderBy := pg.Stable("dict_sort, dict_code", "dict_code")
 
 	var list []model.SysDictData
 	if err := db.Order(orderBy).Offset(pg.Offset()).Limit(pg.PageSize).Find(&list).Error; err != nil {
@@ -191,10 +190,7 @@ func SelectDictTypePage(ctx context.Context, query model.DictTypeQuery, pg page.
 		return []model.SysDictType{}, 0, nil
 	}
 
-	orderBy := pg.OrderBy
-	if orderBy == "" {
-		orderBy = "dict_id"
-	}
+	orderBy := pg.Stable("dict_id", "dict_id")
 
 	var list []model.SysDictType
 	if err := db.Order(orderBy).Offset(pg.Offset()).Limit(pg.PageSize).Find(&list).Error; err != nil {
@@ -217,7 +213,7 @@ func SelectDictTypeList(ctx context.Context, query model.DictTypeQuery) ([]model
 // SelectDictTypeAll 查全部字典类型，供下拉选择。
 func SelectDictTypeAll(ctx context.Context) ([]model.SysDictType, error) {
 	var list []model.SysDictType
-	if err := DB(ctx).Order("dict_id").Find(&list).Error; err != nil {
+	if err := DB(ctx).Find(&list).Error; err != nil {
 		return nil, fmt.Errorf("查询全部字典类型失败: %w", err)
 	}
 	return list, nil

@@ -276,7 +276,8 @@ func registerRole(g *gin.RouterGroup) {
 //
 // 静态路由必须排在 /:userId 之前。
 // 新增用户弹窗调的是 GET /system/user/（带尾斜杠、无 ID），
-// gin 会把它重定向到 /system/user，所以额外注册一条无参路由。
+// Java 同时映射 "/" 和 "/{userId}"。Go 同时注册空路径和 "/"，
+// 避免依赖客户端跟随 Gin 的尾斜杠重定向。
 func registerUser(g *gin.RouterGroup) {
 	const title = "用户管理"
 	user := g.Group("/system/user")
@@ -285,7 +286,10 @@ func registerUser(g *gin.RouterGroup) {
 		middleware.OperLog(title, model.BusinessTypeExport), handler.UserExport)
 	user.POST("/importData", middleware.HasPermission("system:user:import"),
 		middleware.OperLog(title, model.BusinessTypeImport), handler.UserImportData)
-	user.POST("/importTemplate", middleware.HasPermission("system:user:import"), handler.UserImportTemplate)
+	// 【模板下载不挂权限】Java 的 importTemplate 方法上没有 @PreAuthorize。
+	// 模板是一张只有表头的空表，不含任何数据，没有保护的必要；
+	// 真正需要权限的是 importData。
+	user.POST("/importTemplate", handler.UserImportTemplate)
 	user.GET("/deptTree", middleware.HasPermission("system:user:list"), handler.UserDeptTree)
 	// 个人中心：只操作自己，不挂权限标识（与 Java 一致）
 	user.GET("/profile", handler.ProfileGet)
@@ -301,6 +305,7 @@ func registerUser(g *gin.RouterGroup) {
 		middleware.OperLog(title, model.BusinessTypeGrant), handler.UserAuthRoleSave)
 	// 新增弹窗：无 userId
 	user.GET("", middleware.HasPermission("system:user:query"), handler.UserGet)
+	user.GET("/", middleware.HasPermission("system:user:query"), handler.UserGet)
 	user.GET("/:userId", middleware.HasPermission("system:user:query"), handler.UserGet)
 	user.POST("", noRepeat(), middleware.HasPermission("system:user:add"),
 		middleware.OperLog(title, model.BusinessTypeInsert), handler.UserAdd)
@@ -391,22 +396,28 @@ func registerDict(g *gin.RouterGroup) {
 
 // registerNotice 通知公告。
 //
-// listTop / markRead / markReadAll / readUsers / :noticeId 都不挂权限：
-// 顶栏那个公告铃铛是所有登录用户都能点的，与 Java 一致
-// （SysNoticeController 的这几个方法上都没有 @PreAuthorize）。
-// 标记已读也不记操作日志 —— 每个用户每次进页面都会触发。
+// 权限严格照 SysNoticeController 的注解来，**逐个方法核对过**：
 //
-// 【详情接口曾经挂过 system:notice:query，是错的】
-// layout/components/HeaderNotice/DetailView.vue 就是调 getNotice(id) 展开公告的，
-// 挂了权限之后普通员工点开顶栏公告直接 403。
-// 只看 Java 的注解还不够，得看**谁在调这个接口**。
+//	listTop / markRead / markReadAll / :noticeId  →  无 @PreAuthorize，仅需登录
+//	readUsers/list                                →  @PreAuthorize('system:notice:list')
+//
+// 前四个是顶栏公告铃铛用的，所有登录用户都要能调
+// （HeaderNotice/DetailView.vue 调的就是 getNotice(id)，
+// 详情接口曾经错挂过 system:notice:query，导致普通员工点开就 403）。
+//
+// 【readUsers/list 必须挂权限】它返回的是登录名、昵称、部门、手机号 ——
+// 谁读了哪条公告属于管理信息。这里曾经错误地跟着上面几个一起不挂，
+// 注释还写着"与 Java 一致"，实际 Java 那行有 @PreAuthorize。
+// **注释不是证据，要去看源码。**
+//
+// 标记已读不记操作日志 —— 每个用户每次进页面都会触发。
 func registerNotice(g *gin.RouterGroup) {
 	const title = "通知公告"
 	notice := g.Group("/system/notice")
 	notice.GET("/listTop", handler.NoticeListTop)
 	notice.POST("/markRead", handler.NoticeMarkRead)
 	notice.POST("/markReadAll", handler.NoticeMarkReadAll)
-	notice.GET("/readUsers/list", handler.NoticeReadUsers)
+	notice.GET("/readUsers/list", middleware.HasPermission("system:notice:list"), handler.NoticeReadUsers)
 	notice.GET("/list", middleware.HasPermission("system:notice:list"), handler.NoticeList)
 	notice.GET("/:noticeId", handler.NoticeGet)
 	notice.POST("", noRepeat(), middleware.HasPermission("system:notice:add"),

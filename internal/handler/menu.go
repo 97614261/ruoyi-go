@@ -23,7 +23,7 @@ func MenuList(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.OkData(c, list)
+	response.OkData(c, contractMenuList(list))
 }
 
 // MenuTreeSelect GET /system/menu/treeselect
@@ -75,7 +75,8 @@ func MenuGet(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.OkData(c, menu)
+	// selectMenuById 走的是 selectMenuVo，与列表同一套选列
+	response.OkData(c, contractMenu(*menu))
 }
 
 // MenuAdd POST /system/menu

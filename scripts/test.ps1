@@ -20,6 +20,7 @@
     .\scripts\test.ps1 -Full
     .\scripts\test.ps1 -Config configs\application.test.yml
     .\scripts\test.ps1 -Unit
+    .\scripts\test.ps1 -Unit -Race -CCompiler D:\tools\w64devkit\bin\gcc.exe
 #>
 param(
     # Regex passed to "go test -run". Empty means run everything.
@@ -34,9 +35,15 @@ param(
     # up after themselves, but a separate DB removes the question entirely.
     [string]$Config = "",
 
-    # Also run the pure unit tests (pkg/cronx, internal/job ...). Those need
+    # Also run the pure unit tests (pkg/cronx, internal/job, cmd tools ...). Those need
     # neither MySQL nor Redis, so they are the part that could run in CI today.
-    [switch]$Unit
+    [switch]$Unit,
+
+    # Enable the Go race detector. On Windows this requires CGO and MinGW-w64.
+    [switch]$Race,
+
+    # Optional path/name of the C compiler used by CGO (for example gcc.exe).
+    [string]$CCompiler = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,6 +53,9 @@ $ErrorActionPreference = "Stop"
 # Chinese Windows). Without this the captured Chinese text becomes mojibake
 # in both the console and the log files.
 $previousEncoding = [Console]::OutputEncoding
+$previousCGO = $env:CGO_ENABLED
+$previousCC = $env:CC
+$previousPath = $env:PATH
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 try {
 
@@ -54,8 +64,11 @@ Set-Location $projectRoot
 
 $resultDir = Join-Path $projectRoot "test\results"
 New-Item -ItemType Directory -Force -Path $resultDir | Out-Null
-$logFile = Join-Path $resultDir "latest.log"
-$summaryFile = Join-Path $resultDir "summary.log"
+$resultSuffix = if ($Race) { "-race" } else { "" }
+$logName = "latest$resultSuffix.log"
+$summaryName = "summary$resultSuffix.log"
+$logFile = Join-Path $resultDir $logName
+$summaryFile = Join-Path $resultDir $summaryName
 
 # Override config via env vars instead of editing application.yml:
 #   server.mode -> SERVER_MODE   release mode skips the gin route dump
@@ -77,10 +90,24 @@ else {
 # ./test/ needs MySQL + Redis. The other packages are pure unit tests.
 $packages = @("./test/")
 if ($Unit) {
-    $packages += @("./pkg/...", "./internal/...")
+    $packages += @("./pkg/...", "./internal/...", "./cmd/...")
 }
 
 $goArgs = @("test") + $packages + @("-v", "-count=1")
+if ($Race) {
+    $env:CGO_ENABLED = "1"
+    if ($CCompiler -ne "") {
+        if (-not (Test-Path $CCompiler)) { throw "C compiler not found: $CCompiler" }
+        $env:CC = (Resolve-Path $CCompiler).Path
+        # GCC invokes sibling tools such as as.exe by name, so CC alone is not enough.
+        $env:PATH = (Split-Path -Parent $env:CC) + ";" + $env:PATH
+    }
+    $compiler = if ($env:CC) { $env:CC } else { "gcc" }
+    if (-not (Get-Command $compiler -ErrorAction SilentlyContinue)) {
+        throw "race detector requires a C compiler; pass -CCompiler <path-to-gcc.exe>"
+    }
+    $goArgs += "-race"
+}
 if ($Run -ne "") {
     $goArgs += @("-run", $Run)
 }
@@ -104,7 +131,7 @@ if ($exitCode -ne 0) {
     $failDetails = @($output | Where-Object { $_ -match "_test\.go:\d+" })
 }
 $caseResults = @($output | Where-Object { $_ -match "^\s*--- (FAIL|SKIP)" })
-$buildErrors = @($output | Where-Object { $_ -match "^#|cannot use|undefined:|syntax error|declared and not used" })
+$buildErrors = @($output | Where-Object { $_ -match "^#|cannot use|undefined:|syntax error|declared and not used|fatal error|compilation terminated" })
 $passCount = @($output | Where-Object { $_ -match "^\s*--- PASS" }).Count
 $failCount = @($output | Where-Object { $_ -match "^\s*--- FAIL" }).Count
 $skipCount = @($output | Where-Object { $_ -match "^\s*--- SKIP" }).Count
@@ -117,7 +144,7 @@ $summary.Add("command : go $($goArgs -join ' ')")
 $summary.Add("elapsed : $elapsed s")
 $summary.Add("verdict : $verdict (exit=$exitCode)")
 $summary.Add("cases   : pass=$passCount fail=$failCount skip=$skipCount")
-$summary.Add("fulllog : test/results/latest.log")
+$summary.Add("fulllog : test/results/$logName")
 $summary.Add("")
 
 if ($buildErrors.Count -gt 0) {
@@ -154,5 +181,10 @@ exit $exitCode
 }
 finally {
     Remove-Item Env:\RUOYI_TEST_CONFIG -ErrorAction SilentlyContinue
+    if ($null -eq $previousCGO) { Remove-Item Env:\CGO_ENABLED -ErrorAction SilentlyContinue }
+    else { $env:CGO_ENABLED = $previousCGO }
+    if ($null -eq $previousCC) { Remove-Item Env:\CC -ErrorAction SilentlyContinue }
+    else { $env:CC = $previousCC }
+    $env:PATH = $previousPath
     [Console]::OutputEncoding = $previousEncoding
 }

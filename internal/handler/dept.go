@@ -25,7 +25,7 @@ func DeptList(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.OkData(c, list)
+	response.OkData(c, contractDeptList(list))
 }
 
 // DeptExcludeChild GET /system/dept/list/exclude/:deptId
@@ -43,7 +43,7 @@ func DeptExcludeChild(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.OkData(c, list)
+	response.OkData(c, contractDeptList(list))
 }
 
 // DeptGet GET /system/dept/:deptId
@@ -59,7 +59,9 @@ func DeptGet(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.OkData(c, dept)
+	// 【详情和列表的选列不一样】selectDeptById 是单独写的一条 SQL，
+	// 比列表少了 create_by/create_time/del_flag，却多了 parent_name
+	response.OkData(c, contractDeptDetail(*dept))
 }
 
 // DeptAdd POST /system/dept

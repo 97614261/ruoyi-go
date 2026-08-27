@@ -58,7 +58,7 @@ func noticeFilter(db *gorm.DB, query model.NoticeQuery) *gorm.DB {
 
 // SelectNoticePage 分页查询公告。
 //
-// 列表不查 notice_content：富文本正文可能很大，列表页也用不到。
+// Java 管理列表会返回完整 notice_content，响应契约必须保持一致。
 func SelectNoticePage(ctx context.Context, query model.NoticeQuery, pg page.Query) ([]model.SysNotice, int64, error) {
 	db := noticeFilter(DB(ctx).Model(&model.SysNotice{}), query)
 
@@ -70,14 +70,11 @@ func SelectNoticePage(ctx context.Context, query model.NoticeQuery, pg page.Quer
 		return []model.SysNotice{}, 0, nil
 	}
 
-	orderBy := pg.OrderBy
-	if orderBy == "" {
-		orderBy = "notice_id DESC"
-	}
+	orderBy := pg.Stable("notice_id DESC", "notice_id")
 
 	var list []model.SysNotice
 	err := db.
-		Select("notice_id, notice_title, notice_type, status, create_by, create_time, update_by, update_time, remark").
+		Select("notice_id, notice_title, notice_type, CAST(notice_content AS CHAR) AS notice_content, status, create_by, create_time, update_by, update_time, remark").
 		Order(orderBy).
 		Offset(pg.Offset()).
 		Limit(pg.PageSize).
@@ -170,21 +167,6 @@ func MarkNoticeRead(ctx context.Context, userID int64, noticeIDs []int64, at tim
 	return nil
 }
 
-// SelectUnreadNoticeIDs 查用户所有未读的公告 ID，用于"全部标记已读"。
-func SelectUnreadNoticeIDs(ctx context.Context, userID int64) ([]int64, error) {
-	var ids []int64
-	err := DB(ctx).
-		Table("sys_notice n").
-		Joins("LEFT JOIN sys_notice_read r ON r.notice_id = n.notice_id AND r.user_id = ?", userID).
-		Where("n.status = ?", model.StatusNormal).
-		Where("r.notice_id IS NULL").
-		Pluck("n.notice_id", &ids).Error
-	if err != nil {
-		return nil, fmt.Errorf("查询用户 %d 的未读公告失败: %w", userID, err)
-	}
-	return ids, nil
-}
-
 // SelectNoticeReadUserPage 分页查询某条公告的已读用户。
 func SelectNoticeReadUserPage(ctx context.Context, query model.NoticeReadUserQuery, pg page.Query) ([]model.NoticeReadUser, int64, error) {
 	build := func() *gorm.DB {
@@ -214,7 +196,10 @@ func SelectNoticeReadUserPage(ctx context.Context, query model.NoticeReadUserQue
 	var list []model.NoticeReadUser
 	err := build().
 		Select("u.user_id, u.user_name, u.nick_name, IFNULL(d.dept_name,'') AS dept_name, r.read_time").
-		Order("r.read_time DESC").
+		// read_time 精度到秒，一条公告推送后大批人同时点开是常态，
+		// 并列几乎必然发生 —— 没有 user_id 兜底翻页就会重复/漏行。
+		// 这个查询不接受前端排序，所以不走 pg.Stable
+		Order("r.read_time DESC, u.user_id").
 		Offset(pg.Offset()).
 		Limit(pg.PageSize).
 		Scan(&list).Error

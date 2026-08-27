@@ -373,6 +373,48 @@ func TestUserImportTemplate(t *testing.T) {
 	}
 }
 
+// TestUserImportEmptyTemplate 对齐 Java：上传只有表头的合法模板时，
+// 应返回明确的“数据不能为空”，而不是把它误判成损坏的 Excel。
+func TestUserImportEmptyTemplate(t *testing.T) {
+	template := request(http.MethodPost, "/system/user/importTemplate", adminToken, nil)
+	if template.Status != http.StatusOK || len(template.Body) == 0 {
+		t.Fatalf("准备空导入模板失败：HTTP=%d，响应=%s", template.Status, truncBody(template.Body))
+	}
+
+	r := requestMultipart(http.MethodPost, "/system/user/importData", adminToken,
+		"file", "user_template.xlsx", template.Body)
+	mustFail(t, r, "导入用户数据不能为空！", "导入只有表头的用户模板")
+}
+
+// TestUserImportTemplateNeedsLoginOnly 对齐 Java SysUserController：
+// importTemplate 没有 @PreAuthorize，只要求登录；真正导入 importData 才要求
+// system:user:import。普通登录用户拿到的也必须是 xlsx，而不是 403 JSON。
+func TestUserImportTemplateNeedsLoginOnly(t *testing.T) {
+	userBody := newUserPayload("templateperm")
+	userBody["roleIds"] = []int64{} // 明确不给 system:user:import
+	createUser(t, userBody)
+	token := mustLogin(t, fmt.Sprint(userBody["userName"]))
+
+	r := request(http.MethodPost, "/system/user/importTemplate", token, nil)
+	if r.Code == 403 {
+		t.Fatalf("Java 的导入模板接口只要求登录，Go 不应额外要求 system:user:import：msg=%q", r.Msg)
+	}
+	if _, err := excelize.OpenReader(bytes.NewReader(r.Body)); err != nil {
+		t.Fatalf("普通登录用户应拿到合法 xlsx，实际响应=%s", truncBody(r.Body))
+	}
+}
+
+// TestUserNewFormTrailingSlash 对齐 Vue3 的真实请求和 Java 的双路径映射。
+// getUser(undefined) 会请求 /system/user/；这里要求路由直接返回业务响应，
+// 不能依赖客户端跟随 Gin 的尾斜杠重定向。
+func TestUserNewFormTrailingSlash(t *testing.T) {
+	r := request(http.MethodGet, "/system/user/", adminToken, nil)
+	if r.Status != http.StatusOK {
+		t.Fatalf("GET /system/user/ 应直接返回 200，实际 HTTP %d", r.Status)
+	}
+	mustOK(t, r, "带尾斜杠获取新增用户表单数据")
+}
+
 // TestUserExportIsFile 导出返回的是真正的 xlsx，不是 JSON。
 func TestUserExportIsFile(t *testing.T) {
 	r := request(http.MethodPost, "/system/user/export", adminToken, url.Values{"pageSize": {"10"}})

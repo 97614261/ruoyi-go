@@ -19,6 +19,8 @@ type SysNotice struct {
 	UpdateTime    types.Time `gorm:"column:update_time" json:"updateTime"`
 	// remark 列长是 255，不是其它表的 500
 	Remark *string `gorm:"column:remark" json:"remark" binding:"omitempty,max=255"`
+	// Java SysNotice 的 getIsRead() 始终序列化该字段；管理列表默认 false。
+	IsRead bool `gorm:"-" json:"isRead"`
 }
 
 func (SysNotice) TableName() string { return "sys_notice" }
@@ -35,16 +37,20 @@ func (SysNoticeRead) TableName() string { return "sys_notice_read" }
 
 // NoticeTopItem 顶栏公告列表项。
 //
-// 刻意不含 notice_content：那是个 longblob，顶栏只显示标题，
-// 每次进页面都把富文本正文捞出来纯属浪费。
+// 顶栏 SQL 不查询正文和更新字段，但 Java SysNotice 仍会把这些属性以 null
+// 输出。保留字段而不查询，既不读取 longblob，又保持响应契约。
 type NoticeTopItem struct {
-	NoticeID    int64      `gorm:"column:notice_id" json:"noticeId"`
-	NoticeTitle string     `gorm:"column:notice_title" json:"noticeTitle"`
-	NoticeType  string     `gorm:"column:notice_type" json:"noticeType"`
-	Status      string     `gorm:"column:status" json:"status"`
-	CreateBy    string     `gorm:"column:create_by" json:"createBy"`
-	CreateTime  types.Time `gorm:"column:create_time" json:"createTime"`
-	IsRead      bool       `gorm:"column:is_read" json:"isRead"`
+	NoticeID      int64      `gorm:"column:notice_id" json:"noticeId"`
+	NoticeTitle   string     `gorm:"column:notice_title" json:"noticeTitle"`
+	NoticeType    string     `gorm:"column:notice_type" json:"noticeType"`
+	NoticeContent *string    `gorm:"-" json:"noticeContent"`
+	Status        string     `gorm:"column:status" json:"status"`
+	CreateBy      string     `gorm:"column:create_by" json:"createBy"`
+	CreateTime    types.Time `gorm:"column:create_time" json:"createTime"`
+	UpdateBy      *string    `gorm:"-" json:"updateBy"`
+	UpdateTime    types.Time `gorm:"-" json:"updateTime"`
+	Remark        *string    `gorm:"-" json:"remark"`
+	IsRead        bool       `gorm:"column:is_read" json:"isRead"`
 }
 
 // NoticeReadUser 公告已读用户列表项。

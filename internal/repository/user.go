@@ -151,10 +151,7 @@ func SelectUserPage(ctx context.Context, query model.UserQuery, pg page.Query, s
 		return []model.SysUser{}, 0, nil
 	}
 
-	orderBy := pg.OrderBy
-	if orderBy == "" {
-		orderBy = "u.user_id"
-	}
+	orderBy := pg.Stable("u.user_id", "u.user_id")
 
 	var list []model.SysUser
 	err := userListDB(ctx, query, scope).

@@ -121,6 +121,37 @@ func TestMenuCRUD(t *testing.T) {
 	mustFail(t, doGet(t, path), "不存在", "删除后再查")
 }
 
+// TestMenuUpdateSort 保存菜单排序的请求格式和批量更新结果。
+func TestMenuUpdateSort(t *testing.T) {
+	firstID := createMenu(t, newDirPayload("sort_1"))
+	secondID := createMenu(t, newDirPayload("sort_2"))
+
+	mustOK(t, doPut(t, "/system/menu/updateSort", map[string]any{
+		"menuIds":   idPath(firstID) + "," + idPath(secondID),
+		"orderNums": "2,1",
+	}), "保存菜单排序")
+
+	first := dataObject(t, doGet(t, "/system/menu/"+idPath(firstID)), "查询第一个菜单排序")
+	second := dataObject(t, doGet(t, "/system/menu/"+idPath(secondID)), "查询第二个菜单排序")
+	assertField(t, first, "orderNum", 2, "菜单排序更新后")
+	assertField(t, second, "orderNum", 1, "菜单排序更新后")
+
+	cases := []struct {
+		name string
+		body map[string]any
+		want string
+	}{
+		{"ID 与排序数量不一致", map[string]any{"menuIds": idPath(firstID) + "," + idPath(secondID), "orderNums": "1"}, "排序参数不匹配"},
+		{"菜单 ID 非数字", map[string]any{"menuIds": "invalid", "orderNums": "1"}, "排序参数格式错误"},
+		{"排序值非数字", map[string]any{"menuIds": idPath(firstID), "orderNums": "invalid"}, "排序参数格式错误"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mustFail(t, doPut(t, "/system/menu/updateSort", tc.body), tc.want, tc.name)
+		})
+	}
+}
+
 // TestMenuSelfParent 上级菜单不能选自己。
 func TestMenuSelfParent(t *testing.T) {
 	id := createMenu(t, newDirPayload("self"))

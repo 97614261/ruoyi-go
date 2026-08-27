@@ -22,6 +22,7 @@ var (
 	jwtSigner        *jwtx.Signer
 	jwtExpire        time.Duration
 	jwtRefreshWindow time.Duration
+	errStopLoginScan = errors.New("停止扫描登录会话")
 )
 
 // InitToken 由 main 在启动时调用一次。
@@ -60,7 +61,7 @@ func RefreshToken(ctx context.Context, loginUser *model.LoginUser) error {
 	}
 	key := redisx.LoginTokenKey(loginUser.Token)
 	if err := redisx.C().Set(ctx, key, data, jwtExpire).Err(); err != nil {
-		return fmt.Errorf("写入会话 %s 失败: %w", key, err)
+		return fmt.Errorf("写入登录会话失败: %w", err)
 	}
 	return nil
 }
@@ -119,33 +120,36 @@ func VerifyToken(ctx context.Context, loginUser *model.LoginUser) error {
 //  2. 单个会话刷新失败只记日志继续，不中断整体 —— 少刷一个用户的代价是
 //     他要等会话过期，比整批刷新失败小得多。
 func RefreshOnlineUsersByRole(ctx context.Context, roleID int64) error {
-	return redisx.ScanKeys(ctx, redisx.KeyLoginToken, 100, func(key string) error {
-		raw, err := redisx.C().Get(ctx, key).Bytes()
-		if errors.Is(err, redis.Nil) {
-			return nil // 迭代期间刚好过期，正常
-		}
-		if err != nil {
-			slog.Warn("读取会话失败，跳过", "key", key, "err", err)
-			return nil
-		}
+	type permissionSnapshot struct {
+		user        *model.SysUser
+		permissions []string
+	}
+	snapshots := make(map[int64]permissionSnapshot)
 
-		var loginUser model.LoginUser
-		if err := json.Unmarshal(raw, &loginUser); err != nil {
-			slog.Warn("会话反序列化失败，跳过", "key", key, "err", err)
-			return nil
-		}
+	return scanLoginUsers(ctx, 100, func(loginUser *model.LoginUser) error {
 		// 管理员拥有全部权限，无需刷新
 		if loginUser.User == nil || loginUser.User.IsAdmin() || !hasRole(loginUser.User, roleID) {
 			return nil
 		}
 
-		permissions, err := GetMenuPermission(ctx, loginUser.User)
-		if err != nil {
-			slog.Warn("重算权限失败，跳过", "userId", loginUser.UserID, "err", err)
-			return nil
+		snapshot, ok := snapshots[loginUser.UserID]
+		if !ok {
+			fresh, err := repository.SelectUserByID(ctx, loginUser.UserID)
+			if err != nil || fresh == nil {
+				slog.Warn("重新加载用户失败，跳过", "userId", loginUser.UserID, "err", err)
+				return nil
+			}
+			permissions, err := GetMenuPermission(ctx, fresh)
+			if err != nil {
+				slog.Warn("重算权限失败，跳过", "userId", loginUser.UserID, "err", err)
+				return nil
+			}
+			snapshot = permissionSnapshot{user: fresh, permissions: permissions}
+			snapshots[loginUser.UserID] = snapshot
 		}
-		loginUser.Permissions = permissions
-		if err := RefreshToken(ctx, &loginUser); err != nil {
+		loginUser.User = snapshot.user
+		loginUser.Permissions = snapshot.permissions
+		if err := RefreshToken(ctx, loginUser); err != nil {
 			slog.Warn("刷新会话失败，跳过", "userId", loginUser.UserID, "err", err)
 			return nil
 		}
@@ -159,39 +163,73 @@ func RefreshOnlineUsersByRole(ctx context.Context, roleID int64) error {
 // 用户被改了角色后调用，让新权限立刻生效而不用等他重新登录。
 // 该用户不在线时静默返回。
 func RefreshOnlineUserByID(ctx context.Context, userID int64) error {
-	return redisx.ScanKeys(ctx, redisx.KeyLoginToken, 100, func(key string) error {
-		raw, err := redisx.C().Get(ctx, key).Bytes()
-		if errors.Is(err, redis.Nil) {
-			return nil
-		}
-		if err != nil {
-			slog.Warn("读取会话失败，跳过", "key", key, "err", err)
-			return nil
-		}
-
-		var loginUser model.LoginUser
-		if err := json.Unmarshal(raw, &loginUser); err != nil || loginUser.UserID != userID {
+	var (
+		loaded      bool
+		fresh       *model.SysUser
+		permissions []string
+	)
+	return scanLoginUsers(ctx, 100, func(loginUser *model.LoginUser) error {
+		if loginUser.UserID != userID {
 			return nil
 		}
 
 		// 角色变了，要重新查库拿最新角色再算权限
-		fresh, err := repository.SelectUserByID(ctx, userID)
-		if err != nil || fresh == nil {
-			slog.Warn("重新加载用户失败，跳过", "userId", userID, "err", err)
-			return nil
+		if !loaded {
+			loaded = true
+			var err error
+			fresh, err = repository.SelectUserByID(ctx, userID)
+			if err != nil || fresh == nil {
+				slog.Warn("重新加载用户失败，跳过", "userId", userID, "err", err)
+				return nil
+			}
+			permissions, err = GetMenuPermission(ctx, fresh)
+			if err != nil {
+				slog.Warn("重算权限失败，跳过", "userId", userID, "err", err)
+				fresh = nil
+				return nil
+			}
 		}
-		permissions, err := GetMenuPermission(ctx, fresh)
-		if err != nil {
-			slog.Warn("重算权限失败，跳过", "userId", userID, "err", err)
+		if fresh == nil {
 			return nil
 		}
 		loginUser.User = fresh
 		loginUser.Permissions = permissions
-		if err := RefreshToken(ctx, &loginUser); err != nil {
+		if err := RefreshToken(ctx, loginUser); err != nil {
 			slog.Warn("刷新会话失败", "userId", userID, "err", err)
 		}
 		return nil
 	})
+}
+
+// scanLoginUsers 用 SCAN + MGET 分批读取在线会话，避免每个 key 一次 Redis 往返。
+// 单个损坏会话只记录错误类型；会话 key 含登录 UUID，禁止写入日志。
+func scanLoginUsers(ctx context.Context, batch int64, fn func(*model.LoginUser) error) error {
+	err := redisx.ScanKeyBatches(ctx, redisx.KeyLoginToken, batch, func(keys []string) error {
+		values, err := redisx.C().MGet(ctx, keys...).Result()
+		if err != nil {
+			slog.Warn("批量读取在线会话失败，跳过当前批次", "count", len(keys), "err", err)
+			return nil
+		}
+		for _, value := range values {
+			raw, ok := value.(string)
+			if !ok {
+				continue // SCAN 与 MGET 之间过期属于正常情况
+			}
+			var loginUser model.LoginUser
+			if err := json.Unmarshal([]byte(raw), &loginUser); err != nil {
+				slog.Warn("会话反序列化失败，跳过", "err", err)
+				continue
+			}
+			if err := fn(&loginUser); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if errors.Is(err, errStopLoginScan) {
+		return nil
+	}
+	return err
 }
 
 func hasRole(user *model.SysUser, roleID int64) bool {
