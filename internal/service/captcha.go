@@ -17,6 +17,15 @@ import (
 // captchaTTL 验证码有效期，与 Java 版 Constants.CAPTCHA_EXPIRATION 一致。
 const captchaTTL = 2 * time.Minute
 
+// consumeCaptchaScript 原子读取并删除验证码，保证同一个验证码只能被一个请求消费。
+var consumeCaptchaScript = redis.NewScript(`
+local answer = redis.call('get', KEYS[1])
+if answer then
+    redis.call('del', KEYS[1])
+end
+return answer
+`)
+
 // ConfigKeyCaptchaEnabled sys_config 中控制验证码开关的键。
 const ConfigKeyCaptchaEnabled = "sys.account.captchaEnabled"
 
@@ -71,9 +80,7 @@ func VerifyCaptcha(ctx context.Context, id, code string) error {
 	}
 	key := redisx.CaptchaKey(id)
 
-	answer, err := redisx.C().Get(ctx, key).Result()
-	// 取到就删，防止同一个验证码被重复使用
-	redisx.C().Del(ctx, key)
+	answer, err := consumeCaptchaScript.Run(ctx, redisx.C(), []string{key}).Text()
 
 	if errors.Is(err, redis.Nil) {
 		return errs.New("验证码已失效")

@@ -75,7 +75,7 @@ func ListDictTypePage(ctx context.Context, query model.DictTypeQuery, pg page.Qu
 
 // ListDictTypeExport 导出用的全量查询。
 func ListDictTypeExport(ctx context.Context, query model.DictTypeQuery) ([]model.SysDictType, error) {
-	list, err := repository.SelectDictTypeList(ctx, query)
+	list, err := repository.SelectDictTypeList(ctx, query, MaxExportRows+1)
 	if err != nil {
 		return nil, err
 	}
@@ -165,20 +165,18 @@ func DeleteDictTypes(ctx context.Context, dictIDs []int64) error {
 	if len(dictIDs) == 0 {
 		return errs.New("请选择要删除的字典类型")
 	}
-	typeNames := make([]string, 0, len(dictIDs))
-	for _, dictID := range dictIDs {
-		dictType, err := repository.SelectDictTypeByID(ctx, dictID)
-		if err != nil {
-			return err
-		}
-		if dictType == nil {
-			continue
-		}
-		count, err := repository.CountDictDataByType(ctx, dictType.DictType)
-		if err != nil {
-			return err
-		}
-		if count > 0 {
+	var err error
+	dictIDs, err = normalizeRelationIDs(dictIDs, "字典类型")
+	if err != nil {
+		return err
+	}
+	dictTypes, counts, err := repository.SelectDictTypesForDelete(ctx, dictIDs)
+	if err != nil {
+		return err
+	}
+	typeNames := make([]string, 0, len(dictTypes))
+	for _, dictType := range dictTypes {
+		if counts[dictType.DictType] > 0 {
 			return errs.Newf("%s已分配,不能删除", dictType.DictName)
 		}
 		typeNames = append(typeNames, dictType.DictType)
@@ -209,7 +207,7 @@ func ListDictDataPage(ctx context.Context, query model.DictDataQuery, pg page.Qu
 
 // ListDictDataExport 导出用的全量查询。
 func ListDictDataExport(ctx context.Context, query model.DictDataQuery) ([]model.SysDictData, error) {
-	list, err := repository.SelectDictDataList(ctx, query)
+	list, err := repository.SelectDictDataList(ctx, query, MaxExportRows+1)
 	if err != nil {
 		return nil, err
 	}
@@ -285,15 +283,18 @@ func DeleteDictData(ctx context.Context, dictCodes []int64) error {
 	}
 	// 不要用 types 做变量名 —— 会遮蔽 pkg/types 包，本函数虽然用不到，
 	// 但以后有人在这里加一行 types.Now() 就会莫名其妙编译不过
+	var err error
+	dictCodes, err = normalizeRelationIDs(dictCodes, "字典数据")
+	if err != nil {
+		return err
+	}
+	dataRows, err := repository.SelectDictDataByCodes(ctx, dictCodes)
+	if err != nil {
+		return err
+	}
 	affectedTypes := make(map[string]struct{})
-	for _, dictCode := range dictCodes {
-		data, err := repository.SelectDictDataByCode(ctx, dictCode)
-		if err != nil {
-			return err
-		}
-		if data != nil {
-			affectedTypes[data.DictType] = struct{}{}
-		}
+	for _, data := range dataRows {
+		affectedTypes[data.DictType] = struct{}{}
 	}
 
 	if err := repository.DeleteDictDataByCodes(ctx, dictCodes); err != nil {

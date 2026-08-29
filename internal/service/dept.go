@@ -103,7 +103,10 @@ func CheckDeptDataScope(ctx context.Context, user *model.SysUser, deptID int64) 
 }
 
 // CreateDept 新增部门。
-func CreateDept(ctx context.Context, dept *model.SysDept, operator string) error {
+func CreateDept(ctx context.Context, user *model.SysUser, dept *model.SysDept, operator string) error {
+	if _, err := checkDeptIDs(ctx, user, []int64{dept.ParentID}); err != nil {
+		return err
+	}
 	count, err := repository.CountDeptByNameAndParent(ctx, dept.DeptName, dept.ParentID, 0)
 	if err != nil {
 		return err
@@ -141,6 +144,11 @@ func UpdateDept(ctx context.Context, user *model.SysUser, dept *model.SysDept, o
 	}
 	if err := CheckDeptDataScope(ctx, user, dept.DeptID); err != nil {
 		return err
+	}
+	if dept.ParentID != 0 {
+		if _, err := checkDeptIDs(ctx, user, []int64{dept.ParentID}); err != nil {
+			return err
+		}
 	}
 
 	count, err := repository.CountDeptByNameAndParent(ctx, dept.DeptName, dept.ParentID, dept.DeptID)
@@ -252,9 +260,16 @@ func DeleteDept(ctx context.Context, user *model.SysUser, deptID int64) error {
 // UpdateDeptSort 保存部门排序。
 //
 // 传输格式与菜单排序一致，解析逻辑共用 parseSortPairs。
-func UpdateDeptSort(ctx context.Context, body model.DeptSortBody) error {
+func UpdateDeptSort(ctx context.Context, user *model.SysUser, body model.DeptSortBody) error {
 	sorts, err := parseSortPairs(body.DeptIDs, body.OrderNums)
 	if err != nil {
+		return err
+	}
+	ids := make([]int64, 0, len(sorts))
+	for id := range sorts {
+		ids = append(ids, id)
+	}
+	if _, err := checkDeptIDs(ctx, user, ids); err != nil {
 		return err
 	}
 	return repository.UpdateDeptSort(ctx, sorts)

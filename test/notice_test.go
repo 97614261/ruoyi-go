@@ -1,11 +1,16 @@
 package apitest
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
+
+	"ruoyi-go/internal/model"
+	"ruoyi-go/internal/repository"
 )
 
 func newNoticePayload(suffix string) map[string]any {
@@ -99,6 +104,86 @@ func TestNoticeContentIsNotBase64(t *testing.T) {
 	}
 	if !strings.Contains(got, "可读的中文内容") {
 		t.Errorf("正文应原样返回，疑似被 base64 编码了：%q", got)
+	}
+}
+
+// TestNoticeRichTextSanitization 公告保留 Quill 富文本，但可执行内容在入库前移除。
+func TestNoticeRichTextSanitization(t *testing.T) {
+	body := newNoticePayload("richtext-safe")
+	body["noticeContent"] = `<h2 class="ql-align-center">标题</h2>` +
+		`<p onclick="alert(1)"><strong>正文</strong>` +
+		`<span style="color: rgb(230, 0, 0); position: fixed">红色</span>` +
+		`<img src="/profile/upload/demo.png" onerror="alert(2)"></p>` +
+		`<script>alert(3)</script>`
+	id := createNotice(t, body)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stored, err := repository.SelectNoticeByID(ctx, id)
+	if err != nil {
+		t.Fatalf("读取刚入库的公告失败：%v", err)
+	}
+	assertSanitizedNoticeContent(t, stored.NoticeContent, "新增入库")
+	for _, want := range []string{`class="ql-align-center"`, "<strong>正文</strong>", `color: rgb(230, 0, 0)`, `src="/profile/upload/demo.png"`} {
+		if !strings.Contains(stored.NoticeContent, want) {
+			t.Errorf("新增入库后应保留 Quill 内容 %q，实际=%s", want, stored.NoticeContent)
+		}
+	}
+
+	updated := payload(body)
+	updated["noticeId"] = id
+	updated["noticeContent"] = `<blockquote>修改内容</blockquote>` +
+		`<a href="jav&#x61;script:alert(4)" onmouseover="alert(5)">链接</a>` +
+		`<iframe class="ql-video" src="https://example.com/video" onload="alert(6)"></iframe>`
+	mustOK(t, doPut(t, "/system/notice", updated), "修改含危险富文本的公告")
+
+	stored, err = repository.SelectNoticeByID(ctx, id)
+	if err != nil {
+		t.Fatalf("读取修改后的公告失败：%v", err)
+	}
+	assertSanitizedNoticeContent(t, stored.NoticeContent, "修改入库")
+	for _, want := range []string{"<blockquote>修改内容</blockquote>", `class="ql-video"`, `src="https://example.com/video"`} {
+		if !strings.Contains(stored.NoticeContent, want) {
+			t.Errorf("修改入库后应保留 Quill 内容 %q，实际=%s", want, stored.NoticeContent)
+		}
+	}
+}
+
+// TestNoticeHistoricalContentSanitizedOnRead 防止升级前已存在的危险正文继续通过接口输出。
+func TestNoticeHistoricalContentSanitizedOnRead(t *testing.T) {
+	body := newNoticePayload("richtext-history")
+	id := createNotice(t, body)
+	raw := `<p onclick="alert(1)"><strong>历史正文</strong></p><script>alert(2)</script>`
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := repository.DB(ctx).Model(&model.SysNotice{}).
+		Where("notice_id = ?", id).Update("notice_content", raw).Error; err != nil {
+		t.Fatalf("准备历史危险公告失败：%v", err)
+	}
+
+	detail := dataObject(t, doGet(t, "/system/notice/"+idPath(id)), "查历史公告详情")
+	assertSanitizedNoticeContent(t, fmt.Sprint(detail["noticeContent"]), "历史公告详情")
+
+	title := url.QueryEscape(fmt.Sprint(body["noticeTitle"]))
+	rows := pageRows(t, doGet(t, "/system/notice/list?pageSize=100&noticeTitle="+title), "查历史公告列表")
+	item := findBy(rows, "noticeId", id)
+	if item == nil {
+		t.Fatalf("公告列表里找不到历史公告 %d", id)
+	}
+	assertSanitizedNoticeContent(t, fmt.Sprint(item["noticeContent"]), "历史公告列表")
+}
+
+func assertSanitizedNoticeContent(t *testing.T, content, what string) {
+	t.Helper()
+	lower := strings.ToLower(content)
+	for _, forbidden := range []string{"<script", "onclick", "onerror", "onload", "onmouseover", "javascript:", "position:"} {
+		if strings.Contains(lower, forbidden) {
+			t.Errorf("%s不应包含 %q，实际=%s", what, forbidden, content)
+		}
+	}
+	if !strings.Contains(content, "正文") && !strings.Contains(content, "链接") {
+		t.Errorf("%s净化时不应删除安全文本，实际=%s", what, content)
 	}
 }
 
@@ -262,6 +347,21 @@ func TestNoticeDetailNeedsNoPermission(t *testing.T) {
 
 	// 顶栏列表同样是所有人可见
 	mustOK(t, request(http.MethodGet, "/system/notice/listTop", token, nil), "普通用户查顶栏公告")
+}
+
+func TestNoticeDraftIsHiddenFromOrdinaryUsers(t *testing.T) {
+	body := newNoticePayload("draft-hidden")
+	body["status"] = "1"
+	id := createNotice(t, body)
+
+	userBody := newUserPayload("notice-draft")
+	userBody["roleIds"] = []int64{}
+	createUser(t, userBody)
+	token := mustLogin(t, fmt.Sprint(userBody["userName"]))
+
+	r := request(http.MethodGet, "/system/notice/"+idPath(id), token, nil)
+	mustFail(t, r, "公告不存在", "普通用户读取公告草稿")
+	mustOK(t, doGet(t, "/system/notice/"+idPath(id)), "管理员读取公告草稿")
 }
 
 // TestNoticeReadUsersNeedsListPermission 对齐 Java SysNoticeController：

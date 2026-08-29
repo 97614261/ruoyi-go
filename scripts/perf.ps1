@@ -2,6 +2,8 @@
 #
 # NOTE: ASCII only. PowerShell 5.1 decodes .ps1 as ANSI when there is no UTF-8 BOM,
 # so Chinese characters here would turn into mojibake and break string literals.
+# WARNING: index, unindex, and all modify database indexes. Use an isolated perf database only.
+# Never point this script at production. Verify the configured server and database before running.
 #
 # Usage:
 #   .\scripts\perf.ps1 all       # unattended: explain/bench before -> add indexes -> explain/bench after

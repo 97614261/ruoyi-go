@@ -55,9 +55,9 @@ func SelectJobPage(ctx context.Context, query model.JobQuery, pg page.Query) ([]
 }
 
 // SelectJobList 不分页查询，供导出使用。
-func SelectJobList(ctx context.Context, query model.JobQuery) ([]model.SysJob, error) {
+func SelectJobList(ctx context.Context, query model.JobQuery, limit ...int) ([]model.SysJob, error) {
 	var list []model.SysJob
-	if err := jobListDB(ctx, query).Order("job_id").Find(&list).Error; err != nil {
+	if err := applyOptionalLimit(jobListDB(ctx, query), limit).Order("job_id").Find(&list).Error; err != nil {
 		return nil, fmt.Errorf("查询定时任务列表失败: %w", err)
 	}
 	return list, nil

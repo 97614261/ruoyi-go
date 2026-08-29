@@ -17,12 +17,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// 业务状态码。注意与 HTTP 状态码无关，HTTP 恒为 200。
+// 业务状态码。普通业务错误的 HTTP 状态码仍为 200；入口基础设施错误可使用真实状态码。
 const (
-	CodeSuccess      = 200
-	CodeUnauthorized = 401
-	CodeForbidden    = 403
-	CodeError        = 500
+	CodeSuccess         = 200
+	CodeUnauthorized    = 401
+	CodeForbidden       = 403
+	CodePayloadTooLarge = 413
+	CodeError           = 500
 )
 
 const (
@@ -52,6 +53,12 @@ func (r Result) Put(key string, value any) Result {
 // JSON 写出响应。HTTP 状态码恒为 200，错误通过 body 里的 code 表达。
 func (r Result) JSON(c *gin.Context) {
 	c.JSON(http.StatusOK, r)
+}
+
+// JSONStatus 写出真实 HTTP 状态码，同时保持统一的 code/msg JSON 结构。
+// 仅用于代理和客户端必须从 HTTP 层识别的入口错误，例如请求体超限。
+func (r Result) JSONStatus(c *gin.Context, status int) {
+	c.JSON(status, r)
 }
 
 // Ok 返回 {"code":200,"msg":"操作成功"}。

@@ -113,6 +113,9 @@ func CacheKeys(ctx context.Context, cacheName string) ([]string, error) {
 
 	keys := make([]string, 0, 64)
 	err := redisx.ScanKeys(ctx, cacheName, 200, func(key string) error {
+		if redisx.IsConfigCacheMetadataKey(key) {
+			return nil
+		}
 		if len(keys) >= maxCacheKeys {
 			return nil
 		}
@@ -156,6 +159,9 @@ func ClearCacheByName(ctx context.Context, cacheName string) error {
 	if !isAllowedCacheName(cacheName) {
 		return errs.New("不支持清理该缓存")
 	}
+	if cacheName == redisx.KeySysConfig {
+		return ClearConfigCache(ctx, "")
+	}
 	return redisx.ScanKeys(ctx, cacheName, 200, func(key string) error {
 		return redisx.C().Del(ctx, key).Err()
 	})
@@ -169,6 +175,12 @@ func ClearCacheByKey(ctx context.Context, cacheKey string) error {
 	// 只允许删白名单前缀下的 key，避免误删（或恶意删）其它业务数据
 	if !isAllowedCacheName(prefixOf(cacheKey)) {
 		return errs.New("不支持清理该缓存")
+	}
+	if redisx.IsConfigCacheMetadataKey(cacheKey) {
+		return errs.New("不能清理内部缓存元数据")
+	}
+	if strings.HasPrefix(cacheKey, redisx.KeySysConfig) {
+		return ClearConfigCache(ctx, strings.TrimPrefix(cacheKey, redisx.KeySysConfig))
 	}
 	return redisx.C().Del(ctx, cacheKey).Err()
 }

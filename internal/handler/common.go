@@ -67,12 +67,15 @@ func CommonUploads(c *gin.Context) {
 	}
 
 	var urls, fileNames, newFileNames, originalFilenames []string
+	saved := make([]string, 0, len(files))
 	for _, fileHeader := range files {
 		relURL, err := saveUpload(fileHeader)
 		if err != nil {
+			rollbackUploads(c, saved)
 			response.Fail(c, err.Error())
 			return
 		}
+		saved = append(saved, relURL)
 		urls = append(urls, absoluteURL(c, relURL))
 		fileNames = append(fileNames, relURL)
 		newFileNames = append(newFileNames, path.Base(relURL))
@@ -85,6 +88,19 @@ func CommonUploads(c *gin.Context) {
 		Put("newFileNames", strings.Join(newFileNames, ",")).
 		Put("originalFilenames", strings.Join(originalFilenames, ",")).
 		JSON(c)
+}
+
+func rollbackUploads(c *gin.Context, resources []string) {
+	for _, resource := range resources {
+		removed, err := upload.RemoveManagedFile(uploadCfg.Path, uploadCfg.URLPrefix, "upload", resource)
+		if err != nil {
+			slog.WarnContext(c.Request.Context(), "回滚批量上传文件失败", "resource", resource, "err", err)
+			continue
+		}
+		if !removed {
+			slog.WarnContext(c.Request.Context(), "回滚批量上传时文件未找到", "resource", resource)
+		}
+	}
 }
 
 // CommonDownload GET /common/download?fileName=xxx.xlsx&delete=true

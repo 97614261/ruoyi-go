@@ -37,6 +37,11 @@ type LoginUser struct {
 	// LoginTime / ExpireTime 均为 Unix 毫秒
 	LoginTime  int64 `json:"loginTime"`
 	ExpireTime int64 `json:"expireTime"`
+	// SessionGeneration 只存在于 Redis 会话中，不对应数据库字段。
+	// 停用、删除或改密会递增用户代数，使并发中的旧登录结果无法写回。
+	SessionGeneration int64 `json:"sessionGeneration"`
+	// SessionRevision 只协调同一会话的权限更新；普通 TTL 续期不会递增。
+	SessionRevision int64 `json:"sessionRevision"`
 
 	IPAddr        string `json:"ipaddr"`
 	LoginLocation string `json:"loginLocation"`

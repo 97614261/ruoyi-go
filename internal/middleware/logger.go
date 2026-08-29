@@ -27,9 +27,8 @@ func InitLogger(threshold time.Duration) {
 // 只记录元信息，不记录请求体和响应体 —— 登录接口的密码、
 // 各类 token 都在请求体里，落日志等于泄露。
 //
-// 【query 也必须脱敏】"不记请求体"挡不住 /system/user/profile/updatePwd ——
-// 它的 oldPassword / newPassword 走的是查询串，原样打出来就是明文密码进日志。
-// 操作日志那边早就做了脱敏，这里漏掉过一次。
+// 【query 也必须脱敏】即使当前密码接口使用 JSON，将来或其它接口仍可能把敏感参数
+// 放在查询串中；必须先按 URL 语法解码，再做大小写不敏感的字段匹配。
 func Logger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -51,7 +50,7 @@ func Logger() gin.HandlerFunc {
 			"clientIP", c.ClientIP(),
 		}
 		if query != "" {
-			attrs = append(attrs, "query", desensitize(query))
+			attrs = append(attrs, "query", desensitizeQuery(query))
 		}
 		if user := CurrentUser(c); user != nil {
 			attrs = append(attrs, "userId", user.UserID)

@@ -28,7 +28,7 @@ func parseIDs(raw string) ([]int64, error) {
 			continue
 		}
 		id, err := strconv.ParseInt(part, 10, 64)
-		if err != nil {
+		if err != nil || id <= 0 {
 			return nil, errs.New("参数格式错误")
 		}
 		if _, dup := seen[id]; dup {

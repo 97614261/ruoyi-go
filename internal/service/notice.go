@@ -7,6 +7,7 @@ import (
 	"ruoyi-go/internal/model"
 	"ruoyi-go/internal/repository"
 	"ruoyi-go/pkg/errs"
+	"ruoyi-go/pkg/htmlx"
 	"ruoyi-go/pkg/page"
 	"ruoyi-go/pkg/types"
 )
@@ -32,18 +33,26 @@ func ListNoticeTop(ctx context.Context, userID int64) ([]model.NoticeTopItem, in
 
 // ListNoticePage 分页查询公告。
 func ListNoticePage(ctx context.Context, query model.NoticeQuery, pg page.Query) ([]model.SysNotice, int64, error) {
-	return repository.SelectNoticePage(ctx, query, pg)
+	list, total, err := repository.SelectNoticePage(ctx, query, pg)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range list {
+		list[i].NoticeContent = htmlx.SanitizeQuill(list[i].NoticeContent)
+	}
+	return list, total, nil
 }
 
 // GetNotice 按 ID 查公告。
-func GetNotice(ctx context.Context, noticeID int64) (*model.SysNotice, error) {
+func GetNotice(ctx context.Context, noticeID int64, includeDraft bool) (*model.SysNotice, error) {
 	notice, err := repository.SelectNoticeByID(ctx, noticeID)
 	if err != nil {
 		return nil, err
 	}
-	if notice == nil {
+	if notice == nil || (!includeDraft && notice.Status != model.StatusNormal) {
 		return nil, errs.New("公告不存在")
 	}
+	notice.NoticeContent = htmlx.SanitizeQuill(notice.NoticeContent)
 	return notice, nil
 }
 
@@ -55,6 +64,7 @@ func CreateNotice(ctx context.Context, notice *model.SysNotice, operator string)
 	}
 	notice.CreateBy = operator
 	notice.CreateTime = types.Now()
+	notice.NoticeContent = htmlx.SanitizeQuill(notice.NoticeContent)
 	return repository.InsertNotice(ctx, notice)
 }
 
@@ -73,6 +83,7 @@ func UpdateNotice(ctx context.Context, notice *model.SysNotice, operator string)
 
 	notice.UpdateBy = operator
 	notice.UpdateTime = types.Now()
+	notice.NoticeContent = htmlx.SanitizeQuill(notice.NoticeContent)
 	return repository.UpdateNotice(ctx, notice)
 }
 

@@ -7,11 +7,14 @@ import (
 	"ruoyi-go/internal/job"
 	"ruoyi-go/internal/model"
 	"ruoyi-go/internal/repository"
+	"ruoyi-go/pkg/asyncx"
 	"ruoyi-go/pkg/cronx"
 	"ruoyi-go/pkg/errs"
 	"ruoyi-go/pkg/page"
 	"ruoyi-go/pkg/types"
 )
+
+var manualJobPool = asyncx.NewPool(4, 64)
 
 // ListJobPage 分页查询定时任务。
 func ListJobPage(ctx context.Context, query model.JobQuery, pg page.Query) ([]model.SysJob, int64, error) {
@@ -25,7 +28,7 @@ func ListJobPage(ctx context.Context, query model.JobQuery, pg page.Query) ([]mo
 
 // ListJobExport 导出用的全量查询。
 func ListJobExport(ctx context.Context, query model.JobQuery) ([]model.SysJob, error) {
-	list, err := repository.SelectJobList(ctx, query)
+	list, err := repository.SelectJobList(ctx, query, MaxExportRows+1)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +139,9 @@ func RunJobOnce(ctx context.Context, jobID int64) error {
 	}
 
 	snapshot := *target
-	go execute(&snapshot)
+	if !manualJobPool.Submit(func() { execute(&snapshot) }) {
+		return errs.New("任务执行队列繁忙，请稍后再试")
+	}
 	return nil
 }
 

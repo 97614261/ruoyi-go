@@ -22,7 +22,7 @@ func ListPostAll(ctx context.Context) ([]model.SysPost, error) {
 
 // ListPostExport 按查询条件取全部匹配数据，供导出使用。
 func ListPostExport(ctx context.Context, query model.PostQuery) ([]model.SysPost, error) {
-	list, err := repository.SelectPostList(ctx, query)
+	list, err := repository.SelectPostList(ctx, query, MaxExportRows+1)
 	if err != nil {
 		return nil, err
 	}
@@ -83,19 +83,17 @@ func DeletePosts(ctx context.Context, postIDs []int64) error {
 	if len(postIDs) == 0 {
 		return errs.New("请选择要删除的岗位")
 	}
-	for _, id := range postIDs {
-		post, err := repository.SelectPostByID(ctx, id)
-		if err != nil {
-			return err
-		}
-		if post == nil {
-			continue
-		}
-		count, err := repository.CountUserPostByPostID(ctx, id)
-		if err != nil {
-			return err
-		}
-		if count > 0 {
+	var err error
+	postIDs, err = normalizeRelationIDs(postIDs, "岗位")
+	if err != nil {
+		return err
+	}
+	posts, counts, err := repository.SelectPostsForDelete(ctx, postIDs)
+	if err != nil {
+		return err
+	}
+	for _, post := range posts {
+		if counts[post.PostID] > 0 {
 			return errs.Newf("%s已分配,不能删除", post.PostName)
 		}
 	}

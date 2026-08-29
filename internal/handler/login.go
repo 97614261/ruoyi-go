@@ -111,9 +111,12 @@ func GetInfo(c *gin.Context) {
 
 	// 权限有变化时刷新会话，让改权限后立即生效（对齐 Java 版行为）
 	if !sameStrings(permissions, loginUser.Permissions) {
-		loginUser.Permissions = permissions
-		if err := service.RefreshToken(ctx, loginUser); err != nil {
+		if err := service.RefreshLoginUserPermissions(ctx, loginUser); err != nil {
 			slog.Warn("刷新权限缓存失败", "userId", loginUser.UserID, "err", err)
+		} else {
+			user = loginUser.User
+			roles = service.GetRolePermission(user)
+			permissions = loginUser.Permissions
 		}
 	}
 

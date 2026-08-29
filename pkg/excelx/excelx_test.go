@@ -2,6 +2,7 @@ package excelx
 
 import (
 	"bytes"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -171,6 +172,14 @@ func TestImportFatalAndBoundaryCases(t *testing.T) {
 		rows, rowErrors, err := Import[unsupported](bytes.NewReader(data), "")
 		if err != nil || len(rows) != 0 || len(rowErrors) != 1 || !strings.Contains(rowErrors[0].Msg, "不支持的字段类型 slice") {
 			t.Fatalf("rows=%#v rowErrors=%#v err=%v", rows, rowErrors, err)
+		}
+	})
+	t.Run("non-blank row limit includes invalid rows", func(t *testing.T) {
+		data := workbookBytes(t, "数据", [][]any{{"编号"}, {"bad"}, {"2"}})
+		_, _, err := Import[importFixture](bytes.NewReader(data), "", 1)
+		var limitErr RowLimitError
+		if !errors.As(err, &limitErr) || limitErr.Limit != 1 {
+			t.Fatalf("invalid rows must count toward limit, err=%v", err)
 		}
 	})
 }

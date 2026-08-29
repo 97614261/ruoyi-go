@@ -109,7 +109,7 @@ func UpdateProfilePwd(ctx context.Context, userID int64, oldPassword, newPasswor
 	if err := repository.ResetUserPwd(ctx, userID, hashed, user.UserName, time.Now()); err != nil {
 		return err
 	}
-	return RefreshOnlineUserByID(ctx, userID)
+	return RevokeUserSessions(ctx, userID)
 }
 
 // UnlockScreen 校验锁屏密码。
@@ -138,10 +138,25 @@ func UnlockScreen(ctx context.Context, userID int64, password string) error {
 	return nil
 }
 
-// UpdateAvatar 保存头像地址。
-func UpdateAvatar(ctx context.Context, userID int64, avatar string) error {
-	if err := repository.UpdateUserAvatar(ctx, userID, avatar); err != nil {
-		return err
+// AvatarUpdateResult 区分数据库是否已经接受新头像，供调用方正确回收文件。
+type AvatarUpdateResult struct {
+	OldAvatar string
+	Persisted bool
+}
+
+// UpdateAvatar 保存头像地址，并返回被替换的旧头像。
+func UpdateAvatar(ctx context.Context, userID int64, avatar string) (AvatarUpdateResult, error) {
+	oldAvatar, found, err := repository.ReplaceUserAvatar(ctx, userID, avatar)
+	if err != nil {
+		return AvatarUpdateResult{}, err
 	}
-	return RefreshOnlineUserByID(ctx, userID)
+	if !found {
+		return AvatarUpdateResult{}, errs.New("用户不存在")
+	}
+
+	result := AvatarUpdateResult{OldAvatar: oldAvatar, Persisted: true}
+	if err := RefreshOnlineUserByID(ctx, userID); err != nil {
+		return result, err
+	}
+	return result, nil
 }

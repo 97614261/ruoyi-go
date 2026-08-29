@@ -37,9 +37,9 @@ func SelectPostPage(ctx context.Context, query model.PostQuery, pg page.Query) (
 }
 
 // SelectPostList 不分页查询，供导出使用。
-func SelectPostList(ctx context.Context, query model.PostQuery) ([]model.SysPost, error) {
+func SelectPostList(ctx context.Context, query model.PostQuery, limit ...int) ([]model.SysPost, error) {
 	var list []model.SysPost
-	err := postFilter(DB(ctx).Model(&model.SysPost{}), query).
+	err := applyOptionalLimit(postFilter(DB(ctx).Model(&model.SysPost{}), query), limit).
 		Find(&list).Error
 	if err != nil {
 		return nil, fmt.Errorf("查询岗位列表失败: %w", err)
@@ -111,11 +111,14 @@ func UpdatePost(ctx context.Context, post *model.SysPost) error {
 		updates["remark"] = *post.Remark
 	}
 
-	err := DB(ctx).Model(&model.SysPost{}).
+	result := DB(ctx).Model(&model.SysPost{}).
 		Where("post_id = ?", post.PostID).
-		Updates(updates).Error
-	if err != nil {
-		return fmt.Errorf("更新岗位 %d 失败: %w", post.PostID, err)
+		Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("更新岗位 %d 失败: %w", post.PostID, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("更新岗位 %d 失败: 岗位不存在", post.PostID)
 	}
 	return nil
 }

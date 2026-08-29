@@ -36,7 +36,7 @@ func ListRolePage(ctx context.Context, user *model.SysUser, query model.RoleQuer
 
 // ListRoleExport 导出用的全量查询。
 func ListRoleExport(ctx context.Context, user *model.SysUser, query model.RoleQuery) ([]model.SysRole, error) {
-	list, err := repository.SelectRoleList(ctx, query, roleScope(user))
+	list, err := repository.SelectRoleList(ctx, query, roleScope(user), MaxExportRows+1)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,12 @@ func CheckRoleDataScope(ctx context.Context, user *model.SysUser, roleID int64) 
 }
 
 // CreateRole 新增角色。
-func CreateRole(ctx context.Context, role *model.SysRole, operator string) error {
+func CreateRole(ctx context.Context, user *model.SysUser, role *model.SysRole, operator string) error {
+	menuIDs, err := checkMenuIDsForUser(ctx, user, role.MenuIDs)
+	if err != nil {
+		return err
+	}
+	role.MenuIDs = menuIDs
 	if err := checkRoleUnique(ctx, role, "新增"); err != nil {
 		return err
 	}
@@ -115,6 +120,11 @@ func UpdateRole(ctx context.Context, user *model.SysUser, role *model.SysRole, o
 	if err := CheckRoleDataScope(ctx, user, role.RoleID); err != nil {
 		return err
 	}
+	menuIDs, err := checkMenuIDsForUser(ctx, user, role.MenuIDs)
+	if err != nil {
+		return err
+	}
+	role.MenuIDs = menuIDs
 	if err := checkRoleUnique(ctx, role, "修改"); err != nil {
 		return err
 	}
@@ -161,6 +171,11 @@ func AuthDataScope(ctx context.Context, user *model.SysUser, body model.RoleData
 	if err := CheckRoleDataScope(ctx, user, body.RoleID); err != nil {
 		return err
 	}
+	deptIDs, err := checkDeptIDs(ctx, user, body.DeptIDs)
+	if err != nil {
+		return err
+	}
+	body.DeptIDs = deptIDs
 
 	role := &model.SysRole{
 		RoleID:            body.RoleID,
@@ -181,25 +196,22 @@ func DeleteRoles(ctx context.Context, user *model.SysUser, roleIDs []int64) erro
 	if len(roleIDs) == 0 {
 		return errs.New("请选择要删除的角色")
 	}
+	var err error
+	roleIDs, err = checkRoleIDs(ctx, user, roleIDs)
+	if err != nil {
+		return err
+	}
 	for _, roleID := range roleIDs {
 		if err := CheckRoleAllowed(roleID); err != nil {
 			return err
 		}
-		if err := CheckRoleDataScope(ctx, user, roleID); err != nil {
-			return err
-		}
-		role, err := repository.SelectRoleByID(ctx, roleID)
-		if err != nil {
-			return err
-		}
-		if role == nil {
-			continue
-		}
-		count, err := repository.CountUserRoleByRoleID(ctx, roleID)
-		if err != nil {
-			return err
-		}
-		if count > 0 {
+	}
+	roles, counts, err := repository.SelectRolesForDelete(ctx, roleIDs)
+	if err != nil {
+		return err
+	}
+	for _, role := range roles {
+		if counts[role.RoleID] > 0 {
 			return errs.Newf("%s已分配,不能删除", role.RoleName)
 		}
 	}
@@ -209,6 +221,9 @@ func DeleteRoles(ctx context.Context, user *model.SysUser, roleIDs []int64) erro
 // ListAuthUserPage 查角色的已分配/未分配用户。
 func ListAuthUserPage(ctx context.Context, operator *model.SysUser, roleID int64,
 	query model.UserQuery, pg page.Query, allocated bool) ([]model.SysUser, int64, error) {
+	if err := CheckRoleDataScope(ctx, operator, roleID); err != nil {
+		return nil, 0, err
+	}
 	return repository.SelectAuthUserPage(ctx, roleID, query, pg, allocated, userScope(operator))
 }
 
@@ -222,6 +237,11 @@ func CancelAuthUser(ctx context.Context, operator *model.SysUser, roleID int64, 
 	}
 	if len(userIDs) == 0 {
 		return errs.New("请选择要取消授权的用户")
+	}
+	var err error
+	userIDs, err = checkUserIDs(ctx, operator, userIDs)
+	if err != nil {
+		return err
 	}
 	if err := repository.DeleteUserRole(ctx, roleID, userIDs); err != nil {
 		return err
@@ -240,26 +260,29 @@ func GrantAuthUser(ctx context.Context, operator *model.SysUser, roleID int64, u
 	if len(userIDs) == 0 {
 		return errs.New("请选择要授权的用户")
 	}
+	var err error
+	userIDs, err = checkUserIDs(ctx, operator, userIDs)
+	if err != nil {
+		return err
+	}
 	if err := repository.InsertUserRole(ctx, roleID, userIDs); err != nil {
 		return err
 	}
 	return refreshUsers(ctx, userIDs)
 }
 
-// refreshUsers 批量刷新在线会话，单个失败不影响其余。
+// refreshUsers 按用户会话索引批量刷新在线会话。
 func refreshUsers(ctx context.Context, userIDs []int64) error {
-	for _, userID := range userIDs {
-		if err := RefreshOnlineUserByID(ctx, userID); err != nil {
-			return err
-		}
-	}
-	return nil
+	return RefreshOnlineUsersByID(ctx, userIDs...)
 }
 
 // RoleDeptTree 返回部门树和该角色已选中的部门 ID。
 //
 // 对应 /system/role/deptTree/{roleId}，响应是平铺的 depts + checkedKeys。
 func RoleDeptTree(ctx context.Context, user *model.SysUser, roleID int64) ([]model.TreeSelect, []int64, error) {
+	if err := CheckRoleDataScope(ctx, user, roleID); err != nil {
+		return nil, nil, err
+	}
 	role, err := repository.SelectRoleByID(ctx, roleID)
 	if err != nil {
 		return nil, nil, err
@@ -275,10 +298,17 @@ func RoleDeptTree(ctx context.Context, user *model.SysUser, roleID int64) ([]mod
 	if err != nil {
 		return nil, nil, err
 	}
-	if checkedKeys == nil {
-		checkedKeys = []int64{}
+	visible := make(map[int64]struct{}, len(depts))
+	for _, dept := range depts {
+		visible[dept.DeptID] = struct{}{}
 	}
-	return BuildDeptTreeSelect(depts), checkedKeys, nil
+	filteredKeys := make([]int64, 0, len(checkedKeys))
+	for _, id := range checkedKeys {
+		if _, ok := visible[id]; ok {
+			filteredKeys = append(filteredKeys, id)
+		}
+	}
+	return BuildDeptTreeSelect(depts), filteredKeys, nil
 }
 
 // BuildDeptTreeSelect 把部门列表组装成前端树选择组件要的结构。

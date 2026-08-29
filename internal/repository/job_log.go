@@ -65,9 +65,9 @@ func SelectJobLogPage(ctx context.Context, query model.JobLogQuery, pg page.Quer
 }
 
 // SelectJobLogList 不分页查询，供导出使用。
-func SelectJobLogList(ctx context.Context, query model.JobLogQuery) ([]model.SysJobLog, error) {
+func SelectJobLogList(ctx context.Context, query model.JobLogQuery, limit ...int) ([]model.SysJobLog, error) {
 	var list []model.SysJobLog
-	if err := jobLogListDB(ctx, query).Order("job_log_id DESC").Find(&list).Error; err != nil {
+	if err := applyOptionalLimit(jobLogListDB(ctx, query), limit).Order("job_log_id DESC").Find(&list).Error; err != nil {
 		return nil, fmt.Errorf("查询调度日志列表失败: %w", err)
 	}
 	return list, nil

@@ -21,7 +21,7 @@ func ListLogininforPage(ctx context.Context, query model.LogininforQuery, pg pag
 
 // ListLogininforExport 导出用的全量查询。
 func ListLogininforExport(ctx context.Context, query model.LogininforQuery) ([]model.SysLogininfor, error) {
-	list, err := repository.SelectLogininforList(ctx, query)
+	list, err := repository.SelectLogininforList(ctx, query, MaxExportRows+1)
 	if err != nil {
 		return nil, err
 	}
@@ -68,6 +68,15 @@ func UnlockAccount(ctx context.Context, userName string) error {
 	if userName == "" {
 		return errs.New("用户账号不能为空")
 	}
+	// 与登录使用同一套规范账号规则：在大小写不敏感的数据库中，
+	// 用 ADMIN 发起解锁也要删掉实际账号 admin 对应的计数键。
+	user, err := repository.SelectUserAccountByUserName(ctx, userName)
+	if err != nil {
+		return err
+	}
+	if user != nil {
+		userName = user.UserName
+	}
 	if err := redisx.C().Del(ctx, redisx.PwdErrCntKey(userName)).Err(); err != nil {
 		return errs.Wrap(err, "解锁账号失败")
 	}
@@ -83,7 +92,7 @@ func ListOperLogPage(ctx context.Context, query model.OperLogQuery, pg page.Quer
 
 // ListOperLogExport 导出用的全量查询。
 func ListOperLogExport(ctx context.Context, query model.OperLogQuery) ([]model.SysOperLog, error) {
-	list, err := repository.SelectOperLogList(ctx, query)
+	list, err := repository.SelectOperLogList(ctx, query, MaxExportRows+1)
 	if err != nil {
 		return nil, err
 	}

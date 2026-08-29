@@ -57,7 +57,9 @@ func NoticeGet(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	notice, err := service.GetNotice(c.Request.Context(), id)
+	loginUser := middleware.CurrentUser(c)
+	includeDraft := loginUser != nil && loginUser.HasPermission("system:notice:query")
+	notice, err := service.GetNotice(c.Request.Context(), id, includeDraft)
 	if err != nil {
 		fail(c, err)
 		return

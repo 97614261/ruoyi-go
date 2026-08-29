@@ -25,11 +25,18 @@ type RowError struct {
 
 func (e RowError) Error() string { return fmt.Sprintf("第 %d 行：%s", e.Row, e.Msg) }
 
+// RowLimitError indicates that the number of non-empty business rows exceeded the caller's cap.
+type RowLimitError struct {
+	Limit int
+}
+
+func (e RowLimitError) Error() string { return fmt.Sprintf("数据行超过上限 %d", e.Limit) }
+
 // Import 解析 xlsx 为结构体切片。
 //
 // 按表头名称匹配 excel tag 的 name，列顺序无所谓，多余的列忽略。
 // 返回解析成功的行、逐行错误、以及致命错误（文件打不开等）。
-func Import[T any](r io.Reader, sheetName string) ([]T, []RowError, error) {
+func Import[T any](r io.Reader, sheetName string, rowLimit ...int) ([]T, []RowError, error) {
 	file, err := excelize.OpenReader(r)
 	if err != nil {
 		return nil, nil, fmt.Errorf("打开 Excel 失败: %w", err)
@@ -44,15 +51,11 @@ func Import[T any](r io.Reader, sheetName string) ([]T, []RowError, error) {
 		sheetName = sheets[0]
 	}
 
-	rows, err := file.GetRows(sheetName)
+	rows, err := file.Rows(sheetName)
 	if err != nil {
 		return nil, nil, fmt.Errorf("读取工作表 %s 失败: %w", sheetName, err)
 	}
-	if len(rows) < 2 {
-		// 只有表头仍是合法工作簿。交给业务层区分“文件损坏”和“没有业务
-		// 数据”，这样用户导入接口能与 Java 一样返回明确的空数据提示。
-		return []T{}, nil, nil
-	}
+	defer rows.Close()
 
 	var sample T
 	elemType := reflect.TypeOf(sample)
@@ -64,19 +67,44 @@ func Import[T any](r io.Reader, sheetName string) ([]T, []RowError, error) {
 	}
 	columns := filterColumns(parseColumns(elemType), column.forImport)
 
+	if !rows.Next() {
+		if err := rows.Error(); err != nil {
+			return nil, nil, fmt.Errorf("读取工作表 %s 失败: %w", sheetName, err)
+		}
+		return []T{}, nil, nil
+	}
+	header, err := rows.Columns()
+	if err != nil {
+		return nil, nil, fmt.Errorf("读取工作表 %s 表头失败: %w", sheetName, err)
+	}
+
 	// 表头名 -> 列下标
-	headerIndex := make(map[string]int, len(rows[0]))
-	for i, name := range rows[0] {
+	headerIndex := make(map[string]int, len(header))
+	for i, name := range header {
 		headerIndex[strings.TrimSpace(name)] = i
 	}
 
-	result := make([]T, 0, len(rows)-1)
+	result := make([]T, 0)
 	var rowErrors []RowError
+	nonBlankRows := 0
+	rowNumber := 1
+	limit := 0
+	if len(rowLimit) > 0 {
+		limit = rowLimit[0]
+	}
 
-	for i := 1; i < len(rows); i++ {
-		row := rows[i]
+	for rows.Next() {
+		rowNumber++
+		row, err := rows.Columns()
+		if err != nil {
+			return nil, nil, fmt.Errorf("读取工作表 %s 第 %d 行失败: %w", sheetName, rowNumber, err)
+		}
 		if isBlankRow(row) {
 			continue
+		}
+		nonBlankRows++
+		if limit > 0 && nonBlankRows > limit {
+			return nil, nil, RowLimitError{Limit: limit}
 		}
 
 		item := reflect.New(elemType).Elem()
@@ -92,10 +120,13 @@ func Import[T any](r io.Reader, sheetName string) ([]T, []RowError, error) {
 			}
 		}
 		if rowErr != nil {
-			rowErrors = append(rowErrors, RowError{Row: i + 1, Msg: rowErr.Error()})
+			rowErrors = append(rowErrors, RowError{Row: rowNumber, Msg: rowErr.Error()})
 			continue
 		}
 		result = append(result, item.Interface().(T))
+	}
+	if err := rows.Error(); err != nil {
+		return nil, nil, fmt.Errorf("读取工作表 %s 失败: %w", sheetName, err)
 	}
 	return result, rowErrors, nil
 }

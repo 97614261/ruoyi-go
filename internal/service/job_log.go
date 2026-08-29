@@ -16,7 +16,7 @@ func ListJobLogPage(ctx context.Context, query model.JobLogQuery, pg page.Query)
 
 // ListJobLogExport 导出用的全量查询。
 func ListJobLogExport(ctx context.Context, query model.JobLogQuery) ([]model.SysJobLog, error) {
-	list, err := repository.SelectJobLogList(ctx, query)
+	list, err := repository.SelectJobLogList(ctx, query, MaxExportRows+1)
 	if err != nil {
 		return nil, err
 	}

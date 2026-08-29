@@ -38,6 +38,8 @@ func New(cfg *config.Config) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
 
 	r := gin.New()
+	// 空列表表示不信任任何代理头；只有显式配置的反向代理才能影响 ClientIP。
+	_ = r.SetTrustedProxies(cfg.Server.TrustedProxies)
 	// 限制 multipart 解析占用的内存，超出部分落临时文件。
 	// 不设的话 gin 默认 32MB，配合导入这类要全量解析的接口很容易被打爆。
 	r.MaxMultipartMemory = cfg.Upload.MaxSizeMB << 20
@@ -47,7 +49,15 @@ func New(cfg *config.Config) *gin.Engine {
 	middleware.InitExportLimit(service.MaxConcurrentExports)
 	// Trace 必须排第一：排在 Recovery 后面的话，panic 那条日志就没有 traceId，
 	// 而那恰恰是最需要能追溯的一条
-	r.Use(middleware.Trace(), middleware.Recovery(), middleware.Logger(), middleware.CORS())
+	r.Use(
+		middleware.Trace(),
+		middleware.Recovery(),
+		middleware.Logger(),
+		middleware.CORS(),
+		middleware.RequestTimeout(cfg.Server.RequestTimeout),
+		middleware.RequestBodyLimit(cfg.Server.MaxRequestBodyMB<<20),
+		middleware.MultipartBodyLimit(cfg.Upload.MaxRequestSizeMB<<20, cfg.Upload.MaxSizeMB<<20),
+	)
 
 	// 健康检查，不鉴权。真去 ping MySQL 和 Redis，依赖挂了返回 503
 	r.GET("/health", handler.Health)

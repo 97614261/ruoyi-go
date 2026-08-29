@@ -64,9 +64,9 @@ func SelectDictDataPage(ctx context.Context, query model.DictDataQuery, pg page.
 }
 
 // SelectDictDataList 不分页查询，供导出使用。
-func SelectDictDataList(ctx context.Context, query model.DictDataQuery) ([]model.SysDictData, error) {
+func SelectDictDataList(ctx context.Context, query model.DictDataQuery, limit ...int) ([]model.SysDictData, error) {
 	var list []model.SysDictData
-	err := dictDataFilter(DB(ctx).Model(&model.SysDictData{}), query).
+	err := applyOptionalLimit(dictDataFilter(DB(ctx).Model(&model.SysDictData{}), query), limit).
 		Order("dict_sort").Find(&list).Error
 	if err != nil {
 		return nil, fmt.Errorf("查询字典数据失败: %w", err)
@@ -200,9 +200,9 @@ func SelectDictTypePage(ctx context.Context, query model.DictTypeQuery, pg page.
 }
 
 // SelectDictTypeList 不分页查询，供导出使用。
-func SelectDictTypeList(ctx context.Context, query model.DictTypeQuery) ([]model.SysDictType, error) {
+func SelectDictTypeList(ctx context.Context, query model.DictTypeQuery, limit ...int) ([]model.SysDictType, error) {
 	var list []model.SysDictType
-	err := dictTypeFilter(DB(ctx).Model(&model.SysDictType{}), query).
+	err := applyOptionalLimit(dictTypeFilter(DB(ctx).Model(&model.SysDictType{}), query), limit).
 		Order("dict_id").Find(&list).Error
 	if err != nil {
 		return nil, fmt.Errorf("查询字典类型失败: %w", err)

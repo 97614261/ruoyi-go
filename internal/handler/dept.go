@@ -71,7 +71,7 @@ func DeptAdd(c *gin.Context) {
 		response.Fail(c, bindMessage(err))
 		return
 	}
-	if err := service.CreateDept(c.Request.Context(), &dept, currentUsername(c)); err != nil {
+	if err := service.CreateDept(c.Request.Context(), currentUser(c), &dept, currentUsername(c)); err != nil {
 		fail(c, err)
 		return
 	}
@@ -99,7 +99,7 @@ func DeptUpdateSort(c *gin.Context) {
 		response.Fail(c, bindMessage(err))
 		return
 	}
-	if err := service.UpdateDeptSort(c.Request.Context(), body); err != nil {
+	if err := service.UpdateDeptSort(c.Request.Context(), currentUser(c), body); err != nil {
 		fail(c, err)
 		return
 	}

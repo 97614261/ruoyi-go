@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"log/slog"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -119,9 +121,30 @@ func ProfileAvatar(c *gin.Context) {
 		return
 	}
 
-	if err := service.UpdateAvatar(c.Request.Context(), loginUser.UserID, url); err != nil {
+	update, err := service.UpdateAvatar(c.Request.Context(), loginUser.UserID, url)
+	reconcileAvatarFiles(c.Request.Context(), url, update)
+	if err != nil {
 		fail(c, err)
 		return
 	}
 	response.New(response.CodeSuccess, response.MsgSuccess).Put("imgUrl", url).JSON(c)
+}
+
+// reconcileAvatarFiles 以数据库提交结果决定回收新文件还是旧文件。
+// 清理失败不能把已经提交的头像更新伪装成失败或回滚成功响应，只记录日志待排查。
+func reconcileAvatarFiles(ctx context.Context, newAvatar string, update service.AvatarUpdateResult) {
+	target, action := newAvatar, "回收未入库的新头像"
+	if update.Persisted {
+		target, action = update.OldAvatar, "删除已替换的旧头像"
+		if target == newAvatar {
+			return
+		}
+	}
+	if target == "" {
+		return
+	}
+
+	if _, err := upload.RemoveManagedFile(uploadCfg.Path, uploadCfg.URLPrefix, "avatar", target); err != nil {
+		slog.WarnContext(ctx, action+"失败", "resource", target, "err", err)
+	}
 }

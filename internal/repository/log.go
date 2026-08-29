@@ -53,9 +53,9 @@ func SelectLogininforPage(ctx context.Context, query model.LogininforQuery, pg p
 }
 
 // SelectLogininforList 不分页查询，供导出使用。
-func SelectLogininforList(ctx context.Context, query model.LogininforQuery) ([]model.SysLogininfor, error) {
+func SelectLogininforList(ctx context.Context, query model.LogininforQuery, limit ...int) ([]model.SysLogininfor, error) {
 	var list []model.SysLogininfor
-	err := logininforFilter(DB(ctx).Model(&model.SysLogininfor{}), query).
+	err := applyOptionalLimit(logininforFilter(DB(ctx).Model(&model.SysLogininfor{}), query), limit).
 		Order("info_id DESC").Find(&list).Error
 	if err != nil {
 		return nil, fmt.Errorf("查询登录日志失败: %w", err)
@@ -139,9 +139,9 @@ func SelectOperLogPage(ctx context.Context, query model.OperLogQuery, pg page.Qu
 }
 
 // SelectOperLogList 不分页查询，供导出使用。
-func SelectOperLogList(ctx context.Context, query model.OperLogQuery) ([]model.SysOperLog, error) {
+func SelectOperLogList(ctx context.Context, query model.OperLogQuery, limit ...int) ([]model.SysOperLog, error) {
 	var list []model.SysOperLog
-	err := operLogFilter(DB(ctx).Model(&model.SysOperLog{}), query).
+	err := applyOptionalLimit(operLogFilter(DB(ctx).Model(&model.SysOperLog{}), query), limit).
 		Order("oper_id DESC").Find(&list).Error
 	if err != nil {
 		return nil, fmt.Errorf("查询操作日志失败: %w", err)

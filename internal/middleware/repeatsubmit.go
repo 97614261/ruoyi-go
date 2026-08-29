@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -66,26 +65,21 @@ func RepeatSubmit(interval time.Duration) gin.HandlerFunc {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), repeatSubmitTimeout)
 		defer cancel()
 
-		previous, err := redisx.C().Get(ctx, key).Result()
-		if err != nil && !redisx.IsNil(err) {
-			slog.ErrorContext(ctx, "防重复提交查询失败，本次放行", "err", err)
+		// Lua 原子保持原语义：相同指纹拦截；不同指纹覆盖最近记录并重新计时。
+		repeated, err := redisx.CheckRepeatSubmit(ctx, key, fingerprint, interval)
+		if err != nil {
+			slog.ErrorContext(ctx, "防重复提交原子判定失败，本次放行", "err", err)
 			c.Next()
 			return
 		}
 
-		if previous == fingerprint {
+		if repeated {
 			slog.WarnContext(ctx, "拦截重复提交",
 				"method", c.Request.Method, "path", c.Request.URL.Path, "clientIP", c.ClientIP())
 			// 文案与 Java 版 RepeatSubmitInterceptor 一致
 			response.Fail(c, "不允许重复提交，请稍候再试")
 			c.Abort()
 			return
-		}
-
-		// 参数不同也要覆盖并续期：Java 版就是这个语义，
-		// 相当于"最近一次提交"的滑动记录
-		if err := redisx.C().Set(ctx, key, fingerprint, interval).Err(); err != nil {
-			slog.ErrorContext(ctx, "防重复提交写入失败", "err", err)
 		}
 		c.Next()
 	}
@@ -97,7 +91,7 @@ func RepeatSubmit(interval time.Duration) gin.HandlerFunc {
 func requestFingerprint(c *gin.Context) (string, bool) {
 	contentType := c.GetHeader("Content-Type")
 	// 文件上传不判重：整个文件读进内存代价太大，而且同名文件重传通常是合法操作
-	if len(contentType) >= 19 && contentType[:19] == "multipart/form-data" {
+	if isMultipartRequest(contentType) {
 		return "", false
 	}
 
@@ -105,18 +99,23 @@ func requestFingerprint(c *gin.Context) (string, bool) {
 		// 没有请求体时用查询串当指纹，否则所有无参 POST 会互相误判
 		return hash(c.Request.URL.RawQuery), true
 	}
-
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		return "", false
+	if body, ok := cachedRequestBody(c); ok {
+		return hashRequest(c.Request.URL.RawQuery, body), true
 	}
-	// 读完必须放回去，否则后面的 handler 拿到空 body
-	c.Request.Body = io.NopCloser(bytes.NewReader(body))
 
-	return hash(c.Request.URL.RawQuery + "|" + string(body)), true
+	// 没经过入口限制就不读取，避免独立装配时重新引入无上限 io.ReadAll。
+	return "", false
 }
 
 func hash(text string) string {
 	sum := sha256.Sum256([]byte(text))
 	return hex.EncodeToString(sum[:16])
+}
+
+func hashRequest(rawQuery string, body []byte) string {
+	digest := sha256.New()
+	_, _ = io.WriteString(digest, rawQuery)
+	_, _ = digest.Write([]byte{'|'})
+	_, _ = digest.Write(body)
+	return hex.EncodeToString(digest.Sum(nil)[:16])
 }

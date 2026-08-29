@@ -21,6 +21,19 @@ import (
 // Java 版用一条大 join + 嵌套 resultMap 拼装，这里拆成 3 条固定查询，
 // 语义相同但更直观（不是 N+1，条数与用户数无关）。
 func SelectUserByUserName(ctx context.Context, userName string) (*model.SysUser, error) {
+	user, err := SelectUserAccountByUserName(ctx, userName)
+	if err != nil || user == nil {
+		return user, err
+	}
+	if err := fillUserRelations(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+// SelectUserAccountByUserName 只读取账号表，不加载部门和角色。
+// 登录在密码校验成功后会按 ID 复核并加载关系；锁定状态下不应为每次尝试额外查关系表。
+func SelectUserAccountByUserName(ctx context.Context, userName string) (*model.SysUser, error) {
 	var user model.SysUser
 	err := DB(ctx).
 		Where("user_name = ?", userName).
@@ -31,10 +44,6 @@ func SelectUserByUserName(ctx context.Context, userName string) (*model.SysUser,
 	}
 	if err != nil {
 		return nil, fmt.Errorf("查询用户 %s 失败: %w", userName, err)
-	}
-
-	if err := fillUserRelations(ctx, &user); err != nil {
-		return nil, err
 	}
 	return &user, nil
 }
@@ -173,9 +182,9 @@ func SelectUserPage(ctx context.Context, query model.UserQuery, pg page.Query, s
 //
 // 同样不加 DISTINCT，理由见 SelectUserPage。导出的行数更多，
 // 临时表的代价也更大。
-func SelectUserList(ctx context.Context, query model.UserQuery, scope func(*gorm.DB) *gorm.DB) ([]model.SysUser, error) {
+func SelectUserList(ctx context.Context, query model.UserQuery, scope func(*gorm.DB) *gorm.DB, limit ...int) ([]model.SysUser, error) {
 	var list []model.SysUser
-	err := userListDB(ctx, query, scope).
+	err := applyOptionalLimit(userListDB(ctx, query, scope), limit).
 		Select("u.*").
 		Order("u.user_id").
 		Find(&list).Error
@@ -429,11 +438,14 @@ func UpdateUserBasic(ctx context.Context, user *model.SysUser) error {
 
 // UpdateUserStatus 只改状态。
 func UpdateUserStatus(ctx context.Context, userID int64, status, operator string) error {
-	err := DB(ctx).Model(&model.SysUser{}).
+	result := DB(ctx).Model(&model.SysUser{}).
 		Where("user_id = ?", userID).
-		Updates(map[string]any{"status": status, "update_by": operator}).Error
-	if err != nil {
-		return fmt.Errorf("更新用户 %d 状态失败: %w", userID, err)
+		Updates(map[string]any{"status": status, "update_by": operator})
+	if result.Error != nil {
+		return fmt.Errorf("更新用户 %d 状态失败: %w", userID, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("更新用户 %d 状态失败: 用户不存在", userID)
 	}
 	return nil
 }
@@ -443,16 +455,19 @@ func UpdateUserStatus(ctx context.Context, userID int64, status, operator string
 // pwd_update_date 必须一起更新，否则"初始密码提醒""密码过期"这两个
 // 策略会一直按旧时间判断。
 func ResetUserPwd(ctx context.Context, userID int64, hashed, operator string, at time.Time) error {
-	err := DB(ctx).Model(&model.SysUser{}).
+	result := DB(ctx).Model(&model.SysUser{}).
 		Where("user_id = ?", userID).
 		Updates(map[string]any{
 			"password":        hashed,
 			"pwd_update_date": at,
 			"update_time":     at,
 			"update_by":       operator,
-		}).Error
-	if err != nil {
-		return fmt.Errorf("重置用户 %d 密码失败: %w", userID, err)
+		})
+	if result.Error != nil {
+		return fmt.Errorf("重置用户 %d 密码失败: %w", userID, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("重置用户 %d 密码失败: 用户不存在", userID)
 	}
 	return nil
 }
@@ -504,15 +519,39 @@ func UpdateUserProfile(ctx context.Context, userID int64, body model.ProfileBody
 	return nil
 }
 
-// UpdateUserAvatar 更新头像地址。
-func UpdateUserAvatar(ctx context.Context, userID int64, avatar string) error {
-	err := DB(ctx).Model(&model.SysUser{}).
-		Where("user_id = ?", userID).
-		Update("avatar", avatar).Error
-	if err != nil {
-		return fmt.Errorf("更新用户 %d 头像失败: %w", userID, err)
-	}
-	return nil
+// ReplaceUserAvatar 锁定用户行、返回当前头像并写入新地址。
+// 行锁保证同一用户并发换头像时，后一请求看到的是前一请求刚写入的头像。
+func ReplaceUserAvatar(ctx context.Context, userID int64, avatar string) (string, bool, error) {
+	var oldAvatar string
+	var found bool
+	err := Transaction(ctx, func(tx *gorm.DB) error {
+		var current struct {
+			Avatar string `gorm:"column:avatar"`
+		}
+		err := tx.Model(&model.SysUser{}).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("avatar").
+			Where("user_id = ?", userID).
+			Where("del_flag = ?", model.DelFlagExist).
+			Take(&current).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("查询用户 %d 当前头像失败: %w", userID, err)
+		}
+
+		if err := tx.Model(&model.SysUser{}).
+			Where("user_id = ?", userID).
+			Where("del_flag = ?", model.DelFlagExist).
+			Update("avatar", avatar).Error; err != nil {
+			return fmt.Errorf("更新用户 %d 头像失败: %w", userID, err)
+		}
+		oldAvatar = current.Avatar
+		found = true
+		return nil
+	})
+	return oldAvatar, found, err
 }
 
 // SelectPostNamesByUserID 查用户的岗位名称列表。

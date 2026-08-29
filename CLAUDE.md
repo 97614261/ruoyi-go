@@ -1,15 +1,71 @@
 # ruoyi-go
 
-用 Go 复刻 RuoYi 后端。**前端和数据库都不动**：
+用 Go 重做 RuoYi 后端。**目标是超越 Java 版**，同时冻结已有消费者依赖的契约面。
 
-- 前端直接用 `../RuoYi-Vue3-master`，一行不改
-- 表结构直接用 `../RuoYi-Vue-master/sql/ry_20260417.sql`，一行不改
-- Go 侧只替换中间层
+## 三层边界（先读这个，再读别的）
 
-所以**接口契约是硬约束，不是参考**。任何"这样设计更合理"的改动，只要前端不认，就是错的。
-参考实现在 `../RuoYi-Vue-master`，行为有疑问时以那份 Java 代码为准。
+**① 冻结层 —— 已有消费者依赖的契约不动**
 
-契约细则见 @docs/CONVENTIONS.md ，历史决议见 @docs/DECISIONS.md ，压测方法见 [docs/PERF.md](./docs/PERF.md)。
+| | 冻结的内容 |
+|---|---|
+| 前端 | `../RuoYi-Vue3-master` 源码一行不改 |
+| 请求 | 路径、HTTP 方法、Content-Type、参数位置、名字、类型，以及前端依赖的必填 / 可选和默认语义 |
+| 响应 | 字段名、是否出现、层级（平铺 vs `data`）、类型、`null` / 空值语义；下载的 Content-Type、Content-Disposition 和二进制格式 |
+| HTTP 状态 | 普通 RuoYi 业务响应保持 200；只保留已登记的 CORS 预检 204、请求体超限 413、健康检查失败 503 |
+| 数据库 | 生产基线的表、列、类型、可空性、默认值、字符集 / collation、约束和索引；运行期业务数据不属于结构冻结 |
+| 契约数据 | 被 Go、Java 参考版、Vue、部署脚本或测试按名字 / 固定 ID 引用的稳定标识符；当前包括 `sys_config.config_key`、`sys_dict_type.dict_type`、`sys_menu.perms`、超级管理员用户 / 角色 ID |
+| Redis | `pkg/redisx/keys.go` 定义的 Key 前缀；部署清理、会话迁移和测试清理按这些前缀定位 |
+
+任何"这样设计更合理"的改动，只要破坏这张表里的既有依赖，就是错的。确需改变时先修改决议、
+调用方和验证口径，不能借"超越 Java"绕过冻结层。
+
+契约数据冻结的是**标识符**，不是运行期配置值。例如
+`sys.account.chrtype`、`sys.account.initPasswordModify`、`sys.account.passwordValidateDays`、
+`sys.account.captchaEnabled`、`sys.account.registerUser`、`sys.user.initPassword`、
+`sys.login.blackIPList` 这些
+`config_key` 不得改名或删行，但对应 `config_value` 可以按运维需要调整。菜单名称、状态可以变，
+被路由权限引用的 `sys_menu.perms` 不能无迁移改名。新增被代码或前端按名字引用的标识符时，
+自动纳入这一层，不以本表是否逐项列出为限。`sys_user.user_id = 1` 和
+`sys_role.role_id = 1` 分别被 `AdminUserID`、`AdminRoleID` 固定引用，同样不得删除、换 ID
+或移作其他实体。
+
+Redis 前缀并非永远不能迁移；但改名必须先登记决议，并同步代码、部署清理、兼容迁移和测试清理，
+不得作为普通内部重构直接修改。
+
+**② 超越层 —— 内部保障应该做得比 Java 好**
+
+不改变冻结契约和正常业务语义的内部实现：
+
+- 安全内部机制：密码与 Token 不落日志、原子验证码 / 错误计数、注入防护；
+- 正确性：并发控制、事务边界、缓存一致性、批量查询；
+- 资源：数据库和 Redis 超时、连接池、内存控制、异步背压；
+- 运维：日志、追踪、指标和不改变既有探针契约的实现优化。
+
+「Java 也是这么写的」**不是免死金牌**。Java 的缺陷照抄过来不叫对齐，叫失职。
+如果加固会改变返回值、行集、顺序或成功 / 失败语义，则还必须经过第三层审查。
+
+**③ 受控差异层 —— 可观察语义改变必须登记**
+
+请求和响应形状保持冻结，但返回值、行集、行序、错误文案或授权结果与 Java 不同，例如：
+逻辑删除过滤、更具体的错误文案、唯一兜底排序、权限收紧、旧会话失效和富文本净化。
+
+允许差异必须同时满足：
+
+1. 有明确的安全或正确性收益，不是个人风格偏好；
+2. 不破坏 Vue、下载工具、运维探针、脚本及其他已知消费者；
+3. 在 `DECISIONS.md` 登记原因、边界和禁止回退项；
+4. 有定向测试，并在 Java / Go 对拍结果中可识别。
+
+「按主键过滤 `del_flag`」「错误文案更具体」「分页补唯一兜底列」都属于这一层，
+不是前端不可见的内部实现。
+
+**Vue 是用户界面兼容性的首要基准，但不是唯一正确性基准。** API 约定、Java 参考实现、
+现有脚本和运维探针，以及认证、授权、数据权限等安全不变量共同决定行为是否正确。
+参考实现在 `../RuoYi-Vue-master`；行为有疑问时先看 Java 怎么做，再判断它做得对不对。
+Java 是参考，不是标准。
+
+契约细则见 @docs/CONVENTIONS.md ，历史决议见 @docs/DECISIONS.md ，部署切换见
+[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)，压测方法见 [docs/PERF.md](./docs/PERF.md)。
 
 ## 技术栈
 

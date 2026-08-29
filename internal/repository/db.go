@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"time"
 
+	drivermysql "github.com/go-sql-driver/mysql"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -28,7 +29,17 @@ func Init(cfg config.MySQLConfig) error {
 		Colorful:                  false,
 	})
 
-	gdb, err := gorm.Open(mysql.Open(cfg.DSN), &gorm.Config{
+	dsn, err := drivermysql.ParseDSN(cfg.DSN)
+	if err != nil {
+		return fmt.Errorf("解析 MySQL DSN 失败: %w", err)
+	}
+	dsn.Timeout = cfg.ConnectTimeout
+	dsn.ReadTimeout = cfg.ReadTimeout
+	dsn.WriteTimeout = cfg.WriteTimeout
+	// RowsAffected 按匹配行而不是实际变化行统计，幂等更新仍能区分“存在”与“不存在”。
+	dsn.ClientFoundRows = true
+
+	gdb, err := gorm.Open(mysql.Open(dsn.FormatDSN()), &gorm.Config{
 		Logger: gormLogger,
 		// 单条写操作不自动开事务，事务边界由 service 层显式控制
 		SkipDefaultTransaction: true,

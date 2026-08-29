@@ -35,13 +35,13 @@ const (
 // SysMenu 菜单表 sys_menu。
 type SysMenu struct {
 	MenuID   int64  `gorm:"column:menu_id;primaryKey;autoIncrement" json:"menuId"`
-	MenuName string `gorm:"column:menu_name" json:"menuName" binding:"notblank,max=50"`
+	MenuName string `gorm:"column:menu_name" json:"menuName" binding:"notblank,xss,max=50"`
 	ParentID int64  `gorm:"column:parent_id" json:"parentId"`
 	// 指针 + required：对齐 Java 的 Integer + @NotNull，同时让 orderNum=0 通过。
 	// 理由详见 SysPost.PostSort 的注释。
 	OrderNum *int `gorm:"column:order_num" json:"orderNum" binding:"required,min=0"`
 	// max=200 跟 Java 的 @Size 走（列长其实是 200）
-	Path string `gorm:"column:path" json:"path" binding:"omitempty,max=200"`
+	Path string `gorm:"column:path" json:"path" binding:"omitempty,xss,max=200"`
 	// Component 可为 NULL（目录通常没有组件）。
 	// Java 的 @Size 写的是 200（提示语里的 255 是它自己写错了），这里跟注解走
 	Component *string `gorm:"column:component" json:"component" binding:"omitempty,max=200"`

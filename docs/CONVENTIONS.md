@@ -332,9 +332,12 @@ HTTP 方法、结构化路径和权限标识，并标注上述探针覆盖。代
 | 200 | 成功 |
 | 401 | 未认证 / token 失效 |
 | 403 | 已认证但无权限 |
+| 413 | 请求体超过入口上限 |
 | 500 | 业务或系统错误 |
 
-**HTTP 状态码一律 200**，错误通过 body 里的 `code` 表达（RuoYi 前端就是这么判断的）。
+普通业务响应的 **HTTP 状态码一律 200**，错误通过 body 里的 `code` 表达（RuoYi 前端
+就是这么判断的）。入口在请求体超过 `server.maxRequestBodyMB` 时返回真实 HTTP 413，
+同时仍输出统一 `{"code":413,"msg":"..."}`；`/health` 依赖异常时返回真实 HTTP 503。
 
 ---
 
@@ -359,6 +362,15 @@ claims = { "login_user_key": "<uuid>", "sub": "<username>" }
 - 请求头：`Authorization: Bearer <token>`
 - 默认有效期 30 分钟；剩余不足 20 分钟时自动续期（刷新 Redis TTL，不换 token）
 - 登出即删除 Redis key
+- 新会话必须同时维护 `login_user_sessions:<userId>` 反向索引和
+  `login_user_generation:<userId>` 会话代数
+- 普通续期只能在 Redis 最新会话上原地更新时间和 TTL，禁止整体写回请求读取的权限快照
+- 权限更新必须比较 `sessionRevision` 和会话代数；冲突后重新读会话、重新查数据库，
+  无法确认最终权限时安全撤销会话
+- 按用户刷新权限和撤销会话只走反向索引，禁止退回 `SCAN login_tokens:*`；过期 token
+  留下的索引成员要清理
+- Java 完全切换到 Go 时如存在旧会话残余，必须按 [DEPLOYMENT.md](./DEPLOYMENT.md)
+  停服并精确清理三个会话前缀；普通重启不得清理
 
 ### 密码
 
@@ -377,6 +389,8 @@ bcrypt，直接沿用 `sys_user.password` 里现有的 hash，**Java 版生成�
 | 前缀 | 用途 |
 |---|---|
 | `login_tokens:` | 登录会话 |
+| `login_user_sessions:` | Go 用户到登录 UUID 的反向索引 |
+| `login_user_generation:` | Go 用户会话撤销代数 |
 | `captcha_codes:` | 验证码，TTL 2 分钟 |
 | `sys_config:` | 参数缓存 |
 | `sys_dict:` | 字典缓存 |
@@ -465,6 +479,10 @@ orderBy := "role_sort"
 加主键兜底会让双端对拍在有并列值时报差异 —— 那是预期的，
 **不要靠去掉兜底列来消差异**。行序不属于接口契约，前端依赖的是字段和结构。
 
+内存分页同样必须先建立包含唯一键的全序，再执行切片；稳定排序不能替代唯一兜底。
+在线用户列表固定使用 `LoginTime DESC, TokenID ASC`，避免 Redis SCAN 输入顺序变化造成
+跨页重复或遗漏。
+
 > 判断 Java 到底有没有排序，要看 **service 转调到哪条 SQL**，不能只看 mapper 里
 > 有没有同名 select。例如 `selectRoleAll()` 转调的是 `selectRoleList`，
 > 那条才带 `order by r.role_sort`。曾经据此误删过排序，而且双端对拍没发现 ——
@@ -492,7 +510,10 @@ orderBy := "role_sort"
 
 多角色取**并集**（Java 端用 `OR` 拼接）。实现放 `pkg/datascope`，返回 GORM Scope，禁止字符串拼 SQL。
 
-> Java 版的"本部门及以下"用 `find_in_set(deptId, ancestors)`，走不了索引。Go 版可以改成 `ancestors LIKE '0,100,%'` 前缀匹配，**但过滤结果必须与 Java 版完全一致**。
+“本部门及以下”继续与 Java 一致使用 `find_in_set`。2026-08-22 在 10 万用户数据下实测，
+改成 `ancestors` 前缀匹配只快 3.6%；去掉真正昂贵的 `DISTINCT` 和无用 JOIN 后，整条查询
+约 1.5ms。没有新的实测证据不得切换实现，详见 [DECISIONS.md](./DECISIONS.md) 2026-08-22
+「补四个索引（推翻 find_in_set 的判断）」决议。
 
 ---
 
@@ -765,3 +786,45 @@ remark       varchar(500) default null
 - 逻辑删除用 `del_flag char(1) default '0'`，`'2'` 表示已删除（RuoYi 的约定）
 - 需要数据权限的表必须有 `dept_id`，需要"仅本人"的必须有 `user_id`
 - 所有查询条件列必须建索引，日志类大表额外考虑按时间分区或定期归档
+
+---
+
+## 十、本地上传文件生命周期
+
+- 文件已经落盘、但数据库引用写入失败时，必须回收本次新文件
+- 替换资源时只能在数据库提交成功后删除旧文件；并发替换需要锁定或等价机制，确保每次
+  删除的是自己真正替换掉的地址
+- 数据库存储的资源地址是不可信输入，删除必须同时校验 URL 前缀、业务子目录和最终磁盘
+  归属；禁止把地址直接拼接后交给 `os.Remove`
+- 外部 URL、其他业务目录、目录本身和中间目录软链接不属于可清理对象，应安全跳过或拒绝
+- 文件系统和数据库不能做原子事务；清理失败记录内部告警并交给后续巡检，不能谎称已经
+  提交的数据库更新被回滚
+
+头像使用 `upload.RemoveManagedFile(upload.path, URLPrefix, "avatar", resource)`；新增其他
+本地资源类型时传各自固定子目录，不能为了复用放宽为整个 `upload.path` 任意删除。
+
+---
+
+## 十一、运行时资源与关联写入
+
+- Gin 的 `ClientIP()` 只能信任 `server.trustedProxies` 显式列出的 IP/CIDR；直连部署保持
+  空列表，经过本机 Nginx 时通常只配置 `127.0.0.1` / `::1`，不能填全网段图省事。
+- `server.maxRequestBodyMB` 管普通 JSON/form；`upload.maxSizeMB` 管单文件；
+  `upload.maxRequestSizeMB` 管 multipart 整个请求，且必须不小于单文件上限。总请求超限
+  使用已登记的 HTTP 413。
+- 每个请求必须继承 `server.requestTimeout`；MySQL 同时配置 connect/read/write timeout。
+  HTTP Server 的 Read/WriteTimeout 不能代替数据库和请求 context deadline。
+- 路径批量 ID 和 JSON 关联 ID 都必须为正数、去重并限制为 200 个；写关系表前一次性验证
+  实体存在和数据范围，禁止在循环里逐 ID 查库。
+- 导出 Repository 只取 `MaxExportRows+1` 判断超限，绝不静默截断；导入的 5000 行限制
+  统计所有非空行，解析失败行同样计数，返回详情数量和单条长度都必须有上限。
+- 异步工作必须进入有界执行器。操作日志队列满时同步降级，不能静默丢审计；手工任务队列
+  满时返回可读的繁忙错误。注册任务必须响应 `ctx.Done()`，调度器 deadline 只能释放自身
+  状态，Go 不能安全强杀一个忽略 context 的 goroutine。
+- 批量上传属于一个文件副作用单元：任一文件失败时，只回滚本请求此前创建且通过托管目录
+  校验的文件，不触碰历史文件或目录外资源。
+- 参数缓存回源前必须读取 `sys_config:` 内部代数，回填时用 Lua 校验代数；新增、修改、
+  改名、删除和清空缓存必须先推进代数再删数据 key。缓存 TTL 固定为 30 分钟，不能恢复
+  永久缓存或绕过 `redisx.InvalidateConfigCache` 直接删除参数缓存。
+- 防重复提交必须用单段 Redis Lua 原子完成“比较最近指纹、覆盖并续期”。相同指纹在窗口内
+  只能放行一个并发请求；不同指纹仍覆盖最近记录，Redis 故障仍按既有降级策略放行。

@@ -51,7 +51,7 @@ func ListUserPage(ctx context.Context, operator *model.SysUser, query model.User
 
 // ListUserExport 导出用的全量查询，顺便把部门信息摊平到导出字段。
 func ListUserExport(ctx context.Context, operator *model.SysUser, query model.UserQuery) ([]model.SysUser, error) {
-	list, err := repository.SelectUserList(ctx, query, userScope(operator))
+	list, err := repository.SelectUserList(ctx, query, userScope(operator), MaxExportRows+1)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,13 @@ func UpdateUser(ctx context.Context, operator *model.SysUser, user *model.SysUse
 
 	user.UpdateBy = operatorName
 	user.UpdateTime = types.Now()
-	return repository.UpdateUser(ctx, user)
+	if err := repository.UpdateUser(ctx, user); err != nil {
+		return err
+	}
+	if user.Status == model.StatusDisable {
+		return RevokeUserSessions(ctx, user.UserID)
+	}
+	return RefreshOnlineUserByID(ctx, user.UserID)
 }
 
 // ChangeUserStatus 启用/停用用户。
@@ -187,7 +193,13 @@ func ChangeUserStatus(ctx context.Context, operator *model.SysUser, userID int64
 	if err := CheckUserDataScope(ctx, operator, userID); err != nil {
 		return err
 	}
-	return repository.UpdateUserStatus(ctx, userID, status, operatorName)
+	if err := repository.UpdateUserStatus(ctx, userID, status, operatorName); err != nil {
+		return err
+	}
+	if status == model.StatusDisable {
+		return RevokeUserSessions(ctx, userID)
+	}
+	return nil
 }
 
 // ResetUserPwd 重置密码。
@@ -202,13 +214,21 @@ func ResetUserPwd(ctx context.Context, operator *model.SysUser, userID int64, pa
 	if err != nil {
 		return err
 	}
-	return repository.ResetUserPwd(ctx, userID, hashed, operatorName, time.Now())
+	if err := repository.ResetUserPwd(ctx, userID, hashed, operatorName, time.Now()); err != nil {
+		return err
+	}
+	return RevokeUserSessions(ctx, userID)
 }
 
 // DeleteUsers 批量删除用户。
 func DeleteUsers(ctx context.Context, operator *model.SysUser, userIDs []int64) error {
 	if len(userIDs) == 0 {
 		return errs.New("请选择要删除的用户")
+	}
+	var err error
+	userIDs, err = checkUserIDs(ctx, operator, userIDs)
+	if err != nil {
+		return err
 	}
 	for _, userID := range userIDs {
 		if operator != nil && userID == operator.UserID {
@@ -217,18 +237,21 @@ func DeleteUsers(ctx context.Context, operator *model.SysUser, userIDs []int64) 
 		if err := CheckUserAllowed(userID); err != nil {
 			return err
 		}
-		if err := CheckUserDataScope(ctx, operator, userID); err != nil {
-			return err
-		}
 	}
-	return repository.DeleteUserByIDs(ctx, userIDs)
+	if err := repository.DeleteUserByIDs(ctx, userIDs); err != nil {
+		return err
+	}
+	return RevokeUserSessions(ctx, userIDs...)
 }
 
 // AuthRoleOfUser 查用户的授权角色页面数据。
 //
 // 非超级管理员的用户，候选角色里要剔除 admin 角色 —— 否则可以给
 // 任意账号赋予超级管理员，是提权漏洞。
-func AuthRoleOfUser(ctx context.Context, userID int64) (*model.SysUser, []model.SysRole, error) {
+func AuthRoleOfUser(ctx context.Context, operator *model.SysUser, userID int64) (*model.SysUser, []model.SysRole, error) {
+	if _, err := checkUserIDs(ctx, operator, []int64{userID}); err != nil {
+		return nil, nil, err
+	}
 	user, err := repository.SelectUserByID(ctx, userID)
 	if err != nil {
 		return nil, nil, err
@@ -237,7 +260,12 @@ func AuthRoleOfUser(ctx context.Context, userID int64) (*model.SysUser, []model.
 		return nil, nil, errs.New("用户不存在")
 	}
 
-	roles, err := repository.SelectRoleAll(ctx)
+	var roles []model.SysRole
+	if operator == nil || operator.IsAdmin() {
+		roles, err = repository.SelectRoleAll(ctx)
+	} else {
+		roles, err = repository.SelectRoleList(ctx, model.RoleQuery{}, roleScope(operator))
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -259,13 +287,13 @@ func AuthRoleOfUser(ctx context.Context, userID int64) (*model.SysUser, []model.
 
 // AssignUserRoles 保存用户的授权角色。
 func AssignUserRoles(ctx context.Context, operator *model.SysUser, userID int64, roleIDs []int64) error {
-	if err := CheckUserDataScope(ctx, operator, userID); err != nil {
+	if _, err := checkUserIDs(ctx, operator, []int64{userID}); err != nil {
 		return err
 	}
-	for _, roleID := range roleIDs {
-		if err := CheckRoleDataScope(ctx, operator, roleID); err != nil {
-			return err
-		}
+	var err error
+	roleIDs, err = checkRoleIDs(ctx, operator, roleIDs)
+	if err != nil {
+		return err
 	}
 	if err := repository.ReplaceUserRoles(ctx, userID, roleIDs); err != nil {
 		return err
@@ -286,15 +314,20 @@ func HashPassword(plain string) (string, error) {
 // checkUserRelatedScope 校验提交的部门和角色是否在当前用户的数据权限内。
 func checkUserRelatedScope(ctx context.Context, operator *model.SysUser, user *model.SysUser) error {
 	if user.DeptID != nil {
-		if err := CheckDeptDataScope(ctx, operator, *user.DeptID); err != nil {
+		if _, err := checkDeptIDs(ctx, operator, []int64{*user.DeptID}); err != nil {
 			return err
 		}
 	}
-	for _, roleID := range user.RoleIDs {
-		if err := CheckRoleDataScope(ctx, operator, roleID); err != nil {
-			return err
-		}
+	roleIDs, err := checkRoleIDs(ctx, operator, user.RoleIDs)
+	if err != nil {
+		return err
 	}
+	postIDs, err := checkPostIDs(ctx, user.PostIDs)
+	if err != nil {
+		return err
+	}
+	user.RoleIDs = roleIDs
+	user.PostIDs = postIDs
 	return nil
 }
 

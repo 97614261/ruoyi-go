@@ -86,7 +86,7 @@ func MenuAdd(c *gin.Context) {
 		response.Fail(c, bindMessage(err))
 		return
 	}
-	if err := service.CreateMenu(c.Request.Context(), &menu, currentUsername(c)); err != nil {
+	if err := service.CreateMenu(c.Request.Context(), currentUser(c), &menu, currentUsername(c)); err != nil {
 		fail(c, err)
 		return
 	}
@@ -100,7 +100,7 @@ func MenuEdit(c *gin.Context) {
 		response.Fail(c, bindMessage(err))
 		return
 	}
-	if err := service.UpdateMenu(c.Request.Context(), &menu, currentUsername(c)); err != nil {
+	if err := service.UpdateMenu(c.Request.Context(), currentUser(c), &menu, currentUsername(c)); err != nil {
 		fail(c, err)
 		return
 	}
@@ -114,7 +114,7 @@ func MenuUpdateSort(c *gin.Context) {
 		response.Fail(c, bindMessage(err))
 		return
 	}
-	if err := service.UpdateMenuSort(c.Request.Context(), body); err != nil {
+	if err := service.UpdateMenuSort(c.Request.Context(), currentUser(c), body); err != nil {
 		fail(c, err)
 		return
 	}
@@ -130,7 +130,7 @@ func MenuRemove(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	if err := service.DeleteMenu(c.Request.Context(), id); err != nil {
+	if err := service.DeleteMenu(c.Request.Context(), currentUser(c), id); err != nil {
 		fail(c, err)
 		return
 	}

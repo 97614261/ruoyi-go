@@ -73,9 +73,9 @@ func SelectConfigPage(ctx context.Context, query model.ConfigQuery, pg page.Quer
 }
 
 // SelectConfigList 不分页查询，供导出使用。
-func SelectConfigList(ctx context.Context, query model.ConfigQuery) ([]model.SysConfig, error) {
+func SelectConfigList(ctx context.Context, query model.ConfigQuery, limit ...int) ([]model.SysConfig, error) {
 	var list []model.SysConfig
-	err := configFilter(DB(ctx).Model(&model.SysConfig{}), query).
+	err := applyOptionalLimit(configFilter(DB(ctx).Model(&model.SysConfig{}), query), limit).
 		Order("config_id").Find(&list).Error
 	if err != nil {
 		return nil, fmt.Errorf("查询参数列表失败: %w", err)
@@ -130,11 +130,14 @@ func UpdateConfig(ctx context.Context, config *model.SysConfig) error {
 	if config.Remark != nil {
 		updates["remark"] = *config.Remark
 	}
-	err := DB(ctx).Model(&model.SysConfig{}).
+	result := DB(ctx).Model(&model.SysConfig{}).
 		Where("config_id = ?", config.ConfigID).
-		Updates(updates).Error
-	if err != nil {
-		return fmt.Errorf("更新参数 %d 失败: %w", config.ConfigID, err)
+		Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("更新参数 %d 失败: %w", config.ConfigID, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("更新参数 %d 失败: 参数不存在", config.ConfigID)
 	}
 	return nil
 }

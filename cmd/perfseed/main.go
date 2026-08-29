@@ -7,11 +7,13 @@
 // 导出一次性装内存会不会炸），不灌数据就永远只是推测。
 //
 // 【安全设计】
-//   - 不加 -confirm 只打印计划，不写任何数据
+//   - 灌入和清理数据时，不加 -confirm 只打印计划，不写任何数据
 //   - 所有数据的主键都从 idBase 起算，-clean 按主键区间删干净，
 //     不靠名称前缀去猜哪些是造出来的
+//   - -index / -unindex 会立即修改数据库结构，只允许隔离压测库，禁止生产
 //
 // 【注意】默认直接用 configs/application.yml，也就是开发库。
+// 执行前必须核对数据库实例和库名，所有命令都禁止指向生产库。
 // 压测数据在库里期间，接口测试会有几个用例失败（详见 docs/PERF.md），
 // 测完记得 -clean。
 //
@@ -68,8 +70,8 @@ func run() error {
 		operLogs    = flag.Int("operlogs", 500000, "生成的操作日志条数，0 表示不生成")
 		clean       = flag.Bool("clean", false, "删除所有压测数据后退出")
 		explainOnly = flag.Bool("explain", false, "只跑 EXPLAIN 清单，不写任何数据")
-		addIndex    = flag.Bool("index", false, "建立候选索引（可用 -unindex 回滚）")
-		dropIndex   = flag.Bool("unindex", false, "删除候选索引，回到原始表结构")
+		addIndex    = flag.Bool("index", false, "仅限隔离压测库：建立候选索引（禁止生产，可用 -unindex 回滚）")
+		dropIndex   = flag.Bool("unindex", false, "仅限隔离压测库：删除候选索引，回到原始表结构（禁止生产）")
 		confirm     = flag.Bool("confirm", false, "真正执行；不加只打印计划")
 	)
 	flag.Parse()
@@ -95,11 +97,13 @@ func run() error {
 		}
 		return explainAll(db)
 	}
-	// 索引可以完整回滚，也不用 -confirm
+	// 索引操作保留为压测工具能力，但绝不能用于生产库。
 	if *addIndex {
+		fmt.Println("警告：-index 仅限隔离压测库，禁止在生产库执行。")
 		return createIndexes(db)
 	}
 	if *dropIndex {
+		fmt.Println("警告：-unindex 仅限隔离压测库，禁止在生产库执行。")
 		return dropIndexes(db)
 	}
 

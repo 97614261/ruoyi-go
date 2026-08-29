@@ -225,6 +225,8 @@ func TestMenuValidation(t *testing.T) {
 		{"少传 menuName", func(p map[string]any) map[string]any { return omit(p, "menuName") }, "MenuName"},
 		{"menuName 纯空格", func(p map[string]any) map[string]any { return with(p, "menuName", "   ") }, "MenuName"},
 		{"menuName 超过 50 字", func(p map[string]any) map[string]any { return with(p, "menuName", repeatText(51)) }, "MenuName"},
+		{"menuName 含 HTML", func(p map[string]any) map[string]any { return with(p, "menuName", "<img src=x onerror=alert(1)>") }, "MenuName"},
+		{"path 含 HTML", func(p map[string]any) map[string]any { return with(p, "path", "safe<img>") }, "Path"},
 		{"少传 menuType", func(p map[string]any) map[string]any { return omit(p, "menuType") }, "MenuType"},
 		{"orderNum 负数", func(p map[string]any) map[string]any { return with(p, "orderNum", -1) }, "OrderNum"},
 		// 少传要拒（对齐 Java 的 @NotNull），传 0 要过 —— 见 post_test 的说明

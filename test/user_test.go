@@ -3,12 +3,15 @@ package apitest
 import (
 	"bytes"
 	"fmt"
+	"hash/crc32"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/xuri/excelize/v2"
+
+	"ruoyi-go/pkg/redisx"
 )
 
 const (
@@ -20,8 +23,12 @@ const (
 )
 
 func newUserPayload(suffix string) map[string]any {
+	userName := testPrefix + suffix
+	if len([]rune(userName)) > 20 {
+		userName = fmt.Sprintf("%su%08x", testPrefix, crc32.ChecksumIEEE([]byte(suffix)))
+	}
 	return map[string]any{
-		"userName":    testPrefix + suffix,
+		"userName":    userName,
 		"nickName":    testPrefix + "昵称" + suffix,
 		"password":    "test123456",
 		"deptId":      testDeptID,
@@ -46,6 +53,8 @@ func createUser(t *testing.T, body map[string]any) int64 {
 		t.Fatalf("新增用户后按账号 %s 查不到", name)
 	}
 	id := idOf(t, item, "userId")
+	trackRedisKey(redisx.LoginUserSessionsKey(id))
+	trackRedisKey(redisx.LoginUserGenerationKey(id))
 
 	t.Cleanup(func() { _ = doDelete(t, "/system/user/"+idPath(id)) })
 	return id
@@ -83,6 +92,66 @@ func TestUserCRUD(t *testing.T) {
 
 	mustOK(t, doDelete(t, path), "删除用户")
 	mustFail(t, doGet(t, path), "用户不存在", "删除后再查")
+}
+
+// TestUserDeleteRevokesSessions 删除账号后，已经签发的会话必须立即失效。
+func TestUserDeleteRevokesSessions(t *testing.T) {
+	body := newUserPayload("delete_session")
+	id := createUser(t, body)
+	token, err := loginAs(fmt.Sprint(body["userName"]), "test123456")
+	if err != nil {
+		t.Fatalf("测试账号登录失败：%v", err)
+	}
+
+	mustOK(t, doDelete(t, "/system/user/"+idPath(id)), "删除在线用户")
+	assertTokenUnauthorized(t, token, "删除用户")
+}
+
+func TestFullUserEditDisablesExistingSession(t *testing.T) {
+	body := newUserPayload("edit_disable_session")
+	id := createUser(t, body)
+	token, err := loginAs(fmt.Sprint(body["userName"]), "test123456")
+	if err != nil {
+		t.Fatalf("测试账号登录失败：%v", err)
+	}
+
+	updated := payload(body)
+	updated["userId"] = id
+	updated["status"] = "1"
+	delete(updated, "password")
+	mustOK(t, doPut(t, "/system/user", updated), "完整编辑停用用户")
+	assertTokenUnauthorized(t, token, "完整编辑停用用户")
+}
+
+func TestMissingUserUpdatesDoNotReportSuccess(t *testing.T) {
+	const missingID = int64(9_000_000_000_000)
+	mustFail(t, doPut(t, "/system/user/changeStatus", map[string]any{
+		"userId": missingID, "status": "1",
+	}), "", "修改不存在用户状态")
+	mustFail(t, doPut(t, "/system/user/resetPwd", map[string]any{
+		"userId": missingID, "password": "test123456",
+	}), "", "重置不存在用户密码")
+}
+
+// TestUserBatchDeleteRevokesSessions 批量删除只走一次兼容扫描，但每个用户的会话都要撤销。
+func TestUserBatchDeleteRevokesSessions(t *testing.T) {
+	body1 := newUserPayload("batchdel1")
+	body2 := newUserPayload("batchdel2")
+	id1 := createUser(t, body1)
+	id2 := createUser(t, body2)
+	token1, err := loginAs(fmt.Sprint(body1["userName"]), "test123456")
+	if err != nil {
+		t.Fatalf("第一个测试账号登录失败：%v", err)
+	}
+	token2, err := loginAs(fmt.Sprint(body2["userName"]), "test123456")
+	if err != nil {
+		t.Fatalf("第二个测试账号登录失败：%v", err)
+	}
+
+	path := fmt.Sprintf("/system/user/%d,%d", id1, id2)
+	mustOK(t, doDelete(t, path), "批量删除在线用户")
+	assertTokenUnauthorized(t, token1, "批量删除第一个用户")
+	assertTokenUnauthorized(t, token2, "批量删除第二个用户")
 }
 
 // TestUserDetailContract 用户详情是混合形态：data 与四个平铺字段并存。
@@ -156,13 +225,20 @@ func TestUserResetPwd(t *testing.T) {
 	id := createUser(t, body)
 	userName := fmt.Sprint(body["userName"])
 
-	if _, err := loginAs(userName, "test123456"); err != nil {
+	token1, err := loginAs(userName, "test123456")
+	if err != nil {
 		t.Fatalf("新建用户应能用初始密码登录：%v", err)
+	}
+	token2, err := loginAs(userName, "test123456")
+	if err != nil {
+		t.Fatalf("第二个设备登录失败：%v", err)
 	}
 
 	mustOK(t, doPut(t, "/system/user/resetPwd", map[string]any{
 		"userId": id, "password": "reset654321",
 	}), "重置密码")
+	assertTokenUnauthorized(t, token1, "管理员重置密码后的第一个会话")
+	assertTokenUnauthorized(t, token2, "管理员重置密码后的第二个会话")
 
 	if _, err := loginAs(userName, "reset654321"); err != nil {
 		t.Errorf("重置后应能用新密码登录：%v", err)
@@ -177,10 +253,20 @@ func TestUserChangeStatus(t *testing.T) {
 	body := newUserPayload("status")
 	id := createUser(t, body)
 	userName := fmt.Sprint(body["userName"])
+	token1, err := loginAs(userName, "test123456")
+	if err != nil {
+		t.Fatalf("第一个设备登录失败：%v", err)
+	}
+	token2, err := loginAs(userName, "test123456")
+	if err != nil {
+		t.Fatalf("第二个设备登录失败：%v", err)
+	}
 
 	mustOK(t, doPut(t, "/system/user/changeStatus", map[string]any{
 		"userId": id, "status": "1",
 	}), "停用账号（只传两个字段）")
+	assertTokenUnauthorized(t, token1, "停用后的第一个会话")
+	assertTokenUnauthorized(t, token2, "停用后的第二个会话")
 
 	detail := dataObject(t, doGet(t, "/system/user/"+idPath(id)), "查账号状态")
 	assertField(t, detail, "status", "1", "停用后")
@@ -192,6 +278,8 @@ func TestUserChangeStatus(t *testing.T) {
 	mustOK(t, doPut(t, "/system/user/changeStatus", map[string]any{
 		"userId": id, "status": "0",
 	}), "重新启用")
+	assertTokenUnauthorized(t, token1, "重新启用后的旧会话")
+	assertTokenUnauthorized(t, token2, "重新启用后的另一个旧会话")
 	if _, err := loginAs(userName, "test123456"); err != nil {
 		t.Errorf("重新启用后应能登录：%v", err)
 	}
@@ -328,9 +416,18 @@ func TestUserProfile(t *testing.T) {
 		"oldPassword": "test123456", "newPassword": "newpass123",
 	})
 	mustOK(t, r, "改密码")
+	assertTokenUnauthorized(t, token, "个人改密后的当前会话")
 
 	if _, err := loginAs(userName, "newpass123"); err != nil {
 		t.Errorf("改密码后应能用新密码登录：%v", err)
+	}
+}
+
+func assertTokenUnauthorized(t *testing.T, token, what string) {
+	t.Helper()
+	r := request(http.MethodGet, "/getInfo", token, nil)
+	if r.Code != 401 {
+		t.Fatalf("%s后旧 token 应失效（code=401），实际 code=%d，msg=%q", what, r.Code, r.Msg)
 	}
 }
 
@@ -384,6 +481,62 @@ func TestUserImportEmptyTemplate(t *testing.T) {
 	r := requestMultipart(http.MethodPost, "/system/user/importData", adminToken,
 		"file", "user_template.xlsx", template.Body)
 	mustFail(t, r, "导入用户数据不能为空！", "导入只有表头的用户模板")
+}
+
+// TestUserImportMessageEscapesHTML 导入结果由前端 v-html 展示，账号等动态值必须转义。
+func TestUserImportMessageEscapesHTML(t *testing.T) {
+	template := request(http.MethodPost, "/system/user/importTemplate", adminToken, nil)
+	if template.Status != http.StatusOK || len(template.Body) == 0 {
+		t.Fatalf("准备用户导入模板失败：HTTP=%d，响应=%s", template.Status, truncBody(template.Body))
+	}
+
+	file, err := excelize.OpenReader(bytes.NewReader(template.Body))
+	if err != nil {
+		t.Fatalf("打开用户导入模板失败：%v", err)
+	}
+	defer file.Close()
+	sheet := file.GetSheetName(0)
+	rows, err := file.GetRows(sheet)
+	if err != nil || len(rows) == 0 {
+		t.Fatalf("读取用户导入模板表头失败：%v", err)
+	}
+
+	maliciousUserName := `<img src=x onerror=x>`
+	for column, header := range rows[0] {
+		var value string
+		switch header {
+		case "登录名称":
+			value = maliciousUserName
+		case "用户名称":
+			value = "测试昵称"
+		default:
+			continue
+		}
+		cell, err := excelize.CoordinatesToCellName(column+1, 2)
+		if err != nil {
+			t.Fatalf("生成模板单元格坐标失败：%v", err)
+		}
+		if err := file.SetCellValue(sheet, cell, value); err != nil {
+			t.Fatalf("填写用户导入模板失败：%v", err)
+		}
+	}
+	data, err := file.WriteToBuffer()
+	if err != nil {
+		t.Fatalf("生成恶意账号导入文件失败：%v", err)
+	}
+
+	r := requestMultipart(http.MethodPost, "/system/user/importData", adminToken,
+		"file", "unsafe_user.xlsx", data.Bytes())
+	mustFail(t, r, "导入失败", "导入含 HTML 的账号")
+	if strings.Contains(r.Msg, maliciousUserName) {
+		t.Fatalf("导入提示不能原样回显 HTML，实际 msg=%q", r.Msg)
+	}
+	if !strings.Contains(r.Msg, "&lt;img src=x onerror=x&gt;") {
+		t.Errorf("导入提示应转义账号，实际 msg=%q", r.Msg)
+	}
+	if !strings.Contains(r.Msg, "<br/>") {
+		t.Errorf("导入提示应保留前端约定的 <br/> 换行，实际 msg=%q", r.Msg)
+	}
 }
 
 // TestUserImportTemplateNeedsLoginOnly 对齐 Java SysUserController：

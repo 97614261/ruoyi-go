@@ -64,21 +64,30 @@ func ListOnlineUsers(ctx context.Context, query model.OnlineQuery, pg page.Query
 		slog.Warn("在线会话数超过扫描上限，列表已截断", "limit", maxOnlineScan)
 	}
 
-	// 最近登录的排前面
+	items, total := paginateOnlineUsers(all, pg)
+	return items, total, nil
+}
+
+// paginateOnlineUsers 先建立全序再切页，避免 Redis SCAN 输入顺序变化时分页重漏。
+func paginateOnlineUsers(all []model.UserOnline, pg page.Query) ([]model.UserOnline, int64) {
 	sort.Slice(all, func(i, j int) bool {
-		return all[i].LoginTime.Std().After(all[j].LoginTime.Std())
+		ti, tj := all[i].LoginTime.Std(), all[j].LoginTime.Std()
+		if !ti.Equal(tj) {
+			return ti.After(tj)
+		}
+		return all[i].TokenID < all[j].TokenID
 	})
 
 	total := int64(len(all))
 	start := pg.Offset()
 	if start >= len(all) {
-		return []model.UserOnline{}, total, nil
+		return []model.UserOnline{}, total
 	}
 	end := start + pg.PageSize
 	if end > len(all) {
 		end = len(all)
 	}
-	return all[start:end], total, nil
+	return all[start:end], total
 }
 
 // ForceLogout 强制某个会话下线。

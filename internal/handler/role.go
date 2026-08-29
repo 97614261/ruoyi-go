@@ -191,7 +191,7 @@ func RoleAdd(c *gin.Context) {
 		response.Fail(c, bindMessage(err))
 		return
 	}
-	if err := service.CreateRole(c.Request.Context(), &role, currentUsername(c)); err != nil {
+	if err := service.CreateRole(c.Request.Context(), currentUser(c), &role, currentUsername(c)); err != nil {
 		fail(c, err)
 		return
 	}

@@ -9,10 +9,8 @@ import (
 
 // candidateIndex 一条候选索引。
 //
-// 【全部是候选，不是既定方案】CLAUDE.md 写的是"表结构一行不改"。
-// 索引对 Java 和 Go 都是透明的，加了不影响两版并行跑，
-// 但要不要加得看 before / after 的实测数字，不能凭感觉。
-// 所以这里做成可加可删的开关，用完能完整回滚。
+// 【仅限隔离压测库】这些索引用于 before / after 实验，不是生产既定方案。
+// 索引属于数据库结构冻结范围，即使能完整回滚，也禁止在生产库建立或删除。
 type candidateIndex struct {
 	name  string
 	table string

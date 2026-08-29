@@ -1,5 +1,7 @@
 package redisx
 
+import "strconv"
+
 // Redis key 前缀，必须与 Java 版 CacheConstants.java 完全一致，
 // 否则两套后端不能共用同一个 Redis（迁移期需要并行验证）。
 //
@@ -7,6 +9,10 @@ package redisx
 const (
 	// KeyLoginToken 登录会话，后接 uuid。value 是序列化的 LoginUser。
 	KeyLoginToken = "login_tokens:"
+	// KeyLoginUserSessions 按用户维护其全部登录 uuid，供停用、删除和改密时立即撤销。
+	KeyLoginUserSessions = "login_user_sessions:"
+	// KeyLoginUserGeneration 防止撤销会话时，并发登录把旧认证结果重新写回。
+	KeyLoginUserGeneration = "login_user_generation:"
 	// KeyCaptchaCode 验证码，后接 uuid，TTL 2 分钟。
 	KeyCaptchaCode = "captcha_codes:"
 	// KeySysConfig 参数缓存，后接 configKey。
@@ -23,6 +29,16 @@ const (
 
 // LoginTokenKey 拼接登录会话 key。
 func LoginTokenKey(uuid string) string { return KeyLoginToken + uuid }
+
+// LoginUserSessionsKey 拼接用户会话索引 key。
+func LoginUserSessionsKey(userID int64) string {
+	return KeyLoginUserSessions + strconv.FormatInt(userID, 10)
+}
+
+// LoginUserGenerationKey 拼接用户会话代数 key。
+func LoginUserGenerationKey(userID int64) string {
+	return KeyLoginUserGeneration + strconv.FormatInt(userID, 10)
+}
 
 // CaptchaKey 拼接验证码 key。
 func CaptchaKey(uuid string) string { return KeyCaptchaCode + uuid }

@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/robfig/cron/v3"
 
@@ -24,8 +26,8 @@ import (
 // 给得比较宽松：定时任务本来就常有跑几分钟的。
 const JobExecuteTimeout = 30 * time.Minute
 
-// maxExceptionInfo sys_job_log.exception_info 是 varchar(2000)。
-// 不截断的话超长报错会让整条日志写不进去 —— 任务失败的同时连失败原因都丢了。
+// maxExceptionInfo sys_job_log.exception_info 是 varchar(2000)。这里沿用原实现更保守的
+// UTF-8 字节上限；MySQL varchar 的 2000 是字符数，不是字节数。
 const maxExceptionInfo = 2000
 
 // jobScheduler 定时任务调度器。
@@ -38,9 +40,13 @@ const maxExceptionInfo = 2000
 type jobScheduler struct {
 	cron *cron.Cron
 
-	mu sync.Mutex
+	// scheduleMu 把 cron 条目变更和 entries 更新组成一个临界区。
+	// 它不能与 runMu 共用，否则后台修改配置会和任务执行状态互相阻塞。
+	scheduleMu sync.Mutex
 	// entries 任务 ID -> cron 条目 ID，用于增删改时定位
 	entries map[int64]cron.EntryID
+
+	runMu sync.Mutex
 	// running 正在执行的任务 ID，实现「禁止并发」
 	running map[int64]bool
 }
@@ -105,35 +111,53 @@ func StopScheduler(ctx context.Context) {
 
 // add 把任务加入调度。调用方保证 status 为正常。
 func (s *jobScheduler) add(target *model.SysJob) error {
-	if _, _, err := job.Resolve(target.InvokeTarget); err != nil {
-		return err
-	}
-	translated, err := cronx.Translate(target.CronExpression)
+	translated, snapshot, err := prepareSchedule(target)
 	if err != nil {
 		return err
 	}
 
-	snapshot := *target
+	s.scheduleMu.Lock()
+	defer s.scheduleMu.Unlock()
+	return s.replaceLocked(target.JobID, translated, snapshot)
+}
+
+func prepareSchedule(target *model.SysJob) (string, model.SysJob, error) {
+	if _, _, err := job.Resolve(target.InvokeTarget); err != nil {
+		return "", model.SysJob{}, err
+	}
+	translated, err := cronx.Translate(target.CronExpression)
+	if err != nil {
+		return "", model.SysJob{}, err
+	}
+	return translated, *target, nil
+}
+
+// replaceLocked 在持有 scheduleMu 时替换指定任务的 cron entry。
+func (s *jobScheduler) replaceLocked(jobID int64, translated string, snapshot model.SysJob) error {
+	// add 也按替换语义处理，避免重复启动或并发装载时留下无法追踪的旧 entry。
+	s.removeLocked(jobID)
 	entryID, err := s.cron.AddFunc(translated, func() {
 		execute(&snapshot)
 	})
 	if err != nil {
-		return fmt.Errorf("cron 表达式 %q 不正确", target.CronExpression)
+		return fmt.Errorf("cron 表达式 %q 不正确", snapshot.CronExpression)
 	}
 
-	s.mu.Lock()
-	s.entries[target.JobID] = entryID
-	s.mu.Unlock()
+	s.entries[jobID] = entryID
 	return nil
 }
 
 // remove 把任务移出调度。不存在时静默返回。
 func (s *jobScheduler) remove(jobID int64) {
-	s.mu.Lock()
+	s.scheduleMu.Lock()
+	defer s.scheduleMu.Unlock()
+	s.removeLocked(jobID)
+}
+
+// removeLocked 在持有 scheduleMu 时删除条目。
+func (s *jobScheduler) removeLocked(jobID int64) {
 	entryID, ok := s.entries[jobID]
 	delete(s.entries, jobID)
-	s.mu.Unlock()
-
 	if ok {
 		s.cron.Remove(entryID)
 	}
@@ -141,11 +165,18 @@ func (s *jobScheduler) remove(jobID int64) {
 
 // reschedule 先移除再按当前状态重新加入。改任务、改状态都走它。
 func (s *jobScheduler) reschedule(target *model.SysJob) error {
-	s.remove(target.JobID)
 	if target.Status != model.JobStatusNormal {
+		s.remove(target.JobID)
 		return nil
 	}
-	return s.add(target)
+
+	translated, snapshot, err := prepareSchedule(target)
+	if err != nil {
+		return err
+	}
+	s.scheduleMu.Lock()
+	defer s.scheduleMu.Unlock()
+	return s.replaceLocked(target.JobID, translated, snapshot)
 }
 
 // beginRun 标记任务开始执行；返回 false 表示上一次还没跑完且禁止并发。
@@ -153,8 +184,8 @@ func (s *jobScheduler) beginRun(target *model.SysJob) bool {
 	if target.Concurrent == model.JobConcurrentAllow {
 		return true
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
 	if s.running[target.JobID] {
 		return false
 	}
@@ -166,9 +197,9 @@ func (s *jobScheduler) endRun(target *model.SysJob) {
 	if target.Concurrent == model.JobConcurrentAllow {
 		return
 	}
-	s.mu.Lock()
+	s.runMu.Lock()
 	delete(s.running, target.JobID)
-	s.mu.Unlock()
+	s.runMu.Unlock()
 }
 
 // execute 执行一次任务并落一条调度日志。
@@ -208,7 +239,7 @@ func execute(target *model.SysJob) {
 	if err != nil {
 		record.Status = model.JobLogStatusFail
 		record.JobMessage = fmt.Sprintf("%s 执行失败，耗时 %s", target.JobName, cost.Round(time.Millisecond))
-		record.ExceptionInfo = truncateRunes(err.Error(), maxExceptionInfo)
+		record.ExceptionInfo = truncateUTF8Bytes(err.Error(), maxExceptionInfo)
 		slog.ErrorContext(ctx, "定时任务执行失败",
 			"jobId", target.JobID, "jobName", target.JobName, "costMs", cost.Milliseconds(), "err", err)
 	} else {
@@ -228,6 +259,19 @@ func execute(target *model.SysJob) {
 
 // runTask 查注册表并调用，把 panic 转成 error。
 func runTask(ctx context.Context, target *model.SysJob) (err error) {
+	result := make(chan error, 1)
+	go func() {
+		result <- invokeTask(ctx, target)
+	}()
+	select {
+	case err := <-result:
+		return err
+	case <-ctx.Done():
+		return fmt.Errorf("任务超过执行时限或被取消: %w", ctx.Err())
+	}
+}
+
+func invokeTask(ctx context.Context, target *model.SysJob) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("任务执行时发生 panic: %v", r)
@@ -241,14 +285,24 @@ func runTask(ctx context.Context, target *model.SysJob) (err error) {
 	return task(ctx, args)
 }
 
-// truncateRunes 按字符截断，避免切断多字节字符产生非法 UTF-8。
-func truncateRunes(s string, max int) string {
-	if len(s) <= max {
+// truncateUTF8Bytes 在不切断字符的前提下把字符串限制到 max 个 UTF-8 字节。
+// 非法 UTF-8 字节会转为替换字符，保证写入日志的结果始终是合法 UTF-8。
+func truncateUTF8Bytes(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
+	if len(s) <= max && utf8.ValidString(s) {
 		return s
 	}
-	runes := []rune(s)
-	for len(string(runes)) > max {
-		runes = runes[:len(runes)-1]
+
+	var result strings.Builder
+	result.Grow(min(len(s), max))
+	for _, r := range s {
+		size := utf8.RuneLen(r)
+		if result.Len()+size > max {
+			break
+		}
+		result.WriteRune(r)
 	}
-	return string(runes)
+	return result.String()
 }

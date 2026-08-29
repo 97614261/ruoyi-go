@@ -342,6 +342,14 @@ func loginAs(username, password string) (string, error) {
 		return "", fmt.Errorf("解析测试会话失败: %w", err)
 	}
 	trackRedisKey(redisx.LoginTokenKey(claims.LoginUserKey))
+	loginUser, err := service.GetLoginUser(ctx, token)
+	if err != nil {
+		return "", fmt.Errorf("读取测试会话失败: %w", err)
+	}
+	if loginUser != nil {
+		trackRedisKey(redisx.LoginUserSessionsKey(loginUser.UserID))
+		trackRedisKey(redisx.LoginUserGenerationKey(loginUser.UserID))
+	}
 	return token, nil
 }
 

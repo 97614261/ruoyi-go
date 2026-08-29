@@ -110,9 +110,9 @@ func SelectRolePage(ctx context.Context, query model.RoleQuery, pg page.Query, s
 }
 
 // SelectRoleList 不分页查询，供导出和数据权限校验使用。
-func SelectRoleList(ctx context.Context, query model.RoleQuery, scope func(*gorm.DB) *gorm.DB) ([]model.SysRole, error) {
+func SelectRoleList(ctx context.Context, query model.RoleQuery, scope func(*gorm.DB) *gorm.DB, limit ...int) ([]model.SysRole, error) {
 	var list []model.SysRole
-	err := roleListDB(ctx, query, scope).
+	err := applyOptionalLimit(roleListDB(ctx, query, scope), limit).
 		Distinct("r.*").
 		Order("r.role_sort").
 		Find(&list).Error

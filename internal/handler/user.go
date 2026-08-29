@@ -247,7 +247,7 @@ func UserAuthRoleGet(c *gin.Context) {
 		return
 	}
 
-	user, roles, err := service.AuthRoleOfUser(c.Request.Context(), id)
+	user, roles, err := service.AuthRoleOfUser(c.Request.Context(), currentUser(c), id)
 	if err != nil {
 		fail(c, err)
 		return

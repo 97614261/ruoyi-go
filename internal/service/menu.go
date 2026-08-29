@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"html"
 	"strconv"
 	"strings"
 	"unicode"
@@ -26,16 +27,22 @@ func parseSortPairs(idsRaw, ordersRaw string) (map[int64]int, error) {
 	if len(ids) != len(orders) {
 		return nil, errs.New("排序参数不匹配")
 	}
+	if len(ids) > maxRelationIDs {
+		return nil, errs.Newf("一次最多调整%d项排序", maxRelationIDs)
+	}
 
 	result := make(map[int64]int, len(ids))
 	for i := range ids {
 		id, err := strconv.ParseInt(strings.TrimSpace(ids[i]), 10, 64)
-		if err != nil {
+		if err != nil || id <= 0 {
 			return nil, errs.New("排序参数格式错误")
 		}
 		orderNum, err := strconv.Atoi(strings.TrimSpace(orders[i]))
 		if err != nil {
 			return nil, errs.New("排序参数格式错误")
+		}
+		if _, exists := result[id]; exists {
+			return nil, errs.New("排序参数包含重复ID")
 		}
 		result[id] = orderNum
 	}
@@ -146,6 +153,9 @@ func MenuTreeSelect(ctx context.Context, user *model.SysUser, query model.MenuQu
 
 // RoleMenuTreeSelect 菜单树 + 该角色已选中的菜单 ID。
 func RoleMenuTreeSelect(ctx context.Context, user *model.SysUser, roleID int64) ([]model.TreeSelect, []int64, error) {
+	if err := CheckRoleDataScope(ctx, user, roleID); err != nil {
+		return nil, nil, err
+	}
 	role, err := repository.SelectRoleByID(ctx, roleID)
 	if err != nil {
 		return nil, nil, err
@@ -164,7 +174,17 @@ func RoleMenuTreeSelect(ctx context.Context, user *model.SysUser, roleID int64) 
 	if err != nil {
 		return nil, nil, err
 	}
-	return BuildMenuTreeSelect(menus), checkedKeys, nil
+	visible := make(map[int64]struct{}, len(menus))
+	for _, menu := range menus {
+		visible[menu.MenuID] = struct{}{}
+	}
+	filteredKeys := make([]int64, 0, len(checkedKeys))
+	for _, id := range checkedKeys {
+		if _, ok := visible[id]; ok {
+			filteredKeys = append(filteredKeys, id)
+		}
+	}
+	return BuildMenuTreeSelect(menus), filteredKeys, nil
 }
 
 // BuildMenuTreeSelect 把菜单列表组装成树选择结构。
@@ -193,7 +213,7 @@ func BuildMenuTreeSelect(menus []model.SysMenu) []model.TreeSelect {
 			visited[menu.MenuID] = true
 			nodes = append(nodes, model.TreeSelect{
 				ID:       menu.MenuID,
-				Label:    menu.MenuName,
+				Label:    html.EscapeString(menu.MenuName),
 				Disabled: menu.Status == model.StatusDisable,
 				Children: build(menu.MenuID),
 			})
@@ -210,7 +230,7 @@ func BuildMenuTreeSelect(menus []model.SysMenu) []model.TreeSelect {
 		visited[menu.MenuID] = true
 		roots = append(roots, model.TreeSelect{
 			ID:       menu.MenuID,
-			Label:    menu.MenuName,
+			Label:    html.EscapeString(menu.MenuName),
 			Disabled: menu.Status == model.StatusDisable,
 			Children: build(menu.MenuID),
 		})
@@ -219,7 +239,12 @@ func BuildMenuTreeSelect(menus []model.SysMenu) []model.TreeSelect {
 }
 
 // CreateMenu 新增菜单。
-func CreateMenu(ctx context.Context, menu *model.SysMenu, operator string) error {
+func CreateMenu(ctx context.Context, user *model.SysUser, menu *model.SysMenu, operator string) error {
+	if menu.ParentID != MenuRootID {
+		if _, err := checkMenuIDsForUser(ctx, user, []int64{menu.ParentID}); err != nil {
+			return err
+		}
+	}
 	if err := checkMenuValid(ctx, menu, "新增"); err != nil {
 		return err
 	}
@@ -230,12 +255,19 @@ func CreateMenu(ctx context.Context, menu *model.SysMenu, operator string) error
 }
 
 // UpdateMenu 修改菜单。
-func UpdateMenu(ctx context.Context, menu *model.SysMenu, operator string) error {
+func UpdateMenu(ctx context.Context, user *model.SysUser, menu *model.SysMenu, operator string) error {
 	if menu.MenuID == 0 {
 		return errs.New("菜单ID不能为空")
 	}
 	if menu.ParentID == menu.MenuID {
 		return errs.Newf("修改菜单'%s'失败，上级菜单不能选择自己", menu.MenuName)
+	}
+	ids := []int64{menu.MenuID}
+	if menu.ParentID != MenuRootID {
+		ids = append(ids, menu.ParentID)
+	}
+	if _, err := checkMenuIDsForUser(ctx, user, ids); err != nil {
+		return err
 	}
 	if err := checkMenuValid(ctx, menu, "修改"); err != nil {
 		return err
@@ -255,7 +287,10 @@ func UpdateMenu(ctx context.Context, menu *model.SysMenu, operator string) error
 }
 
 // DeleteMenu 删除菜单。
-func DeleteMenu(ctx context.Context, menuID int64) error {
+func DeleteMenu(ctx context.Context, user *model.SysUser, menuID int64) error {
+	if _, err := checkMenuIDsForUser(ctx, user, []int64{menuID}); err != nil {
+		return err
+	}
 	hasChild, err := repository.HasChildByMenuID(ctx, menuID)
 	if err != nil {
 		return err
@@ -275,12 +310,41 @@ func DeleteMenu(ctx context.Context, menuID int64) error {
 }
 
 // UpdateMenuSort 保存菜单排序。
-func UpdateMenuSort(ctx context.Context, body model.MenuSortBody) error {
+func UpdateMenuSort(ctx context.Context, user *model.SysUser, body model.MenuSortBody) error {
 	sorts, err := parseSortPairs(body.MenuIDs, body.OrderNums)
 	if err != nil {
 		return err
 	}
+	ids := make([]int64, 0, len(sorts))
+	for id := range sorts {
+		ids = append(ids, id)
+	}
+	if _, err := checkMenuIDsForUser(ctx, user, ids); err != nil {
+		return err
+	}
 	return repository.UpdateMenuSort(ctx, sorts)
+}
+
+func checkMenuIDsForUser(ctx context.Context, user *model.SysUser, ids []int64) ([]int64, error) {
+	normalized, err := checkMenuIDs(ctx, ids)
+	if err != nil || len(normalized) == 0 || user == nil || user.IsAdmin() {
+		return normalized, err
+	}
+	menus, err := ListMenus(ctx, user, model.MenuQuery{})
+	if err != nil {
+		return nil, err
+	}
+	visible := make([]int64, 0, len(normalized))
+	requested := make(map[int64]struct{}, len(normalized))
+	for _, id := range normalized {
+		requested[id] = struct{}{}
+	}
+	for _, menu := range menus {
+		if _, ok := requested[menu.MenuID]; ok {
+			visible = append(visible, menu.MenuID)
+		}
+	}
+	return normalized, ensureAllIDs(normalized, visible, "菜单")
 }
 
 // checkMenuValid 菜单名唯一 + 外链地址格式 + 路由冲突。
@@ -351,10 +415,10 @@ func BuildRouters(menus []*model.SysMenu) []model.RouterVo {
 		router := model.RouterVo{
 			Hidden:    menu.Visible == model.MenuHidden,
 			Name:      routeNameOf(menu),
-			Path:      routerPathOf(menu),
+			Path:      safeRoutePath(routerPathOf(menu)),
 			Component: componentOf(menu),
 			Query:     derefString(menu.Query),
-			Meta:      newMeta(menu.MenuName, menu.Icon, menu.IsCache == model.MenuCacheNo, menu.Path),
+			Meta:      newMeta(html.EscapeString(menu.MenuName), menu.Icon, menu.IsCache == model.MenuCacheNo, menu.Path),
 		}
 
 		switch {
@@ -367,16 +431,16 @@ func BuildRouters(menus []*model.SysMenu) []model.RouterVo {
 			// 一级菜单（非目录）：自身降级成布局容器，真实页面放进 children
 			router.Meta = nil
 			router.Children = []model.RouterVo{{
-				Path:      menu.Path,
+				Path:      safeRoutePath(menu.Path),
 				Component: derefString(menu.Component),
 				Name:      routeName(menu.RouteName, menu.Path),
 				Query:     derefString(menu.Query),
-				Meta:      newMeta(menu.MenuName, menu.Icon, menu.IsCache == model.MenuCacheNo, menu.Path),
+				Meta:      newMeta(html.EscapeString(menu.MenuName), menu.Icon, menu.IsCache == model.MenuCacheNo, menu.Path),
 			}}
 
 		case menu.ParentID == MenuRootID && isInnerLink(menu):
 			// 一级内链：外层挂在 "/"，内层用 InnerLink 组件套 iframe
-			router.Meta = &model.MetaVo{Title: menu.MenuName, Icon: menu.Icon}
+			router.Meta = &model.MetaVo{Title: html.EscapeString(menu.MenuName), Icon: menu.Icon}
 			router.Path = "/"
 			routerPath := innerLinkReplacer.Replace(menu.Path)
 			link := menu.Path
@@ -385,13 +449,17 @@ func BuildRouters(menus []*model.SysMenu) []model.RouterVo {
 				Component: ComponentInnerLink,
 				Name:      routeName(menu.RouteName, routerPath),
 				// 这里用的是 3 参构造：link 无条件赋值，不做 http 前缀判断
-				Meta: &model.MetaVo{Title: menu.MenuName, Icon: menu.Icon, Link: &link},
+				Meta: &model.MetaVo{Title: html.EscapeString(menu.MenuName), Icon: menu.Icon, Link: &link},
 			}}
 		}
 
 		routers = append(routers, router)
 	}
 	return routers
+}
+
+func safeRoutePath(value string) string {
+	return strings.NewReplacer("&", "%26", "<", "%3C", ">", "%3E", `"`, "%22", "'", "%27").Replace(value)
 }
 
 // newMeta 对应 Java 版 MetaVo(title, icon, noCache, link)。

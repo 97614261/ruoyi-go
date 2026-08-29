@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
-	"regexp"
+	"net/url"
 	"strings"
 	"time"
 
@@ -15,27 +16,27 @@ import (
 
 	"ruoyi-go/internal/model"
 	"ruoyi-go/internal/service"
+	"ruoyi-go/pkg/asyncx"
 	"ruoyi-go/pkg/types"
 )
 
 // 各字段的截断上限，对应 sys_oper_log 的列长（varchar(2000)）。
 const (
-	maxParamLength  = 2000
-	maxResultLength = 2000
-	maxErrorLength  = 2000
+	maxParamLength      = 2000
+	maxResultLength     = 2000
+	maxErrorLength      = 2000
+	redactedValue       = "******"
+	unparseableLogValue = "[无法解析，已省略]"
+	uncachedLogValue    = "[未经过入口限制，已省略]"
+	multipartLogValue   = "[multipart 文件上传，参数未记录]"
+	unsupportedLogValue = "[不支持的参数格式，已省略]"
 )
 
-// 脱敏规则。**两种格式都要覆盖**：
-//
-//	JSON 体：{"password":"123456"}
-//	查询串：?oldPassword=123456&newPassword=abc
-//
-// 只做 JSON 是不够的 —— /system/user/profile/updatePwd 的参数就在 query 里，
-// 漏掉的话明文密码会原样落进一张可以被导出的表。
-var (
-	sensitiveJSON  = regexp.MustCompile(`"(password|oldPassword|newPassword|confirmPassword)"\s*:\s*"[^"]*"`)
-	sensitiveQuery = regexp.MustCompile(`(?i)\b(password|oldPassword|newPassword|confirmPassword)=[^&\s]*`)
-)
+// sensitiveParamNames 集中维护不可进入请求日志和操作日志的字段名。
+// 匹配不区分大小写，与 encoding/json 的字段绑定规则一致。
+var sensitiveParamNames = []string{"password", "oldPassword", "newPassword", "confirmPassword"}
+
+var operLogPool = asyncx.NewPool(4, 256)
 
 // OperLog 记录操作日志。
 //
@@ -62,13 +63,17 @@ func OperLog(title string, businessType int) gin.HandlerFunc {
 
 		// 异步写库：日志不该拖慢请求，也不该因为写失败影响业务结果。
 		// 必须用新的 context —— 请求的 ctx 在 handler 返回后就被取消了。
-		go func() {
+		writeLog := func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if err := service.RecordOperLog(ctx, record); err != nil {
 				slog.Warn("记录操作日志失败", "title", title, "err", err)
 			}
-		}()
+		}
+		if !operLogPool.Submit(writeLog) {
+			// 满载时同步降级，宁可只影响极端情况下的耗时，也不静默丢审计日志。
+			writeLog()
+		}
 	}
 }
 
@@ -84,17 +89,14 @@ func captureRequestBody(c *gin.Context) string {
 	if c.Request.Body == nil || c.Request.Method == http.MethodGet {
 		return ""
 	}
-	contentType := c.GetHeader("Content-Type")
-	if strings.HasPrefix(contentType, "multipart/form-data") {
-		return "[multipart 文件上传，参数未记录]"
+	if isMultipartRequest(c.GetHeader("Content-Type")) {
+		return multipartLogValue
 	}
-
-	body, err := io.ReadAll(c.Request.Body)
-	if err != nil {
-		return ""
+	if body, ok := cachedRequestBody(c); ok {
+		return string(body)
 	}
-	c.Request.Body = io.NopCloser(bytes.NewReader(body))
-	return string(body)
+	// 没经过入口限制就不读取，避免独立装配时重新引入无上限 io.ReadAll。
+	return uncachedLogValue
 }
 
 func buildOperLog(c *gin.Context, title string, businessType int,
@@ -119,12 +121,15 @@ func buildOperLog(c *gin.Context, title string, businessType int,
 		}
 	}
 
-	// 请求体为空时退回查询串（PUT ?a=b 这类接口）
-	params := requestBody
-	if params == "" {
-		params = c.Request.URL.RawQuery
+	// 请求体和查询串必须按各自的语法解析后脱敏。不能在原始文本上跑正则：
+	// JSON 键大小写、转义字符、非字符串值和 URL 编码都能绕过正则。
+	var params string
+	if requestBody != "" {
+		params = desensitizeBody(requestBody, c.GetHeader("Content-Type"))
+	} else {
+		params = desensitizeQuery(c.Request.URL.RawQuery)
 	}
-	record.OperParam = truncate(desensitize(params), maxParamLength)
+	record.OperParam = truncate(params, maxParamLength)
 
 	responseBody := writer.body.String()
 	record.JSONResult = truncate(responseBody, maxResultLength)
@@ -189,10 +194,97 @@ func extractCode(body string) (int, string) {
 	return result.Code, result.Msg
 }
 
-// desensitize 把参数里的密码替换掉，JSON 和查询串两种格式都处理。
-func desensitize(params string) string {
-	params = sensitiveJSON.ReplaceAllString(params, `"$1":"******"`)
-	return sensitiveQuery.ReplaceAllString(params, `$1=******`)
+func desensitizeBody(body, contentType string) string {
+	if body == uncachedLogValue {
+		return body
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return unparseableLogValue
+	}
+	switch {
+	case mediaType == "application/json" || strings.HasSuffix(mediaType, "+json"):
+		return desensitizeJSON(body)
+	case mediaType == "application/x-www-form-urlencoded":
+		return desensitizeQuery(body)
+	case strings.HasPrefix(mediaType, "multipart/") && body == multipartLogValue:
+		return multipartLogValue
+	default:
+		return unsupportedLogValue
+	}
+}
+
+func desensitizeJSON(raw string) string {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return unparseableLogValue
+	}
+	// Decode 必须消费完整输入；否则 `{"password":"x"} trailing` 会把
+	// 后半段未经检查的内容留在日志里。
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return unparseableLogValue
+	}
+	if _, ok := value.(map[string]any); !ok {
+		if _, ok := value.([]any); !ok {
+			return unsupportedLogValue
+		}
+	}
+
+	redactSensitiveValues(value)
+	clean, err := json.Marshal(value)
+	if err != nil {
+		return unparseableLogValue
+	}
+	return string(clean)
+}
+
+func desensitizeQuery(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	values, err := url.ParseQuery(raw)
+	if err != nil {
+		return unparseableLogValue
+	}
+	for key, items := range values {
+		if !isSensitiveParam(key) {
+			continue
+		}
+		for i := range items {
+			items[i] = redactedValue
+		}
+		values[key] = items
+	}
+	return values.Encode()
+}
+
+func redactSensitiveValues(value any) {
+	switch node := value.(type) {
+	case map[string]any:
+		for key, child := range node {
+			if isSensitiveParam(key) {
+				node[key] = redactedValue
+				continue
+			}
+			redactSensitiveValues(child)
+		}
+	case []any:
+		for _, child := range node {
+			redactSensitiveValues(child)
+		}
+	}
+}
+
+func isSensitiveParam(key string) bool {
+	for _, name := range sensitiveParamNames {
+		if strings.EqualFold(key, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // truncate 按字符截断到指定字节数。
