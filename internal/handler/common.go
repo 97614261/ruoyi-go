@@ -34,7 +34,7 @@ func CommonUpload(c *gin.Context) {
 
 	relURL, err := saveUpload(fileHeader)
 	if err != nil {
-		response.Fail(c, err.Error())
+		response.Fail(c, uploadFailureMessage(c, err))
 		return
 	}
 
@@ -72,7 +72,7 @@ func CommonUploads(c *gin.Context) {
 		relURL, err := saveUpload(fileHeader)
 		if err != nil {
 			rollbackUploads(c, saved)
-			response.Fail(c, err.Error())
+			response.Fail(c, uploadFailureMessage(c, err))
 			return
 		}
 		saved = append(saved, relURL)
@@ -88,6 +88,14 @@ func CommonUploads(c *gin.Context) {
 		Put("newFileNames", strings.Join(newFileNames, ",")).
 		Put("originalFilenames", strings.Join(originalFilenames, ",")).
 		JSON(c)
+}
+
+func uploadFailureMessage(c *gin.Context, err error) string {
+	if message, ok := upload.ClientMessage(err); ok {
+		return message
+	}
+	slog.ErrorContext(c.Request.Context(), "保存上传文件失败", "err", err)
+	return "文件上传失败，请稍后重试"
 }
 
 func rollbackUploads(c *gin.Context, resources []string) {
@@ -114,7 +122,7 @@ func CommonDownload(c *gin.Context) {
 		return
 	}
 
-	absPath, err := upload.SafeJoin(filepath.Join(uploadCfg.Path, upload.DownloadSubDir), fileName)
+	absPath, err := upload.SafeJoinExisting(filepath.Join(uploadCfg.Path, upload.DownloadSubDir), fileName)
 	if err != nil {
 		response.FailDownload(c, response.CodeError, "文件名称("+fileName+")非法，不允许下载。")
 		return
@@ -141,7 +149,7 @@ func CommonDownloadResource(c *gin.Context) {
 	// 前缀不存在时 StripResourcePrefix 返回空串，落到 SafeJoin 会指向根目录本身，
 	// 下面的 IsDir 判断会把它挡掉
 	relPath := upload.StripResourcePrefix(resource, uploadCfg.URLPrefix)
-	absPath, err := upload.SafeJoin(uploadCfg.Path, relPath)
+	absPath, err := upload.SafeJoinExisting(uploadCfg.Path, relPath)
 	if err != nil {
 		response.FailDownload(c, response.CodeError, "资源文件("+resource+")非法，不允许下载。")
 		return

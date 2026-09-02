@@ -1,6 +1,9 @@
 package excelx
 
 import (
+	"bufio"
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"reflect"
@@ -8,10 +11,19 @@ import (
 	"strings"
 	"time"
 
+	legacyxls "github.com/extrame/xls"
 	"github.com/xuri/excelize/v2"
 
 	"ruoyi-go/pkg/types"
 )
+
+const (
+	maxXLSXUnzipSize    = 128 << 20
+	maxXLSXWorksheetXML = 32 << 20
+	maxLegacyXLSSize    = 20 << 20
+)
+
+var legacyXLSMagic = []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}
 
 // RowError 一行数据的解析错误。
 //
@@ -32,28 +44,14 @@ type RowLimitError struct {
 
 func (e RowLimitError) Error() string { return fmt.Sprintf("数据行超过上限 %d", e.Limit) }
 
-// Import 解析 xlsx 为结构体切片。
+// Import parses xlsx and legacy xls workbooks into a struct slice.
 //
 // 按表头名称匹配 excel tag 的 name，列顺序无所谓，多余的列忽略。
 // 返回解析成功的行、逐行错误、以及致命错误（文件打不开等）。
 func Import[T any](r io.Reader, sheetName string, rowLimit ...int) ([]T, []RowError, error) {
-	file, err := excelize.OpenReader(r)
+	rows, err := openImportRows(r, sheetName)
 	if err != nil {
 		return nil, nil, fmt.Errorf("打开 Excel 失败: %w", err)
-	}
-	defer file.Close()
-
-	if sheetName == "" {
-		sheets := file.GetSheetList()
-		if len(sheets) == 0 {
-			return nil, nil, fmt.Errorf("Excel 中没有工作表")
-		}
-		sheetName = sheets[0]
-	}
-
-	rows, err := file.Rows(sheetName)
-	if err != nil {
-		return nil, nil, fmt.Errorf("读取工作表 %s 失败: %w", sheetName, err)
 	}
 	defer rows.Close()
 
@@ -130,6 +128,120 @@ func Import[T any](r io.Reader, sheetName string, rowLimit ...int) ([]T, []RowEr
 	}
 	return result, rowErrors, nil
 }
+
+type importRows interface {
+	Next() bool
+	Columns(...excelize.Options) ([]string, error)
+	Error() error
+	Close() error
+}
+
+type xlsxRows struct {
+	*excelize.Rows
+	file *excelize.File
+}
+
+func (r *xlsxRows) Close() error {
+	return errors.Join(r.Rows.Close(), r.file.Close())
+}
+
+func openImportRows(r io.Reader, sheetName string) (importRows, error) {
+	buffered := bufio.NewReader(r)
+	magic, _ := buffered.Peek(len(legacyXLSMagic))
+	if bytes.Equal(magic, legacyXLSMagic) {
+		return openLegacyXLSRows(buffered, sheetName)
+	}
+
+	file, err := excelize.OpenReader(buffered, excelize.Options{
+		UnzipSizeLimit:    maxXLSXUnzipSize,
+		UnzipXMLSizeLimit: maxXLSXWorksheetXML,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if sheetName == "" {
+		sheets := file.GetSheetList()
+		if len(sheets) == 0 {
+			file.Close()
+			return nil, fmt.Errorf("Excel 中没有工作表")
+		}
+		sheetName = sheets[0]
+	}
+	rows, err := file.Rows(sheetName)
+	if err != nil {
+		file.Close()
+		return nil, fmt.Errorf("读取工作表 %s 失败: %w", sheetName, err)
+	}
+	return &xlsxRows{Rows: rows, file: file}, nil
+}
+
+type legacyRows struct {
+	sheet *legacyxls.WorkSheet
+	row   int
+}
+
+func openLegacyXLSRows(r io.Reader, sheetName string) (_ importRows, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("旧版 Excel 文件损坏: %v", recovered)
+		}
+	}()
+
+	data, err := io.ReadAll(io.LimitReader(r, maxLegacyXLSSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxLegacyXLSSize {
+		return nil, fmt.Errorf("旧版 Excel 文件超过 %d MB", maxLegacyXLSSize>>20)
+	}
+	workbook, err := legacyxls.OpenReader(bytes.NewReader(data), "utf-8")
+	if err != nil {
+		return nil, err
+	}
+	if workbook == nil || workbook.NumSheets() == 0 {
+		return nil, fmt.Errorf("Excel 中没有工作表")
+	}
+	var sheet *legacyxls.WorkSheet
+	for i := 0; i < workbook.NumSheets(); i++ {
+		candidate := workbook.GetSheet(i)
+		if candidate != nil && (sheetName == "" || candidate.Name == sheetName) {
+			sheet = candidate
+			break
+		}
+	}
+	if sheet == nil {
+		return nil, fmt.Errorf("读取工作表 %s 失败: 工作表不存在", sheetName)
+	}
+	return &legacyRows{sheet: sheet}, nil
+}
+
+func (r *legacyRows) Next() bool {
+	if r.row > int(r.sheet.MaxRow) {
+		return false
+	}
+	r.row++
+	return true
+}
+
+func (r *legacyRows) Columns(_ ...excelize.Options) (_ []string, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("读取旧版 Excel 第 %d 行失败: %v", r.row, recovered)
+		}
+	}()
+	row := r.sheet.Row(r.row - 1)
+	if row == nil {
+		return []string{}, nil
+	}
+	columns := make([]string, row.LastCol())
+	for i := range columns {
+		columns[i] = row.Col(i)
+	}
+	return columns, nil
+}
+
+func (*legacyRows) Error() error { return nil }
+func (*legacyRows) Close() error { return nil }
 
 // Template 生成只有表头的导入模板。
 //

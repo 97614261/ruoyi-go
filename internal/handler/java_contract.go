@@ -158,6 +158,40 @@ func contractUserList(users []model.SysUser) []map[string]any {
 	return result
 }
 
+// contractAuthUserList matches the deliberately narrow projection used by
+// Java's allocated/unallocated-role queries. Only the user's basic columns and
+// the nested deptId are selected there; every other mapped field stays null.
+func contractAuthUserList(users []model.SysUser) []map[string]any {
+	result := make([]map[string]any, 0, len(users))
+	for _, user := range users {
+		item := userMap(user)
+		delete(item, "userType")
+		item["avatar"] = nil
+		item["sex"] = nil
+		item["delFlag"] = nil
+		item["pwdUpdateDate"] = nil
+		item["createBy"] = nil
+		item["updateBy"] = nil
+		item["updateTime"] = nil
+		item["remark"] = nil
+		item["roleId"] = nil
+		item["roleIds"] = nil
+		item["postIds"] = nil
+		item["roles"] = []any{}
+		if user.DeptID != nil {
+			item["dept"] = map[string]any{
+				"deptId": *user.DeptID, "parentId": nil, "ancestors": nil,
+				"deptName": nil, "orderNum": nil, "leader": nil,
+				"phone": nil, "email": nil, "status": nil, "delFlag": nil,
+				"parentName": nil, "children": []any{}, "createBy": nil,
+				"createTime": nil, "updateBy": nil, "updateTime": nil, "remark": nil,
+			}
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
 func contractUser(user model.SysUser, full bool) map[string]any {
 	result := userMap(user)
 	delete(result, "userType") // Java SysUser 没有该响应属性。

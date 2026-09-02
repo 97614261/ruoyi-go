@@ -3,6 +3,7 @@ package redisx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,10 @@ import (
 )
 
 var client *redis.Client
+
+// ErrStopScan lets a callback finish a SCAN successfully without walking the
+// remaining keyspace. It is useful for bounded list endpoints.
+var ErrStopScan = errors.New("停止扫描")
 
 // Options Redis 连接参数。
 type Options struct {
@@ -50,6 +55,26 @@ func Ping(ctx context.Context) error {
 	return client.Ping(ctx).Err()
 }
 
+// Stats returns Redis client pool counters for health checks and load tests.
+func Stats() (map[string]any, error) {
+	if client == nil {
+		return nil, fmt.Errorf("Redis 未初始化")
+	}
+	stats := client.PoolStats()
+	return map[string]any{
+		"hits":            stats.Hits,
+		"misses":          stats.Misses,
+		"timeouts":        stats.Timeouts,
+		"waitCount":       stats.WaitCount,
+		"waitMs":          stats.WaitDurationNs / int64(time.Millisecond),
+		"unusable":        stats.Unusable,
+		"totalConns":      stats.TotalConns,
+		"idleConns":       stats.IdleConns,
+		"staleConns":      stats.StaleConns,
+		"pendingRequests": stats.PendingRequests,
+	}, nil
+}
+
 // Close 关闭连接。
 func Close() error {
 	if client == nil {
@@ -78,17 +103,32 @@ func ScanKeys(ctx context.Context, prefix string, batch int64, fn func(key strin
 
 // ScanKeyBatches 按 SCAN 返回的批次迭代 key，供 MGET/Pipeline 批量读取使用。
 func ScanKeyBatches(ctx context.Context, prefix string, batch int64, fn func(keys []string) error) error {
+	return scanKeyBatches(ctx, prefix, batch, func(ctx context.Context, cursor uint64, pattern string, count int64) ([]string, uint64, error) {
+		return client.Scan(ctx, cursor, pattern, count).Result()
+	}, fn)
+}
+
+func scanKeyBatches(
+	ctx context.Context,
+	prefix string,
+	batch int64,
+	scan func(context.Context, uint64, string, int64) ([]string, uint64, error),
+	fn func(keys []string) error,
+) error {
 	if batch <= 0 {
 		batch = 100
 	}
 	var cursor uint64
 	for {
-		keys, next, err := client.Scan(ctx, cursor, prefix+"*", batch).Result()
+		keys, next, err := scan(ctx, cursor, prefix+"*", batch)
 		if err != nil {
 			return fmt.Errorf("SCAN %s* 失败: %w", prefix, err)
 		}
 		if len(keys) > 0 {
 			if err := fn(keys); err != nil {
+				if errors.Is(err, ErrStopScan) {
+					return nil
+				}
 				return err
 			}
 		}

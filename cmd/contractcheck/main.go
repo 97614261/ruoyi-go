@@ -230,6 +230,12 @@ func run() (exitCode int) {
 	different := total - matched
 	percent := float64(matched) * 100 / float64(total)
 	fmt.Printf("SUMMARY matched=%d different=%d total=%d percent=%.2f%%\n", matched, different, total, percent)
+	supplementalMatched, supplementalTotal := compareSupplementalRouteProbes(goAPI, javaAPI, cfg.maxDiffs)
+	supplementalDifferent := supplementalTotal - supplementalMatched
+	fmt.Printf("SUPPLEMENTAL_PROBE_SUMMARY matched=%d different=%d total=%d percent=%.2f%%\n",
+		supplementalMatched, supplementalDifferent, supplementalTotal,
+		float64(supplementalMatched)*100/float64(supplementalTotal))
+	different += supplementalDifferent
 	if cfg.writeProbes {
 		probeMatched, probeTotal := compareWriteProbes(goAPI, javaAPI, cfg.maxDiffs)
 		probeDifferent := probeTotal - probeMatched

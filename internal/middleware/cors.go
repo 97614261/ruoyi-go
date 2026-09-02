@@ -10,9 +10,22 @@ import (
 // allowedOrigins 允许跨域的来源白名单，由 InitCORS 注入。
 var allowedOrigins []string
 
+var allowAnyOrigin bool
+
 // InitCORS 设置跨域白名单，必须在构建路由前调用。
 func InitCORS(origins []string) {
-	allowedOrigins = origins
+	allowedOrigins = allowedOrigins[:0]
+	allowAnyOrigin = false
+	for _, origin := range origins {
+		origin = strings.TrimSpace(origin)
+		if origin == "*" {
+			allowAnyOrigin = true
+			continue
+		}
+		if origin != "" {
+			allowedOrigins = append(allowedOrigins, origin)
+		}
+	}
 }
 
 // CORS 跨域处理。
@@ -29,14 +42,18 @@ func CORS() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 		if origin != "" && isOriginAllowed(origin) {
-			c.Header("Access-Control-Allow-Origin", origin)
-			c.Header("Access-Control-Allow-Credentials", "true")
+			if allowAnyOrigin {
+				// The CORS standard forbids credentials with a wildcard origin.
+				c.Header("Access-Control-Allow-Origin", "*")
+			} else {
+				c.Header("Access-Control-Allow-Origin", origin)
+				c.Header("Access-Control-Allow-Credentials", "true")
+				// An echoed Origin changes the response and therefore the cache key.
+				c.Header("Vary", "Origin")
+			}
 			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Authorization, X-Requested-With")
 			c.Header("Access-Control-Max-Age", "86400")
-			// 回显的 Origin 会进缓存，必须声明按 Origin 变化，
-			// 否则 CDN／代理可能把 A 站的响应头发给 B 站
-			c.Header("Vary", "Origin")
 		}
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
@@ -47,10 +64,10 @@ func CORS() gin.HandlerFunc {
 }
 
 func isOriginAllowed(origin string) bool {
+	if allowAnyOrigin {
+		return true
+	}
 	for _, allowed := range allowedOrigins {
-		if allowed == "*" {
-			return true
-		}
 		if strings.EqualFold(allowed, origin) {
 			return true
 		}

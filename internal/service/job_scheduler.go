@@ -49,6 +49,9 @@ type jobScheduler struct {
 	runMu sync.Mutex
 	// running 正在执行的任务 ID，实现「禁止并发」
 	running map[int64]bool
+	// runWG 跟踪真正仍在运行的任务函数。execute 可能因 context 超时先返回，
+	// 但停止调度器时仍应等待任务函数退出，而不是只等待外层 cron 回调。
+	runWG sync.WaitGroup
 }
 
 // scheduler 包级单例。
@@ -102,10 +105,30 @@ func StopScheduler(ctx context.Context) {
 
 	select {
 	case <-stopped.Done():
-		slog.InfoContext(ctx, "定时任务调度器已停止")
 	case <-ctx.Done():
 		// 优雅关闭有总超时，不能被一个长任务无限拖住
 		slog.WarnContext(ctx, "等待定时任务结束超时，强制退出")
+		return
+	}
+
+	if !scheduler.waitForRuns(ctx) {
+		slog.WarnContext(ctx, "等待定时任务函数退出超时，强制退出")
+		return
+	}
+	slog.InfoContext(ctx, "定时任务调度器已停止")
+}
+
+func (s *jobScheduler) waitForRuns(ctx context.Context) bool {
+	done := make(chan struct{})
+	go func() {
+		s.runWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 
@@ -218,7 +241,6 @@ func execute(target *model.SysJob) {
 			"jobId", target.JobID, "jobName", target.JobName)
 		return
 	}
-	defer scheduler.endRun(target)
 
 	start := time.Now().In(types.Location)
 	record := model.SysJobLog{
@@ -229,7 +251,7 @@ func execute(target *model.SysJob) {
 		StartTime:    types.Time(start),
 	}
 
-	err := runTask(ctx, target)
+	err := scheduler.runStartedTask(ctx, target)
 
 	end := time.Now().In(types.Location)
 	record.EndTime = types.Time(end)
@@ -257,16 +279,36 @@ func execute(target *model.SysJob) {
 	}
 }
 
-// runTask 查注册表并调用，把 panic 转成 error。
-func runTask(ctx context.Context, target *model.SysJob) (err error) {
+// runStartedTask 执行已经通过 beginRun 登记的任务。
+//
+// context 超时只代表调用方停止等待，不能强行终止不响应 context 的 Go 函数。
+// 此时 running 标记和 runWG 必须保留到任务函数真正退出，防止下一轮与旧任务重叠。
+func (s *jobScheduler) runStartedTask(ctx context.Context, target *model.SysJob) (err error) {
+	return s.runStartedTaskWith(ctx, target, invokeTask)
+}
+
+func (s *jobScheduler) runStartedTaskWith(
+	ctx context.Context,
+	target *model.SysJob,
+	invoke func(context.Context, *model.SysJob) error,
+) (err error) {
 	result := make(chan error, 1)
+	done := make(chan struct{})
+	s.runWG.Add(1)
 	go func() {
-		result <- invokeTask(ctx, target)
+		defer s.runWG.Done()
+		defer close(done)
+		result <- invoke(ctx, target)
 	}()
 	select {
 	case err := <-result:
+		s.endRun(target)
 		return err
 	case <-ctx.Done():
+		go func() {
+			<-done
+			s.endRun(target)
+		}()
 		return fmt.Errorf("任务超过执行时限或被取消: %w", ctx.Err())
 	}
 }

@@ -16,6 +16,11 @@ import (
 
 var manualJobPool = asyncx.NewPool(4, 64)
 
+// ShutdownManualJobPool stops accepting manual runs and waits for accepted jobs.
+func ShutdownManualJobPool(ctx context.Context) error {
+	return manualJobPool.Shutdown(ctx)
+}
+
 // ListJobPage 分页查询定时任务。
 func ListJobPage(ctx context.Context, query model.JobQuery, pg page.Query) ([]model.SysJob, int64, error) {
 	list, total, err := repository.SelectJobPage(ctx, query, pg)

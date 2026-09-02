@@ -221,6 +221,38 @@ func CheckMenuExistRole(ctx context.Context, menuID int64) (bool, error) {
 	return count > 0, nil
 }
 
+// SelectUserIDsByMenuID returns deduplicated users whose roles contain the menu.
+func SelectUserIDsByMenuID(ctx context.Context, menuID int64) ([]int64, error) {
+	var userIDs []int64
+	err := DB(ctx).Table("sys_user_role ur").
+		Joins("INNER JOIN sys_role_menu rm ON rm.role_id = ur.role_id").
+		Where("rm.menu_id = ?", menuID).
+		Distinct().
+		Pluck("ur.user_id", &userIDs).Error
+	if err != nil {
+		return nil, fmt.Errorf("查询菜单 %d 的关联用户失败: %w", menuID, err)
+	}
+	return userIDs, nil
+}
+
+// SelectMenuParentIDs loads the complete parent relation in one query so the
+// service can reject cycles without issuing database queries in a loop.
+func SelectMenuParentIDs(ctx context.Context) (map[int64]int64, error) {
+	type parentRow struct {
+		MenuID   int64 `gorm:"column:menu_id"`
+		ParentID int64 `gorm:"column:parent_id"`
+	}
+	var rows []parentRow
+	if err := DB(ctx).Model(&model.SysMenu{}).Select("menu_id", "parent_id").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("查询菜单父子关系失败: %w", err)
+	}
+	parents := make(map[int64]int64, len(rows))
+	for _, row := range rows {
+		parents[row.MenuID] = row.ParentID
+	}
+	return parents, nil
+}
+
 // InsertMenu 新增菜单。
 func InsertMenu(ctx context.Context, menu *model.SysMenu) error {
 	if err := DB(ctx).Create(menu).Error; err != nil {

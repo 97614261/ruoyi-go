@@ -46,6 +46,11 @@ func ImportUsers(ctx context.Context, operator *model.SysUser, r io.Reader, upda
 		return "", errs.New("导入用户数据不能为空！")
 	}
 
+	// Keep the preload and every following user write in the same single-process
+	// critical section, otherwise a concurrent create can invalidate byName.
+	userWriteMu.Lock()
+	defer userWriteMu.Unlock()
+
 	deptSet := make(map[int64]struct{})
 	names := make([]string, 0, len(users))
 	for i := range users {
@@ -84,18 +89,20 @@ func ImportUsers(ctx context.Context, operator *model.SysUser, r io.Reader, upda
 	if initPassword == "" {
 		return "", errs.New("未配置初始密码（sys.user.initPassword），请先在参数设置中补充")
 	}
+	if !validPasswordLength(initPassword) {
+		return "", errs.Newf("初始密码长度必须在%d到%d个字符之间", passwordMinLength, passwordMaxLength)
+	}
 	hashed, err := HashPassword(initPassword)
 	if err != nil {
 		return "", err
 	}
 
 	var (
-		successNum      int
-		failureNum      int
-		successMsg      strings.Builder
-		failureMsg      strings.Builder
-		updatedNormal   []int64
-		updatedDisabled []int64
+		successNum    int
+		failureNum    int
+		successMsg    strings.Builder
+		failureMsg    strings.Builder
+		updatedNormal []int64
 	)
 
 	// 解析阶段的行错误直接计入失败
@@ -116,21 +123,12 @@ func ImportUsers(ctx context.Context, operator *model.SysUser, r io.Reader, upda
 			continue
 		}
 		byName[strings.ToLower(user.UserName)] = user
-		if updatedID > 0 {
-			if updatedStatus == model.StatusDisable {
-				updatedDisabled = append(updatedDisabled, updatedID)
-			} else {
-				updatedNormal = append(updatedNormal, updatedID)
-			}
+		if updatedID > 0 && updatedStatus != model.StatusDisable {
+			updatedNormal = append(updatedNormal, updatedID)
 		}
 		successNum++
 		if successNum <= maxImportMessageDetails {
 			fmt.Fprintf(&successMsg, "<br/>%d、账号 %s 导入成功", successNum, html.EscapeString(user.UserName))
-		}
-	}
-	if len(updatedDisabled) > 0 {
-		if err := RevokeUserSessions(ctx, updatedDisabled...); err != nil {
-			return "", err
 		}
 	}
 	if len(updatedNormal) > 0 {
@@ -174,6 +172,9 @@ func importOneUser(ctx context.Context, operator *model.SysUser, user *model.Sys
 		if user.Status == "" {
 			user.Status = model.StatusNormal
 		}
+		if err := checkUserStatus(user.Status); err != nil {
+			return 0, "", err
+		}
 		user.CreateBy = operatorName
 		user.CreateTime = types.Now()
 		return 0, "", repository.InsertUser(ctx, user)
@@ -192,16 +193,23 @@ func importOneUser(ctx context.Context, operator *model.SysUser, user *model.Sys
 	user.UserID = existing.UserID
 	user.UpdateBy = operatorName
 	user.UpdateTime = types.Now()
+	if user.Status == "" {
+		user.Status = existing.Status
+	}
+	if err := checkUserStatus(user.Status); err != nil {
+		return 0, "", err
+	}
+	if user.Status == model.StatusDisable {
+		if err := RevokeUserSessions(ctx, user.UserID); err != nil {
+			return 0, "", err
+		}
+	}
 	// 用 UpdateUserBasic 而不是 UpdateUser：导入表里没有角色和岗位列，
 	// 走 UpdateUser 会把被更新用户的角色、岗位全部清空。理由详见该函数注释。
 	if err := repository.UpdateUserBasic(ctx, user); err != nil {
 		return 0, "", err
 	}
-	status := user.Status
-	if status == "" {
-		status = existing.Status
-	}
-	return user.UserID, status, nil
+	return user.UserID, user.Status, nil
 }
 
 func existingIf(ok bool, user *model.SysUser) *model.SysUser {

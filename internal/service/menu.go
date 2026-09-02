@@ -5,6 +5,7 @@ import (
 	"html"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"ruoyi-go/internal/model"
@@ -240,6 +241,9 @@ func BuildMenuTreeSelect(menus []model.SysMenu) []model.TreeSelect {
 
 // CreateMenu 新增菜单。
 func CreateMenu(ctx context.Context, user *model.SysUser, menu *model.SysMenu, operator string) error {
+	menuWriteMu.Lock()
+	defer menuWriteMu.Unlock()
+
 	if menu.ParentID != MenuRootID {
 		if _, err := checkMenuIDsForUser(ctx, user, []int64{menu.ParentID}); err != nil {
 			return err
@@ -256,6 +260,9 @@ func CreateMenu(ctx context.Context, user *model.SysUser, menu *model.SysMenu, o
 
 // UpdateMenu 修改菜单。
 func UpdateMenu(ctx context.Context, user *model.SysUser, menu *model.SysMenu, operator string) error {
+	menuWriteMu.Lock()
+	defer menuWriteMu.Unlock()
+
 	if menu.MenuID == 0 {
 		return errs.New("菜单ID不能为空")
 	}
@@ -280,10 +287,52 @@ func UpdateMenu(ctx context.Context, user *model.SysUser, menu *model.SysMenu, o
 	if existing == nil {
 		return errs.New("菜单不存在")
 	}
+	if menu.ParentID != MenuRootID {
+		parents, err := repository.SelectMenuParentIDs(ctx)
+		if err != nil {
+			return err
+		}
+		if menuParentCreatesCycle(menu.MenuID, menu.ParentID, parents) {
+			return errs.Newf("修改菜单'%s'失败，上级菜单不能选择自己的下级", menu.MenuName)
+		}
+	}
 
 	menu.UpdateBy = operator
 	menu.UpdateTime = types.Now()
-	return repository.UpdateMenu(ctx, menu)
+	permissionChanged := existing.Status != menu.Status || derefString(existing.Perms) != derefString(menu.Perms)
+	if !permissionChanged {
+		return repository.UpdateMenu(ctx, menu)
+	}
+
+	userIDs, err := repository.SelectUserIDsByMenuID(ctx, menu.MenuID)
+	if err != nil {
+		return err
+	}
+	if err := repository.UpdateMenu(ctx, menu); err != nil {
+		return err
+	}
+	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	return RefreshOnlineUsersByID(refreshCtx, userIDs...)
+}
+
+func menuParentCreatesCycle(menuID, parentID int64, parents map[int64]int64) bool {
+	seen := make(map[int64]struct{})
+	for parentID != MenuRootID {
+		if parentID == menuID {
+			return true
+		}
+		if _, exists := seen[parentID]; exists {
+			return true
+		}
+		seen[parentID] = struct{}{}
+		next, exists := parents[parentID]
+		if !exists {
+			return false
+		}
+		parentID = next
+	}
+	return false
 }
 
 // DeleteMenu 删除菜单。

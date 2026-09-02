@@ -153,12 +153,15 @@ func TestParseNilWhitelist(t *testing.T) {
 }
 
 func TestOffset(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
 	cases := []struct {
 		num, size, want int
 	}{
 		{1, 10, 0},
 		{2, 10, 10},
 		{5, 20, 80},
+		{0, 10, 0},
+		{maxInt, MaxPageSize, maxInt},
 	}
 	for _, tc := range cases {
 		q := Query{PageNum: tc.num, PageSize: tc.size}

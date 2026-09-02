@@ -114,6 +114,12 @@ func CheckUserDataScope(ctx context.Context, operator *model.SysUser, userID int
 
 // CreateUser 新增用户。
 func CreateUser(ctx context.Context, operator *model.SysUser, user *model.SysUser, operatorName string) error {
+	userWriteMu.Lock()
+	defer userWriteMu.Unlock()
+
+	// The client must never influence the auto-increment identity. It also must
+	// not smuggle the reserved role through a forged userId=1 on a create request.
+	user.UserID = 0
 	if err := checkUserRelatedScope(ctx, operator, user); err != nil {
 		return err
 	}
@@ -123,13 +129,15 @@ func CreateUser(ctx context.Context, operator *model.SysUser, user *model.SysUse
 	if user.Password == "" {
 		return errs.New("密码不能为空")
 	}
+	if !validPasswordLength(user.Password) {
+		return errs.Newf("密码长度必须在%d到%d个字符之间", passwordMinLength, passwordMaxLength)
+	}
 
 	hashed, err := HashPassword(user.Password)
 	if err != nil {
 		return err
 	}
 
-	user.UserID = 0
 	user.Password = hashed
 	user.DelFlag = model.DelFlagExist
 	if user.UserType == "" {
@@ -137,6 +145,9 @@ func CreateUser(ctx context.Context, operator *model.SysUser, user *model.SysUse
 	}
 	if user.Status == "" {
 		user.Status = model.StatusNormal
+	}
+	if err := checkUserStatus(user.Status); err != nil {
+		return err
 	}
 	user.CreateBy = operatorName
 	user.CreateTime = types.Now()
@@ -150,6 +161,9 @@ func CreateUser(ctx context.Context, operator *model.SysUser, user *model.SysUse
 //
 // 不处理密码：编辑表单不含密码字段，若一并更新会把账号密码清成空串的哈希。
 func UpdateUser(ctx context.Context, operator *model.SysUser, user *model.SysUser, operatorName string) error {
+	userWriteMu.Lock()
+	defer userWriteMu.Unlock()
+
 	if user.UserID == 0 {
 		return errs.New("用户ID不能为空")
 	}
@@ -157,6 +171,9 @@ func UpdateUser(ctx context.Context, operator *model.SysUser, user *model.SysUse
 		return err
 	}
 	if err := CheckUserDataScope(ctx, operator, user.UserID); err != nil {
+		return err
+	}
+	if err := checkUserStatus(user.Status); err != nil {
 		return err
 	}
 	if err := checkUserRelatedScope(ctx, operator, user); err != nil {
@@ -176,28 +193,38 @@ func UpdateUser(ctx context.Context, operator *model.SysUser, user *model.SysUse
 
 	user.UpdateBy = operatorName
 	user.UpdateTime = types.Now()
+	if user.Status == model.StatusDisable {
+		if err := RevokeUserSessions(ctx, user.UserID); err != nil {
+			return err
+		}
+	}
 	if err := repository.UpdateUser(ctx, user); err != nil {
 		return err
 	}
 	if user.Status == model.StatusDisable {
-		return RevokeUserSessions(ctx, user.UserID)
+		return nil
 	}
 	return RefreshOnlineUserByID(ctx, user.UserID)
 }
 
 // ChangeUserStatus 启用/停用用户。
 func ChangeUserStatus(ctx context.Context, operator *model.SysUser, userID int64, status, operatorName string) error {
+	if err := checkUserStatus(status); err != nil {
+		return err
+	}
 	if err := CheckUserAllowed(userID); err != nil {
 		return err
 	}
 	if err := CheckUserDataScope(ctx, operator, userID); err != nil {
 		return err
 	}
+	if status == model.StatusDisable {
+		if err := RevokeUserSessions(ctx, userID); err != nil {
+			return err
+		}
+	}
 	if err := repository.UpdateUserStatus(ctx, userID, status, operatorName); err != nil {
 		return err
-	}
-	if status == model.StatusDisable {
-		return RevokeUserSessions(ctx, userID)
 	}
 	return nil
 }
@@ -210,14 +237,20 @@ func ResetUserPwd(ctx context.Context, operator *model.SysUser, userID int64, pa
 	if err := CheckUserDataScope(ctx, operator, userID); err != nil {
 		return err
 	}
+	if !validPasswordLength(password) {
+		return errs.Newf("密码长度必须在%d到%d个字符之间", passwordMinLength, passwordMaxLength)
+	}
 	hashed, err := HashPassword(password)
 	if err != nil {
+		return err
+	}
+	if err := RevokeUserSessions(ctx, userID); err != nil {
 		return err
 	}
 	if err := repository.ResetUserPwd(ctx, userID, hashed, operatorName, time.Now()); err != nil {
 		return err
 	}
-	return RevokeUserSessions(ctx, userID)
+	return nil
 }
 
 // DeleteUsers 批量删除用户。
@@ -238,10 +271,13 @@ func DeleteUsers(ctx context.Context, operator *model.SysUser, userIDs []int64) 
 			return err
 		}
 	}
+	if err := RevokeUserSessions(ctx, userIDs...); err != nil {
+		return err
+	}
 	if err := repository.DeleteUserByIDs(ctx, userIDs); err != nil {
 		return err
 	}
-	return RevokeUserSessions(ctx, userIDs...)
+	return nil
 }
 
 // AuthRoleOfUser 查用户的授权角色页面数据。
@@ -295,6 +331,9 @@ func AssignUserRoles(ctx context.Context, operator *model.SysUser, userID int64,
 	if err != nil {
 		return err
 	}
+	if err := checkReservedAdminRole(userID, roleIDs); err != nil {
+		return err
+	}
 	if err := repository.ReplaceUserRoles(ctx, userID, roleIDs); err != nil {
 		return err
 	}
@@ -322,12 +361,34 @@ func checkUserRelatedScope(ctx context.Context, operator *model.SysUser, user *m
 	if err != nil {
 		return err
 	}
+	if err := checkReservedAdminRole(user.UserID, roleIDs); err != nil {
+		return err
+	}
 	postIDs, err := checkPostIDs(ctx, user.PostIDs)
 	if err != nil {
 		return err
 	}
 	user.RoleIDs = roleIDs
 	user.PostIDs = postIDs
+	return nil
+}
+
+func checkReservedAdminRole(userID int64, roleIDs []int64) error {
+	if userID == model.AdminUserID {
+		return nil
+	}
+	for _, roleID := range roleIDs {
+		if roleID == model.AdminRoleID {
+			return errs.New("不允许给普通用户分配超级管理员角色")
+		}
+	}
+	return nil
+}
+
+func checkUserStatus(status string) error {
+	if status != model.StatusNormal && status != model.StatusDisable {
+		return errs.New("用户状态只能是0或1")
+	}
 	return nil
 }
 

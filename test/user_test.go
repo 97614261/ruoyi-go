@@ -2,15 +2,23 @@ package apitest
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"hash/crc32"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/xuri/excelize/v2"
+	"gorm.io/gorm"
 
+	"ruoyi-go/internal/model"
+	"ruoyi-go/internal/repository"
+	"ruoyi-go/internal/service"
+	"ruoyi-go/pkg/page"
 	"ruoyi-go/pkg/redisx"
 )
 
@@ -94,6 +102,57 @@ func TestUserCRUD(t *testing.T) {
 	mustFail(t, doGet(t, path), "用户不存在", "删除后再查")
 }
 
+func TestUserListDeptProjectionAndQueryCount(t *testing.T) {
+	body := newUserPayload("list_dept")
+	createUser(t, body)
+	userName := fmt.Sprint(body["userName"])
+
+	expectedDept := dataObject(t, doGet(t, "/system/dept/"+idPath(testDeptID)), "查询预期部门")
+	rows := pageRows(t, doGet(t, "/system/user/list?pageSize=10&userName="+url.QueryEscape(userName)), "用户列表部门投影")
+	item := findBy(rows, "userName", userName)
+	if item == nil {
+		t.Fatalf("用户列表找不到测试用户 %s", userName)
+	}
+	dept, ok := item["dept"].(map[string]any)
+	if !ok {
+		t.Fatalf("用户列表必须返回部门对象，实际 %T(%v)", item["dept"], item["dept"])
+	}
+	for _, key := range []string{"deptId", "deptName", "leader"} {
+		assertField(t, dept, key, expectedDept[key], "用户列表部门投影")
+	}
+
+	// 只统计带有本测试 context 标记的查询，避免后台任务影响计数。
+	type queryCountKey struct{}
+	ctx := context.WithValue(context.Background(), queryCountKey{}, true)
+	var queryCount atomic.Int32
+	callbackName := fmt.Sprintf("test:user-page-query-count:%p", &queryCount)
+	db := repository.DB(ctx)
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if marked, _ := tx.Statement.Context.Value(queryCountKey{}).(bool); marked {
+			queryCount.Add(1)
+		}
+	}); err != nil {
+		t.Fatalf("注册查询计数器失败：%v", err)
+	}
+	defer func() {
+		if err := db.Callback().Query().Remove(callbackName); err != nil {
+			t.Errorf("移除查询计数器失败：%v", err)
+		}
+	}()
+
+	list, total, err := repository.SelectUserPage(ctx, model.UserQuery{UserName: userName},
+		page.Query{PageNum: 1, PageSize: 10}, nil)
+	if err != nil {
+		t.Fatalf("直接查询用户分页失败：%v", err)
+	}
+	if total != 1 || len(list) != 1 {
+		t.Fatalf("用户分页结果错误：total=%d len=%d", total, len(list))
+	}
+	if got := queryCount.Load(); got != 2 {
+		t.Fatalf("用户分页应固定为 COUNT + 分页 JOIN 两条 SQL，实际 %d 条", got)
+	}
+}
+
 // TestUserDeleteRevokesSessions 删除账号后，已经签发的会话必须立即失效。
 func TestUserDeleteRevokesSessions(t *testing.T) {
 	body := newUserPayload("delete_session")
@@ -152,6 +211,28 @@ func TestUserBatchDeleteRevokesSessions(t *testing.T) {
 	mustOK(t, doDelete(t, path), "批量删除在线用户")
 	assertTokenUnauthorized(t, token1, "批量删除第一个用户")
 	assertTokenUnauthorized(t, token2, "批量删除第二个用户")
+}
+
+func TestPasswordResetRevokesBeforeFailedDatabaseWrite(t *testing.T) {
+	body := newUserPayload("revoke_before_write")
+	userID := createUser(t, body)
+	token := mustLogin(t, fmt.Sprint(body["userName"]))
+	if err := repository.DeleteUserByIDs(context.Background(), []int64{userID}); err != nil {
+		t.Fatalf("清理测试用户关联失败：%v", err)
+	}
+	if err := repository.DB(context.Background()).Where("user_id = ?", userID).Delete(&model.SysUser{}).Error; err != nil {
+		t.Fatalf("物理删除测试用户失败：%v", err)
+	}
+	admin, err := repository.SelectUserByID(context.Background(), model.AdminUserID)
+	if err != nil || admin == nil {
+		t.Fatalf("读取管理员失败：admin=%v err=%v", admin, err)
+	}
+
+	err = service.ResetUserPwd(context.Background(), admin, userID, "newPassword123", "admin")
+	if err == nil {
+		t.Fatal("不存在的用户应使数据库更新失败")
+	}
+	assertTokenUnauthorized(t, token, "数据库写入失败前也必须先撤销旧会话")
 }
 
 // TestUserDetailContract 用户详情是混合形态：data 与四个平铺字段并存。
@@ -261,6 +342,9 @@ func TestUserChangeStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("第二个设备登录失败：%v", err)
 	}
+	mustFail(t, doPut(t, "/system/user/changeStatus", map[string]any{
+		"userId": id, "status": "2",
+	}), "Status", "拒绝未知账号状态")
 
 	mustOK(t, doPut(t, "/system/user/changeStatus", map[string]any{
 		"userId": id, "status": "1",
@@ -293,6 +377,9 @@ func TestUserAuthRole(t *testing.T) {
 	mustOK(t, r, "查用户的可分配角色")
 	assertTopLevel(t, r, "用户授权角色", "code", "msg", "user", "roles")
 	assertNoTopLevel(t, r, "用户授权角色", "data")
+
+	mustFail(t, doPut(t, fmt.Sprintf("/system/user/authRole?userId=%d&roleIds=%d", id, adminRoleID), nil),
+		"不允许给普通用户分配超级管理员角色", "直接提交保留角色")
 
 	// 参数走 query string，roleIds 是逗号拼接的
 	mustOK(t, doPut(t, fmt.Sprintf("/system/user/authRole?userId=%d&roleIds=%d", id, commonRoleID), nil), "保存角色分配")
@@ -351,6 +438,11 @@ func TestUserProfile(t *testing.T) {
 	r := request(http.MethodGet, "/system/user/profile", token, nil)
 	mustOK(t, r, "查个人信息")
 	assertTopLevel(t, r, "个人信息", "code", "msg", "data", "roleGroup", "postGroup")
+	profile := dataObject(t, r, "个人信息")
+	assertField(t, profile, "avatar", nil, "个人信息空头像应对齐 Java 会话对象")
+	if _, ok := profile["params"].(map[string]any); !ok {
+		t.Fatalf("个人信息 params 应为 Java 会话兼容对象，实际 %#v", profile["params"])
+	}
 
 	// 改资料
 	r = request(http.MethodPut, "/system/user/profile", token, map[string]any{
@@ -362,7 +454,7 @@ func TestUserProfile(t *testing.T) {
 	mustOK(t, r, "改个人资料")
 
 	r = request(http.MethodGet, "/system/user/profile", token, nil)
-	profile := dataObject(t, r, "改后的个人信息")
+	profile = dataObject(t, r, "改后的个人信息")
 	assertField(t, profile, "nickName", testPrefix+"自己改的昵称", "改后")
 	assertField(t, profile, "sex", "1", "改后")
 
@@ -481,6 +573,19 @@ func TestUserImportEmptyTemplate(t *testing.T) {
 	r := requestMultipart(http.MethodPost, "/system/user/importData", adminToken,
 		"file", "user_template.xlsx", template.Body)
 	mustFail(t, r, "导入用户数据不能为空！", "导入只有表头的用户模板")
+}
+
+func TestUserImportAcceptsLegacyXLS(t *testing.T) {
+	data, err := os.ReadFile("../pkg/excelx/testdata/table.xls")
+	if err != nil {
+		t.Fatalf("读取旧版 Excel 样本失败：%v", err)
+	}
+	r := requestMultipart(http.MethodPost, "/system/user/importData", adminToken,
+		"file", "legacy_users.xls", data)
+	if strings.Contains(r.Msg, "解析 Excel 失败") {
+		t.Fatalf(".xls 应进入业务字段校验而不是文件解析失败，实际 msg=%q", r.Msg)
+	}
+	mustFail(t, r, "登录名称不能为空", "旧版 .xls 已成功解析")
 }
 
 // TestUserImportMessageEscapesHTML 导入结果由前端 v-html 展示，账号等动态值必须转义。
@@ -632,9 +737,9 @@ func TestUserValidation(t *testing.T) {
 			return with(p, "password", "123456789012345678901")
 		}, "Password"},
 
-		// 字典字段不写 oneof：管理员往字典里加一项，后端不能拒
+		// 性别仍跟字典扩展；用户状态参与登录授权，只允许正常/停用。
 		{"sex 传字典外的值", func(p map[string]any) map[string]any { return with(p, "sex", "9") }, ""},
-		{"status 传字典外的值", func(p map[string]any) map[string]any { return with(p, "status", "2") }, ""},
+		{"status 传字典外的值", func(p map[string]any) map[string]any { return with(p, "status", "2") }, "Status"},
 
 		{"少传 deptId", func(p map[string]any) map[string]any { return omit(p, "deptId") }, ""},
 		{"少传 remark", func(p map[string]any) map[string]any { return omit(p, "remark") }, ""},

@@ -104,6 +104,9 @@ func CheckDeptDataScope(ctx context.Context, user *model.SysUser, deptID int64) 
 
 // CreateDept 新增部门。
 func CreateDept(ctx context.Context, user *model.SysUser, dept *model.SysDept, operator string) error {
+	deptWriteMu.Lock()
+	defer deptWriteMu.Unlock()
+
 	if _, err := checkDeptIDs(ctx, user, []int64{dept.ParentID}); err != nil {
 		return err
 	}
@@ -139,6 +142,9 @@ func CreateDept(ctx context.Context, user *model.SysUser, dept *model.SysDept, o
 // 改了上级部门就要同步重算自己和所有子孙的 ancestors；
 // 把部门改成正常状态时，其所有上级也要一并启用（对齐 Java）。
 func UpdateDept(ctx context.Context, user *model.SysUser, dept *model.SysDept, operator string) error {
+	deptWriteMu.Lock()
+	defer deptWriteMu.Unlock()
+
 	if dept.DeptID == 0 {
 		return errs.New("部门ID不能为空")
 	}
@@ -183,15 +189,20 @@ func UpdateDept(ctx context.Context, user *model.SysUser, dept *model.SysDept, o
 		return err
 	}
 
-	var children []model.SysDept
+	newAncestors := "0"
 	if newParent != nil {
-		dept.Ancestors = newParent.Ancestors + "," + strconv.FormatInt(newParent.DeptID, 10)
-		children, err = rebuildChildrenAncestors(ctx, dept.DeptID, oldDept.Ancestors, dept.Ancestors)
-		if err != nil {
-			return err
+		deptID := strconv.FormatInt(dept.DeptID, 10)
+		if containsID(newParent.Ancestors, deptID) {
+			return errs.Newf("修改部门'%s'失败，上级部门不能是自己的下级", dept.DeptName)
 		}
-	} else {
-		dept.Ancestors = oldDept.Ancestors
+		newAncestors = newParent.Ancestors + "," + strconv.FormatInt(newParent.DeptID, 10)
+	} else if dept.ParentID != 0 {
+		return errs.New("上级部门不存在")
+	}
+	dept.Ancestors = newAncestors
+	children, err := rebuildChildrenAncestors(ctx, dept.DeptID, oldDept.Ancestors, newAncestors)
+	if err != nil {
+		return err
 	}
 
 	// 启用某个部门时，把它所有上级也启用，避免出现"父停用子正常"的断链

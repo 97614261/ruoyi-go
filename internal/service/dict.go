@@ -3,8 +3,11 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	"ruoyi-go/internal/model"
 	"ruoyi-go/internal/repository"
@@ -27,12 +30,31 @@ const dictCacheTTL = 30 * time.Minute
 func GetDictDataByType(ctx context.Context, dictType string) ([]model.SysDictData, error) {
 	key := redisx.SysDictKey(dictType)
 
-	if raw, err := redisx.C().Get(ctx, key).Bytes(); err == nil {
+	raw, cacheErr := redisx.C().Get(ctx, key).Bytes()
+	cacheAvailable := errors.Is(cacheErr, redis.Nil)
+	if cacheErr == nil {
 		var cached []model.SysDictData
 		if err := json.Unmarshal(raw, &cached); err == nil {
 			return cached, nil
 		}
 		slog.Warn("字典缓存解析失败，回源查库", "dictType", dictType)
+		if err := redisx.InvalidateDictCache(ctx, key); err != nil {
+			slog.Warn("清理损坏的字典缓存失败，本次不回填", "dictType", dictType, "err", err)
+		} else {
+			cacheAvailable = true
+		}
+	} else if !errors.Is(cacheErr, redis.Nil) {
+		slog.Warn("读取字典缓存失败，回源查库", "dictType", dictType, "err", cacheErr)
+	}
+
+	var revision int64
+	if cacheAvailable {
+		var err error
+		revision, err = redisx.DictCacheRevision(ctx)
+		if err != nil {
+			cacheAvailable = false
+			slog.Warn("读取字典缓存代数失败，本次不回填", "dictType", dictType, "err", err)
+		}
 	}
 
 	list, err := repository.SelectDictDataByType(ctx, dictType)
@@ -41,9 +63,14 @@ func GetDictDataByType(ctx context.Context, dictType string) ([]model.SysDictDat
 	}
 	fillDictDefault(list)
 
-	if data, err := json.Marshal(list); err == nil {
-		if err := redisx.C().Set(ctx, key, data, dictCacheTTL).Err(); err != nil {
-			slog.Warn("写入字典缓存失败", "dictType", dictType, "err", err)
+	if cacheAvailable {
+		if data, err := json.Marshal(list); err == nil {
+			stored, storeErr := redisx.StoreDictCacheIfRevision(ctx, key, data, revision, dictCacheTTL)
+			if storeErr != nil {
+				slog.Warn("写入字典缓存失败", "dictType", dictType, "err", storeErr)
+			} else if !stored {
+				slog.Debug("字典已在回源期间更新，跳过旧值回填", "dictType", dictType)
+			}
 		}
 	}
 	return list, nil
@@ -52,9 +79,15 @@ func GetDictDataByType(ctx context.Context, dictType string) ([]model.SysDictDat
 // ClearDictCache 清除指定类型的字典缓存，dictType 为空时清除全部。
 func ClearDictCache(ctx context.Context, dictType string) error {
 	if dictType != "" {
-		return redisx.C().Del(ctx, redisx.SysDictKey(dictType)).Err()
+		return redisx.InvalidateDictCache(ctx, redisx.SysDictKey(dictType))
+	}
+	if err := redisx.InvalidateDictCache(ctx); err != nil {
+		return err
 	}
 	return redisx.ScanKeys(ctx, redisx.KeySysDict, 100, func(key string) error {
+		if redisx.IsDictCacheMetadataKey(key) {
+			return nil
+		}
 		return redisx.C().Del(ctx, key).Err()
 	})
 }

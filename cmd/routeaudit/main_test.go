@@ -53,3 +53,9 @@ func TestNormalizePathTreatsTrailingSlashAsAlias(t *testing.T) {
 		t.Fatalf("got=%q", got)
 	}
 }
+
+func TestSupplementalEvidenceCount(t *testing.T) {
+	if got := len(supplementalEvidence); got != 57 {
+		t.Fatalf("补充路由证据应为 57 条，实际 %d；必须与 contractcheck 的实际探针同步", got)
+	}
+}

@@ -54,6 +54,15 @@ func TestDefaultProbeCount(t *testing.T) {
 	}
 }
 
+func TestSupplementalProbeCount(t *testing.T) {
+	const authenticationProbes = 2 // login and logout
+	got := len(supplementalRouteProbes()) + len(supplementalDynamicRouteProbes()) +
+		authenticationProbes + len(supplementalExportPaths())
+	if got != 57 {
+		t.Fatalf("补充路由探针应为 57 个，实际 %d；增删时必须同步 routeaudit 证据和文档", got)
+	}
+}
+
 func TestPermissionProbeCount(t *testing.T) {
 	if permissionProbeTotal != 18 {
 		t.Fatalf("数据权限探针应为 18 个，实际 %d", permissionProbeTotal)

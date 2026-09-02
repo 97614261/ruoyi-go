@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -100,6 +101,29 @@ type importFixture struct {
 	When     types.Time `excel:"name:日期;format:2006/01/02"`
 	Optional *int       `excel:"name:可选值"`
 	Exported string     `excel:"name:仅导出;type:export"`
+}
+
+type legacyImportFixture struct {
+	Code        string `excel:"name:Code"`
+	Name        string `excel:"name:Name"`
+	Description string `excel:"name:Description"`
+}
+
+func TestImportLegacyXLS(t *testing.T) {
+	data, err := os.ReadFile("testdata/table.xls")
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	rows, rowErrors, err := Import[legacyImportFixture](bytes.NewReader(data), "Table")
+	if err != nil {
+		t.Fatalf("Import() legacy xls error = %v", err)
+	}
+	if len(rowErrors) != 0 || len(rows) != 11 {
+		t.Fatalf("legacy rows=%d rowErrors=%#v", len(rows), rowErrors)
+	}
+	if rows[0].Code != "code1" || rows[0].Name != "name1" || rows[10].Description != "description11" {
+		t.Fatalf("legacy values not parsed: first=%#v last=%#v", rows[0], rows[10])
+	}
 }
 
 func TestImportConvertsValuesAndCollectsRowErrors(t *testing.T) {

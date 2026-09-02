@@ -121,6 +121,34 @@ func TestMenuCRUD(t *testing.T) {
 	mustFail(t, doGet(t, path), "不存在", "删除后再查")
 }
 
+func TestMenuPermissionChangeRefreshesOnlineSession(t *testing.T) {
+	dirID := createMenu(t, newDirPayload("perm_refresh"))
+	button := newButtonPayload(dirID, "perm_refresh")
+	buttonID := createMenu(t, button)
+
+	role := newRolePayload("menu_perm_refresh")
+	role["menuIds"] = []int64{buttonID}
+	roleID := createRole(t, role)
+	user := newUserPayload("menu_perm_refresh")
+	user["roleIds"] = []int64{roleID}
+	createUser(t, user)
+	token := mustLogin(t, fmt.Sprint(user["userName"]))
+
+	oldPermission := fmt.Sprint(button["perms"])
+	assertSessionHasPermission(t, token, oldPermission, true)
+
+	updated := payload(button)
+	updated["menuId"] = buttonID
+	updated["perms"] = "zztest:demo:perm_refresh_new"
+	mustOK(t, doPut(t, "/system/menu", updated), "修改菜单权限标识")
+	assertSessionHasPermission(t, token, oldPermission, false)
+	assertSessionHasPermission(t, token, fmt.Sprint(updated["perms"]), true)
+
+	updated["status"] = "1"
+	mustOK(t, doPut(t, "/system/menu", updated), "停用菜单权限")
+	assertSessionHasPermission(t, token, fmt.Sprint(updated["perms"]), false)
+}
+
 // TestMenuUpdateSort 保存菜单排序的请求格式和批量更新结果。
 func TestMenuUpdateSort(t *testing.T) {
 	firstID := createMenu(t, newDirPayload("sort_1"))
@@ -160,6 +188,21 @@ func TestMenuSelfParent(t *testing.T) {
 	body["menuId"] = id
 	body["parentId"] = id
 	mustFail(t, doPut(t, "/system/menu", body), "上级菜单不能选择自己", "父菜单设成自己")
+}
+
+func TestMenuRejectsDescendantParent(t *testing.T) {
+	a := newDirPayload("cycle_a")
+	aID := createMenu(t, a)
+	bID := createMenu(t, with(newDirPayload("cycle_b"), "parentId", aID))
+	cID := createMenu(t, with(newDirPayload("cycle_c"), "parentId", bID))
+
+	cycle := payload(a)
+	cycle["menuId"] = aID
+	cycle["parentId"] = cID
+	mustFail(t, doPut(t, "/system/menu", cycle), "上级菜单不能选择自己的下级", "菜单不能挂到后代下")
+
+	detail := dataObject(t, doGet(t, "/system/menu/"+idPath(aID)), "循环修改失败后查询菜单")
+	assertField(t, detail, "parentId", 0, "循环修改不得写入")
 }
 
 // TestMenuFrameMustBeHTTP 外链菜单的地址必须是 http(s)。

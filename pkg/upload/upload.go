@@ -2,6 +2,7 @@
 package upload
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -12,6 +13,21 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// ClientError is safe to return to the caller. Filesystem and operating-system
+// errors deliberately use ordinary wrapped errors so handlers can hide them.
+type ClientError struct{ message string }
+
+func (e *ClientError) Error() string { return e.message }
+
+// ClientMessage returns only messages that cannot expose server internals.
+func ClientMessage(err error) (string, bool) {
+	var clientErr *ClientError
+	if errors.As(err, &clientErr) {
+		return clientErr.message, true
+	}
+	return "", false
+}
 
 // ImageExtensions 头像等图片上传允许的扩展名。
 //
@@ -59,15 +75,15 @@ type Options struct {
 // 与 Java 版 FileUploadUtils.upload 的产出格式一致。
 func Save(fh *multipart.FileHeader, opt Options) (string, error) {
 	if fh == nil {
-		return "", fmt.Errorf("未选择文件")
+		return "", &ClientError{message: "未选择文件"}
 	}
 	if opt.MaxSize > 0 && fh.Size > opt.MaxSize {
-		return "", fmt.Errorf("文件大小超过上限 %d MB", opt.MaxSize/1024/1024)
+		return "", &ClientError{message: fmt.Sprintf("文件大小超过上限 %d MB", opt.MaxSize/1024/1024)}
 	}
 
 	ext := strings.ToLower(filepath.Ext(fh.Filename))
 	if opt.AllowedExt != nil && !opt.AllowedExt[ext] {
-		return "", fmt.Errorf("不支持的文件格式 %s", ext)
+		return "", &ClientError{message: fmt.Sprintf("不支持的文件格式 %s", ext)}
 	}
 
 	// 用 uuid 重命名：原始文件名可能带路径穿越（../）或非法字符，

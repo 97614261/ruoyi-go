@@ -331,6 +331,7 @@ func buildReport(goRoutes, javaRoutes []route, excluded []string) string {
 	fmt.Fprintf(&out, "| 方法 + 结构化路径匹配 | %d |\n| 权限标识匹配 | %d |\n| 权限标识差异 | %d |\n", matched, permissionMatched, permissionDifferent)
 	fmt.Fprintf(&out, "| 已纳入自动双端探针的匹配路由 | %d/%d（%.2f%%） |\n\n", covered, matched, coveragePercent)
 	fmt.Fprintf(&out, "> “已纳入探针”只表示有自动执行入口；是否通过以对应实跑日志为准。\n")
+	fmt.Fprintf(&out, "> 部分破坏性写路由只验证未登录拒绝，不能把 130/130 解读为全部成功副作用已对拍。\n")
 	fmt.Fprintf(&out, "> 路径参数名会统一为 `{}` 比较，避免 `{id}` / `{userId}` 这种非契约差异。\n\n")
 	fmt.Fprintf(&out, "## 完整清单\n\n| 方法与路径 | Go | Java | 权限 | 自动双端证据 |\n|---|---|---|---|---|\n")
 	for _, pair := range pairs {
@@ -377,7 +378,7 @@ func probeEvidence(key string) string {
 	for _, candidate := range []struct {
 		label string
 		set   map[string]bool
-	}{{"核心 GET", coreGETEvidence}, {"CRUD", crudEvidence}, {"字段校验", validationEvidence}, {"数据/功能权限", permissionEvidence}, {"文件", fileEvidence}, {"错误场景", writeEvidence}} {
+	}{{"核心 GET", coreGETEvidence}, {"CRUD", crudEvidence}, {"字段校验", validationEvidence}, {"数据/功能权限", permissionEvidence}, {"文件", fileEvidence}, {"错误场景", writeEvidence}, {"补充路由场景", supplementalEvidence}} {
 		if candidate.set[key] {
 			labels = append(labels, candidate.label)
 		}
@@ -412,10 +413,40 @@ var permissionEvidence = routeSet("GET", []string{"/system/user/list", "/system/
 var fileEvidence = map[string]bool{"POST /common/upload": true, "POST /common/uploads": true, "POST /system/user/importTemplate": true, "POST /system/user/importData": true}
 var writeEvidence = map[string]bool{"POST /register": true, "POST /common/upload": true, "POST /common/uploads": true, "POST /system/user/importData": true, "POST /system/user/profile/avatar": true, "DELETE /monitor/cache/clearCacheName/{}": true, "DELETE /monitor/cache/clearCacheKey/{}": true}
 
+var supplementalEvidence = routeSetPairs([]string{
+	"DELETE /monitor/cache/clearCacheAll", "DELETE /monitor/jobLog/clean", "DELETE /monitor/jobLog/{}",
+	"DELETE /monitor/logininfor/clean", "DELETE /monitor/logininfor/{}", "DELETE /monitor/online/{}",
+	"DELETE /monitor/operlog/clean", "DELETE /monitor/operlog/{}", "DELETE /system/config/refreshCache",
+	"DELETE /system/dict/type/refreshCache", "GET /common/download", "GET /common/download/resource",
+	"GET /monitor/cache", "GET /monitor/cache/getKeys/{}", "GET /monitor/cache/getNames",
+	"GET /monitor/cache/getValue/{}/{}", "GET /monitor/jobLog/{}", "GET /monitor/logininfor/list",
+	"GET /monitor/logininfor/unlock/{}", "GET /monitor/online/list", "GET /monitor/operlog/list",
+	"GET /monitor/server", "GET /system/dept/list/exclude/{}", "GET /system/notice/readUsers/list",
+	"GET /system/role/authUser/allocatedList", "GET /system/role/authUser/unallocatedList",
+	"GET /system/user/authRole/{}", "GET /system/user/profile", "POST /login", "POST /logout",
+	"POST /monitor/job/export", "POST /monitor/jobLog/export", "POST /monitor/logininfor/export",
+	"POST /monitor/operlog/export", "POST /system/config/export", "POST /system/dict/data/export",
+	"POST /system/dict/type/export", "POST /system/notice/markRead", "POST /system/notice/markReadAll",
+	"POST /system/post/export", "POST /system/role/export", "POST /system/user/export", "POST /unlockscreen",
+	"PUT /monitor/job/changeStatus", "PUT /monitor/job/run", "PUT /system/dept/updateSort",
+	"PUT /system/menu/updateSort", "PUT /system/role/authUser/cancel", "PUT /system/role/authUser/cancelAll",
+	"PUT /system/role/authUser/selectAll", "PUT /system/role/changeStatus", "PUT /system/role/dataScope",
+	"PUT /system/user/authRole", "PUT /system/user/changeStatus", "PUT /system/user/profile",
+	"PUT /system/user/profile/updatePwd", "PUT /system/user/resetPwd",
+})
+
 func routeSet(method string, paths []string) map[string]bool {
 	result := make(map[string]bool, len(paths))
 	for _, path := range paths {
 		result[method+" "+path] = true
+	}
+	return result
+}
+
+func routeSetPairs(keys []string) map[string]bool {
+	result := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		result[key] = true
 	}
 	return result
 }

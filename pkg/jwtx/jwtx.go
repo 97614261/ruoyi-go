@@ -66,11 +66,11 @@ func (s *Signer) Sign(loginUserKey, userName string) (string, error) {
 // Parse 校验签名并取出 claims。
 func (s *Signer) Parse(tokenStr string) (*Claims, error) {
 	parsed, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+		if t.Method != jwt.SigningMethodHS512 {
 			return nil, fmt.Errorf("%w: 签名算法不匹配 %v", ErrInvalidToken, t.Header["alg"])
 		}
 		return s.secret, nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodHS512.Alg()}))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidToken, err)
 	}

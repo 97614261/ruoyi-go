@@ -45,7 +45,7 @@ return 1
 
 var renewSessionScript = redis.NewScript(`
 local current = tonumber(redis.call('get', KEYS[3]) or '0')
-local expected = tonumber(ARGV[3])
+local expected = tonumber(ARGV[4])
 if current ~= expected then
     return -1
 end
@@ -54,15 +54,19 @@ if not raw then
     return 0
 end
 local ok, session = pcall(cjson.decode, raw)
-if not ok then
+local updatedOK = pcall(cjson.decode, ARGV[1])
+if not ok or not updatedOK then
     return -2
 end
-session['loginTime'] = tonumber(ARGV[4])
-session['expireTime'] = tonumber(ARGV[5])
-redis.call('set', KEYS[1], cjson.encode(session), 'PX', ARGV[1])
-redis.call('sadd', KEYS[2], ARGV[2])
-redis.call('pexpire', KEYS[2], ARGV[1])
-redis.call('set', KEYS[3], tostring(current), 'PX', ARGV[1])
+local currentRevision = tonumber(session['sessionRevision'] or '0')
+local expectedRevision = tonumber(ARGV[5])
+if currentRevision ~= expectedRevision then
+    return 2
+end
+redis.call('set', KEYS[1], ARGV[1], 'PX', ARGV[2])
+redis.call('sadd', KEYS[2], ARGV[3])
+redis.call('pexpire', KEYS[2], ARGV[2])
+redis.call('set', KEYS[3], tostring(current), 'PX', ARGV[2])
 return 1
 `)
 
@@ -77,23 +81,16 @@ if not raw then
     return 0
 end
 local sessionOK, session = pcall(cjson.decode, raw)
-local userOK, user = pcall(cjson.decode, ARGV[4])
-local permissionsOK, permissions = pcall(cjson.decode, ARGV[5])
-if not sessionOK or not userOK or not permissionsOK then
+local updatedOK = pcall(cjson.decode, ARGV[4])
+if not sessionOK or not updatedOK then
     return -2
 end
 local currentRevision = tonumber(session['sessionRevision'] or '0')
-local expectedRevision = tonumber(ARGV[6])
+local expectedRevision = tonumber(ARGV[5])
 if currentRevision ~= expectedRevision then
     return 2
 end
-session['user'] = user
-session['permissions'] = permissions
-session['deptId'] = user['deptId']
-session['loginTime'] = tonumber(ARGV[7])
-session['expireTime'] = tonumber(ARGV[8])
-session['sessionRevision'] = currentRevision + 1
-redis.call('set', KEYS[1], cjson.encode(session), 'PX', ARGV[1])
+redis.call('set', KEYS[1], ARGV[4], 'PX', ARGV[1])
 redis.call('sadd', KEYS[2], ARGV[2])
 redis.call('pexpire', KEYS[2], ARGV[1])
 redis.call('set', KEYS[3], tostring(currentGeneration), 'PX', ARGV[1])
@@ -169,21 +166,40 @@ func writeNewSession(ctx context.Context, loginUser *model.LoginUser) error {
 
 // RefreshToken 原地刷新 Redis 中最新会话的时间和 TTL，不覆盖权限快照。
 func RefreshToken(ctx context.Context, loginUser *model.LoginUser) error {
-	now := time.Now()
-	loginTime := now.UnixMilli()
-	expireTime := now.Add(jwtExpire).UnixMilli()
-	result, err := renewSessionScript.Run(ctx, redisx.C(), sessionKeys(loginUser),
-		jwtExpire.Milliseconds(), loginUser.Token, loginUser.SessionGeneration,
-		loginTime, expireTime).Int64()
-	if err != nil {
-		return fmt.Errorf("续期登录会话失败: %w", err)
+	current := loginUser
+	for attempt := 0; attempt < maxSessionRefreshRetries; attempt++ {
+		refreshed := *current
+		setSessionTimes(&refreshed)
+		data, err := json.Marshal(&refreshed)
+		if err != nil {
+			return fmt.Errorf("序列化续期会话失败: %w", err)
+		}
+		result, err := renewSessionScript.Run(ctx, redisx.C(), sessionKeys(current),
+			data, jwtExpire.Milliseconds(), current.Token, current.SessionGeneration,
+			current.SessionRevision).Int64()
+		if err != nil {
+			return fmt.Errorf("续期登录会话失败: %w", err)
+		}
+		switch result {
+		case 1:
+			*loginUser = refreshed
+			return nil
+		case 2:
+			latest, err := GetLoginUserByKey(ctx, current.Token)
+			if err != nil {
+				return err
+			}
+			if latest == nil {
+				return errSessionChanged
+			}
+			current = latest
+		case 0, -1:
+			return errSessionChanged
+		default:
+			return fmt.Errorf("Redis 登录会话内容无效")
+		}
 	}
-	if result != 1 {
-		return errSessionChanged
-	}
-	loginUser.LoginTime = loginTime
-	loginUser.ExpireTime = expireTime
-	return nil
+	return errSessionConflict
 }
 
 func setSessionTimes(loginUser *model.LoginUser) {
@@ -334,32 +350,28 @@ func refreshSessionPermissions(ctx context.Context, loginUser *model.LoginUser,
 
 func writeSessionPermissions(ctx context.Context, loginUser *model.LoginUser,
 	snapshot permissionSnapshot) error {
-	userJSON, err := json.Marshal(snapshot.user)
+	now := time.Now()
+	updated := *loginUser
+	updated.User = snapshot.user
+	updated.DeptID = snapshot.user.DeptID
+	updated.Permissions = snapshot.permissions
+	updated.LoginTime = now.UnixMilli()
+	updated.ExpireTime = now.Add(jwtExpire).UnixMilli()
+	updated.SessionRevision++
+	data, err := json.Marshal(&updated)
 	if err != nil {
 		return fmt.Errorf("序列化用户权限快照失败: %w", err)
 	}
-	permissionsJSON, err := json.Marshal(snapshot.permissions)
-	if err != nil {
-		return fmt.Errorf("序列化权限标识失败: %w", err)
-	}
 
-	now := time.Now()
-	loginTime := now.UnixMilli()
-	expireTime := now.Add(jwtExpire).UnixMilli()
 	result, err := updateSessionPermissionsScript.Run(ctx, redisx.C(), sessionKeys(loginUser),
 		jwtExpire.Milliseconds(), loginUser.Token, loginUser.SessionGeneration,
-		userJSON, permissionsJSON, loginUser.SessionRevision, loginTime, expireTime).Int64()
+		data, loginUser.SessionRevision).Int64()
 	if err != nil {
 		return fmt.Errorf("原子更新登录权限失败: %w", err)
 	}
 	switch result {
 	case 1:
-		loginUser.User = snapshot.user
-		loginUser.DeptID = snapshot.user.DeptID
-		loginUser.Permissions = snapshot.permissions
-		loginUser.LoginTime = loginTime
-		loginUser.ExpireTime = expireTime
-		loginUser.SessionRevision++
+		*loginUser = updated
 		return nil
 	case 2:
 		return errSessionConflict
@@ -676,6 +688,7 @@ func RevokeUserSessions(ctx context.Context, userIDs ...int64) error {
 		return nil
 	}
 
+	var revokeErrors []error
 	for _, userID := range ids {
 		keys := []string{
 			redisx.LoginUserGenerationKey(userID),
@@ -683,8 +696,8 @@ func RevokeUserSessions(ctx context.Context, userIDs ...int64) error {
 		}
 		if _, err := revokeSessionsScript.Run(ctx, redisx.C(), keys,
 			redisx.KeyLoginToken, jwtExpire.Milliseconds()).Int64(); err != nil {
-			return fmt.Errorf("撤销用户 %d 会话失败: %w", userID, err)
+			revokeErrors = append(revokeErrors, fmt.Errorf("撤销用户 %d 会话失败: %w", userID, err))
 		}
 	}
-	return nil
+	return errors.Join(revokeErrors...)
 }

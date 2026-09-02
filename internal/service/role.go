@@ -91,6 +91,9 @@ func CheckRoleDataScope(ctx context.Context, user *model.SysUser, roleID int64) 
 
 // CreateRole 新增角色。
 func CreateRole(ctx context.Context, user *model.SysUser, role *model.SysRole, operator string) error {
+	roleWriteMu.Lock()
+	defer roleWriteMu.Unlock()
+
 	menuIDs, err := checkMenuIDsForUser(ctx, user, role.MenuIDs)
 	if err != nil {
 		return err
@@ -111,6 +114,9 @@ func CreateRole(ctx context.Context, user *model.SysUser, role *model.SysRole, o
 
 // UpdateRole 修改角色。
 func UpdateRole(ctx context.Context, user *model.SysUser, role *model.SysRole, operator string) error {
+	roleWriteMu.Lock()
+	defer roleWriteMu.Unlock()
+
 	if role.RoleID == 0 {
 		return errs.New("角色ID不能为空")
 	}

@@ -20,7 +20,8 @@ type HealthResult struct {
 	MySQL  string `json:"mysql"`
 	Redis  string `json:"redis"`
 	// DB 连接池状态，排查连接泄漏用
-	DB map[string]any `json:"db,omitempty"`
+	DB        map[string]any `json:"db,omitempty"`
+	RedisPool map[string]any `json:"redisPool,omitempty"`
 }
 
 // Health 依次探活 MySQL 和 Redis。
@@ -50,6 +51,8 @@ func Health(ctx context.Context) HealthResult {
 	if err := redisx.Ping(redisCtx); err != nil {
 		result.Redis = "down"
 		result.Status = "down"
+	} else if stats, err := redisx.Stats(); err == nil {
+		result.RedisPool = stats
 	}
 
 	return result

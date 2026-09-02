@@ -22,10 +22,11 @@ func TestHealthChecksDependencies(t *testing.T) {
 	}
 
 	var result struct {
-		Status string         `json:"status"`
-		MySQL  string         `json:"mysql"`
-		Redis  string         `json:"redis"`
-		DB     map[string]any `json:"db"`
+		Status    string         `json:"status"`
+		MySQL     string         `json:"mysql"`
+		Redis     string         `json:"redis"`
+		DB        map[string]any `json:"db"`
+		RedisPool map[string]any `json:"redisPool"`
 	}
 	if err := json.Unmarshal(r.Body, &result); err != nil {
 		t.Fatalf("健康检查响应解析失败：%v，原文=%s", err, truncBody(r.Body))
@@ -48,6 +49,14 @@ func TestHealthChecksDependencies(t *testing.T) {
 	for _, key := range []string{"maxOpen", "inUse", "idle", "waitCount"} {
 		if _, ok := result.DB[key]; !ok {
 			t.Errorf("连接池状态缺少 %q 字段", key)
+		}
+	}
+	if len(result.RedisPool) == 0 {
+		t.Error("健康检查应带上 Redis 连接池状态，否则无法判断连接等待和池容量")
+	}
+	for _, key := range []string{"totalConns", "idleConns", "waitCount", "timeouts", "pendingRequests"} {
+		if _, ok := result.RedisPool[key]; !ok {
+			t.Errorf("Redis 连接池状态缺少 %q 字段", key)
 		}
 	}
 

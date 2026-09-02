@@ -100,7 +100,7 @@ func MarkNoticeRead(ctx context.Context, userID, noticeID int64) error {
 	if noticeID == 0 {
 		return errs.New("公告ID不能为空")
 	}
-	return repository.MarkNoticeRead(ctx, userID, []int64{noticeID}, time.Now())
+	return MarkNoticeReadBatch(ctx, userID, []int64{noticeID})
 }
 
 // MarkNoticeReadBatch 批量标记已读。noticeIDs 为空时与 Java 一致，直接成功。
@@ -108,7 +108,18 @@ func MarkNoticeReadBatch(ctx context.Context, userID int64, noticeIDs []int64) e
 	if len(noticeIDs) == 0 {
 		return nil
 	}
-	return repository.MarkNoticeRead(ctx, userID, noticeIDs, time.Now())
+	normalized, err := normalizeRelationIDs(noticeIDs, "公告")
+	if err != nil {
+		return err
+	}
+	published, err := repository.MarkPublishedNoticesRead(ctx, userID, normalized, time.Now())
+	if err != nil {
+		return err
+	}
+	if err := ensureAllIDs(normalized, published, "公告"); err != nil {
+		return err
+	}
+	return nil
 }
 
 // ListNoticeReadUsers 查某条公告的已读用户。

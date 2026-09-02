@@ -253,8 +253,8 @@ func UserAuthRoleGet(c *gin.Context) {
 		return
 	}
 	response.New(response.CodeSuccess, response.MsgSuccess).
-		Put("user", user).
-		Put("roles", roles).
+		Put("user", contractUser(*user, true)).
+		Put("roles", contractRoles(roles)).
 		JSON(c)
 }
 

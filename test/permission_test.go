@@ -145,8 +145,8 @@ func TestPermissionMatrix(t *testing.T) {
 		},
 		{
 			name: "参数按键取值", path: "/system/config/configKey/sys.user.initPassword",
-			needPermission: false,
-			why:            "Java 无 @PreAuthorize，登录页要读验证码开关",
+			needPermission: true,
+			why:            "Go 安全差异：动态参数值可能包含初始密码，仅允许参数或用户管理权限读取",
 		},
 		{
 			name: "定时任务列表", path: "/monitor/job/list?pageNum=1&pageSize=10",

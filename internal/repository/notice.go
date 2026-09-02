@@ -144,27 +144,46 @@ func DeleteNoticeByIDs(ctx context.Context, noticeIDs []int64) error {
 	})
 }
 
-// MarkNoticeRead 标记已读。
-//
-// sys_notice_read 有 (user_id, notice_id) 唯一索引，重复标记会冲突，
-// 所以用 ON CONFLICT DO NOTHING（对应 Java 的 insert ignore）。
-func MarkNoticeRead(ctx context.Context, userID int64, noticeIDs []int64, at time.Time) error {
+// MarkPublishedNoticesRead 校验公告存在且已发布，并在同一事务内标记已读。
+// FOR UPDATE 保证校验到写入之间公告不能被并发删除或切回草稿。
+func MarkPublishedNoticesRead(
+	ctx context.Context,
+	userID int64,
+	noticeIDs []int64,
+	at time.Time,
+) ([]int64, error) {
 	if len(noticeIDs) == 0 {
+		return []int64{}, nil
+	}
+
+	var published []int64
+	err := Transaction(ctx, func(tx *gorm.DB) error {
+		if err := tx.Model(&model.SysNotice{}).
+			Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("notice_id IN ?", noticeIDs).
+			Where("status = ?", model.StatusNormal).
+			Pluck("notice_id", &published).Error; err != nil {
+			return fmt.Errorf("校验可读公告失败: %w", err)
+		}
+		if len(published) != len(noticeIDs) {
+			return nil
+		}
+
+		rows := make([]model.SysNoticeRead, 0, len(noticeIDs))
+		for _, noticeID := range noticeIDs {
+			rows = append(rows, model.SysNoticeRead{
+				NoticeID: noticeID,
+				UserID:   userID,
+				ReadTime: types.Time(at),
+			})
+		}
+		// sys_notice_read 有 (user_id, notice_id) 唯一索引，重复标记直接忽略。
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error; err != nil {
+			return fmt.Errorf("标记公告已读失败: %w", err)
+		}
 		return nil
-	}
-	rows := make([]model.SysNoticeRead, 0, len(noticeIDs))
-	for _, noticeID := range noticeIDs {
-		rows = append(rows, model.SysNoticeRead{
-			NoticeID: noticeID,
-			UserID:   userID,
-			ReadTime: types.Time(at),
-		})
-	}
-	err := DB(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&rows).Error
-	if err != nil {
-		return fmt.Errorf("标记公告已读失败: %w", err)
-	}
-	return nil
+	})
+	return published, err
 }
 
 // SelectNoticeReadUserPage 分页查询某条公告的已读用户。

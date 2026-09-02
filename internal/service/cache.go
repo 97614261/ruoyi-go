@@ -113,13 +113,13 @@ func CacheKeys(ctx context.Context, cacheName string) ([]string, error) {
 
 	keys := make([]string, 0, 64)
 	err := redisx.ScanKeys(ctx, cacheName, 200, func(key string) error {
-		if redisx.IsConfigCacheMetadataKey(key) {
-			return nil
-		}
-		if len(keys) >= maxCacheKeys {
+		if redisx.IsCacheMetadataKey(key) {
 			return nil
 		}
 		keys = append(keys, key)
+		if len(keys) >= maxCacheKeys {
+			return redisx.ErrStopScan
+		}
 		return nil
 	})
 	if err != nil {
@@ -138,6 +138,9 @@ func CacheValue(ctx context.Context, cacheName, cacheKey string) (*model.CacheIt
 	fullKey := cacheKey
 	if !strings.HasPrefix(fullKey, cacheName) {
 		fullKey = cacheName + cacheKey
+	}
+	if redisx.IsCacheMetadataKey(fullKey) {
+		return nil, errs.New("不能查看内部缓存元数据")
 	}
 
 	value, err := redisx.C().Get(ctx, fullKey).Result()
@@ -162,6 +165,9 @@ func ClearCacheByName(ctx context.Context, cacheName string) error {
 	if cacheName == redisx.KeySysConfig {
 		return ClearConfigCache(ctx, "")
 	}
+	if cacheName == redisx.KeySysDict {
+		return ClearDictCache(ctx, "")
+	}
 	return redisx.ScanKeys(ctx, cacheName, 200, func(key string) error {
 		return redisx.C().Del(ctx, key).Err()
 	})
@@ -176,11 +182,14 @@ func ClearCacheByKey(ctx context.Context, cacheKey string) error {
 	if !isAllowedCacheName(prefixOf(cacheKey)) {
 		return errs.New("不支持清理该缓存")
 	}
-	if redisx.IsConfigCacheMetadataKey(cacheKey) {
+	if redisx.IsCacheMetadataKey(cacheKey) {
 		return errs.New("不能清理内部缓存元数据")
 	}
 	if strings.HasPrefix(cacheKey, redisx.KeySysConfig) {
 		return ClearConfigCache(ctx, strings.TrimPrefix(cacheKey, redisx.KeySysConfig))
+	}
+	if strings.HasPrefix(cacheKey, redisx.KeySysDict) {
+		return ClearDictCache(ctx, strings.TrimPrefix(cacheKey, redisx.KeySysDict))
 	}
 	return redisx.C().Del(ctx, cacheKey).Err()
 }

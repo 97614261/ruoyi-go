@@ -8,6 +8,71 @@
 
 ---
 
+## 2026-09-02 Redis 连接池采用 32，并保留外部 A/B 证据
+
+**当前边界**：单实例默认和部署配置的 `redis.poolSize` 从 20 调整为 32，目标是当前 2C2G
+部署。`mysql.maxIdleConns=20` 和 `mysql.maxOpenConns=50` 不随本条修改；两类连接池的数字
+来自不同 A/B，不能因为名字相似一起扩大。
+
+**为什么**：从独立 Windows 压测端经公网直连目标服务，按交错顺序对 20/32/40 各跑 3 轮
+`c80 × 60s`。三轮中位数如下：
+
+| Redis 连接数 | QPS 中位数 | P95 中位数 | Redis 等待次数中位数 | 错误/超时 |
+|---:|---:|---:|---:|---:|
+| 20 | 836.10 | 136.30ms | 135917 | 0/0 |
+| **32** | **865.41** | **135.96ms** | **60565** | **0/0** |
+| 40 | 857.40 | 138.88ms | 14981 | 0/0 |
+
+32 相对 20 的中位 QPS 提升约 3.5%，P95 没有回退，池等待减少约 55%；40 虽继续减少等待，
+但吞吐和 P95 都没有继续改善。选择 32 是当前硬件下的折中，不是“连接越多越快”。随后用 32
+补跑 `c80 × 10m`，完成 505431 次请求、842.38 QPS、P95 140.67ms、错误 0。
+
+**禁止回退/外推**：不要凭单轮数字改回 20，也不要只看等待次数把连接池继续扩大。更换 CPU、
+Redis 部署方式、网络或实例数后必须重新 A/B；多实例还须把所有实例的连接总数一起计算。相关
+证据见 `docs/OPTIMIZATION_VALIDATION_2026-09-02.md`。
+
+---
+
+## 2026-08-31 全路由场景覆盖不等于行为全等，差异按收益登记
+
+**当前边界**：Java 的 130 条非代码生成器路由与 Go 的方法、结构化路径和权限标识全部匹配，
+每条共同路由现在至少有一个自动双端场景。新增补充场景为 52/57 精确或语义一致；破坏性接口
+中的一部分只验证双方都拒绝未登录请求，因此 130/130 表示“有自动执行入口”，不表示每条
+成功路径、所有参数组合、响应字段和副作用都已全等。
+
+本轮发现的响应形状差异必须修复：个人资料统一使用 Java 登录会话对象投影；角色已分配/未分配
+用户统一使用 Java 窄列查询的投影；用户授权角色页统一复用 Java 兼容用户/角色转换。修复后
+三个场景精确一致。下列可观察差异保留并纳入当前人工差异基线：
+
+- 缺失文件下载时 Go 返回结构化业务错误，Java 暴露原始异常文本；缺失上传附件同理，Go 返回
+  可读的白名单消息，不复刻 Java 的空指针或 multipart 内部异常。
+- Go 缓存监控有意不展示 `login_tokens:`，且清理和值读取只允许白名单前缀，避免持有缓存权限的
+  用户读取完整会话、权限或误删其他业务 key；Java 会展示会话分类并对未知清理静默成功。
+- 不存在缓存值的空串/`null`、部分新增后详情的空串/`null`、校验错误文案不同，不改变已知 Vue
+  分支、字段类型或成功业务结果。
+- 查询已删除或不存在对象时 Go 返回明确失败，Java 部分 mapper 因未过滤 `del_flag` 或 controller
+  不检查空值而返回成功；Go 的严格不存在语义保留。
+- Go 更新公告时保存 `remark`；Java `updateNotice` mapper 漏写该列。Go 创建定时任务时校验
+  `jobName`；Java 虽声明 `@NotBlank`，但新增入口没有启用 `@Validated`。两项都保留 Go 行为。
+- 稳定分页的唯一兜底排序、数据权限安全加固、会话即时失效和更具体的错误消息继续按既有决议
+  保留，不为了把 `different` 归零而删除。
+
+**为什么**：补齐 57 个遗漏场景后，未测试过的投影错误确实被发现并修复，但也再次证明“与
+Java 不同”不等于“Go 有缺陷”。原始异常泄露、可浏览完整会话、删除后仍返回对象、漏写字段和
+漏校验都不值得复刻。需要固定的是消费者依赖的契约和安全不变量，而不是 Java 的每个缺陷。
+
+**禁止回退**：不得把路由覆盖率写成成功行为一致率；不得把未登录拒绝场景写成已验证成功
+副作用；不得为了提高精确一致百分比重新暴露会话缓存、吞掉不存在错误、漏写公告备注或放过
+空任务名。`-AllowDifferences` 仍只适合人工复核；机器可读差异基线实现前，新增差异必须逐条
+查看日志，不能因为命令退出 0 就视为已批准。
+
+**相关位置**：`cmd/contractcheck/supplemental.go`、`cmd/routeaudit/main.go`、
+`internal/handler/java_contract.go`、`internal/handler/profile.go`、`internal/handler/role.go`、
+`internal/handler/user.go`、`docs/API_ROUTE_COVERAGE_2026-08-25.md`、
+`docs/VALIDATION_REPORT_2026-08-31.md`
+
+---
+
 ## 2026-08-28 目标从"复刻 Java"改为"超越 Java"，冻结契约面
 
 **当前边界**：项目目标是做出比 Java 版更好的后端，同时冻结已有消费者依赖的契约。
@@ -74,6 +139,9 @@ API 约定、已知消费者和安全 / 正确性约束共同决定哪个实现�
 ---
 
 ## 2026-08-28 会话续期原地合并，权限更新使用 revision CAS
+
+> ⚠️ **状态导航：具体写入方式已被后续 2026-08-30「权限传播、入口顺序与退出排空」取代。**
+> generation/revision CAS 和禁止旧快照覆盖新权限仍然有效，但不再经 Lua 解码后重编码 JSON。
 
 **当前边界**：`RefreshToken` 通过 Lua 读取 Redis 中当前会话，只更新时间字段和 token、
 用户索引、generation 三个 TTL，不再整体写回请求持有的会话快照。权限更新在 Redis 会话
@@ -166,6 +234,9 @@ Java 对拍必须使用独立 Redis DB，不能在生产切换后继续写入 Go
 ---
 
 ## 2026-08-28 普通请求体入口统一限流，并只读取一次
+
+> ⚠️ **状态导航：中间件位置已被后续 2026-08-30「权限传播、入口顺序与退出排空」取代。**
+> 大小上限、完整读取一次和 HTTP 413 语义不变，但不再位于鉴权和匿名限流之前。
 
 **当前边界**：非 multipart 请求体在全局路由入口通过 `http.MaxBytesReader` 限制，默认
 上限为 `server.maxRequestBodyMB=2`。入口实际读取完整内容，因此没有 `Content-Length` 的
@@ -1416,5 +1487,198 @@ TTL 会缩短错误时间但不能消除竞争。代数使旧快照失去写入�
 **相关位置**：`pkg/redisx/configcache.go`、`pkg/redisx/repeatsubmit.go`、
 `internal/service/config.go`、`internal/service/cache.go`、`internal/middleware/repeatsubmit.go`、
 `test/redis_consistency_test.go`。
+
+---
+
+## 2026-08-29 连接池取 20、分页部门改为受限 JOIN，鉴权 Lua 候选不采纳
+
+**当前边界**：MySQL `maxIdleConns` 默认值和部署配置从 10 调为 20，`maxOpenConns` 仍为
+50。用户分页 COUNT 继续只查 `sys_user`，分页取数在带 LIMIT 的查询中 LEFT JOIN
+`sys_dept`，只加载 Java 列表契约需要的 `dept_id/dept_name/leader`；导出继续使用独立批量
+查询补完整部门对象。`/health` 同时暴露 MySQL 与 Redis 客户端池统计，供压测按阶段做差值。
+
+**为什么**：2C2G 同机 A/B 每组 3 轮、每轮 15 秒。混合 2500 RPS 下，空闲连接 20 相对
+10 将 P95/P99 从 10.778/24.851ms 降至 8.169/17.584ms，数据库等待从
+1020 次/8324ms 降为 0，空闲连接关闭从 2059 降为 118；增加到 30 没有继续改善。分页部门
+JOIN 相对批量补查将 1400 RPS 用户列表 P95/P99 从 5.633/13.181ms 降至
+4.251/9.347ms，服务 CPU 从 68.81% 降至 58.00%。所有固定速率轮次均为 0 错误、0 丢弃。
+
+**否决的候选**：会话 JSON 和用户 generation 不能普通 MGET，因为第二个 key 依赖 JSON
+中的 `userId`。单次 Redis Lua + `cjson.decode` 虽减少命令和池等待，但 3000 RPS getInfo
+的 P95/P99 从 3.201/7.637ms 回退到 3.511/8.283ms，因此恢复两次 GET。不能仅凭“网络往返
+更少”宣称更快；要重新采用 Lua，必须拿出相同固定速率模型下稳定改善尾延迟的新证据。
+
+**禁止回退**：不得把部门 JOIN 放回 COUNT 或无分页基础查询，不得恢复 DISTINCT；不得仅凭
+单接口 0.1ms 级噪声把空闲连接降回 10，也不得未经 A/B 扩大 `maxOpenConns`。调整连接池、
+鉴权 Redis 读取或分页部门加载时，必须同时核对 P95/P99、服务与压测端 CPU、MySQL/Redis
+池等待、错误和丢弃，不能只看 QPS。
+
+**相关位置**：`configs/application.yml`、`internal/config/config.go`、
+`internal/repository/user.go`、`pkg/redisx/redisx.go`、`internal/service/health.go`、
+`internal/config/config_test.go`、`internal/repository/user_test.go`、
+`test/observability_test.go`、`test/session_test.go`、`test/user_test.go`、`docs/PERF.md`。
+
+---
+
+## 2026-08-30 权限传播、入口顺序与退出排空
+
+**当前边界**：菜单的 `perms` 或 `status` 变化后，查询该菜单关联的角色并刷新其在线用户；
+加载或写回最终权限失败时继续沿用安全撤销策略。普通 JSON/form 和 multipart 总大小上限
+保持不变，但受保护接口先鉴权、匿名登录/注册先按 IP 限流，之后才完整读取或解析请求体；
+不存在的路径不读取请求体。`GET /system/config/configKey/{key}` 保持路径和响应不变，参数
+管理员可读任意键，用户管理员只可读取 `sys.user.initPassword`，普通登录用户不再按猜测
+键名读取配置值。不存在或已删除账号与真实账号密码错误都执行相同 cost 的 bcrypt。
+
+操作日志池和手工任务池支持停止接收、排空和带 context 等待。退出顺序固定为 HTTP 停止
+接入、排空两个异步池、停止 scheduler、最后由既有 defer 关闭 Redis/MySQL。关闭开始后
+`Submit` 必须返回 false，不能向已关闭 channel 写入。
+
+会话续期和权限刷新继续比较 generation/revision，但 Go 先生成完整的新会话 JSON，Lua
+只校验当前版本后原样 SET。禁止 Lua 对会话执行 `cjson.decode -> cjson.encode`：Redis Lua
+会把空数组重编码成 `{}`，角色被撤掉最后一个权限或菜单停用时会生成无法反序列化的会话。
+续期发现 revision 冲突时重新读取最新会话后再写，旧权限快照没有写回资格。
+
+**为什么**：Java 菜单修改不会刷新会话，活跃用户可长期保留已经撤销的按钮权限；全局
+预读让无 token、被限流和 404 请求在被拒绝前消耗内存或临时磁盘；动态参数键接口会暴露
+初始密码并为未来敏感配置留下枚举入口；统一错误文案不能消除 bcrypt 时序差异。原有界
+池只解决过载，没有解决正常重启时已接收任务丢失。空数组问题由菜单停用的第二次刷新
+集成测试实际复现，不是推断。
+
+**受控差异**：参数按键读取和菜单权限即时生效比 Java 更严格；请求/响应形状、正常成功
+值、数据库结构和 Redis 前缀不变。无权限读取按既有普通业务 HTTP 200 + body code 403；
+请求体超限仍是已登记的 HTTP 413。
+
+**禁止回退**：不得让菜单权限变化只写数据库；不得把完整请求体读取放回鉴权或匿名限流
+之前；不得恢复“任意登录用户按键读取参数”；不得为不存在账号跳过 bcrypt；不得只关闭
+channel 而不等待已接收任务。会话 JSON 不得经 Lua 解码后重编码，相关修改必须保留菜单
+权限改名、菜单停用、空权限数组、续期冲突、无 token/404 请求体零读取、最小参数权限和
+异步池排空/超时测试。
+
+**相关位置**：`internal/service/menu.go`、`internal/repository/menu.go`、
+`internal/service/token.go`、`internal/router/router.go`、`internal/middleware/auth.go`、
+`internal/service/login.go`、`pkg/asyncx/pool.go`、`cmd/server/main.go`、
+`test/menu_test.go`、`test/body_limit_test.go`、`test/config_test.go`、
+`pkg/asyncx/pool_test.go`。
+
+---
+
+## 2026-08-30 P1 收口：安全变更先撤会话、树结构防环、菜单按用户刷新、兼容 xls
+
+> 本条取代上一条中“按菜单关联角色逐个刷新”的实现描述；菜单权限即时生效和会话 JSON
+> revision/CAS 约束继续有效。
+
+**当前边界**：停用、删除、管理员重置密码、个人修改密码以及导入停用账号，都必须在数据库
+写入前先撤销目标用户会话。Redis 撤销失败则拒绝数据库变更；批量撤销不得在首个错误后停止，
+必须尝试全部用户并汇总错误。数据库随后失败时允许用户被额外登出，这是安全优先的受控差异。
+
+部门修改必须拒绝把自己挂到任意后代下面；移到虚拟根节点 `parent_id=0` 时将自身
+`ancestors` 重置为 `0`，并在同一数据库事务中重算全部后代路径。菜单没有 ancestors，更新前
+一次性读取完整父子关系并在内存向上追溯，禁止在循环中查库，也拒绝形成新环。
+
+菜单 `perms/status` 变化时，不再按角色重复扫描全站会话。数据库一次查询得到去重用户 ID，
+按新版用户会话反向索引批量 MGET 并刷新；Redis 读取错误向上返回。数据库提交后的刷新使用
+保留 trace 值但不继承请求取消信号的 5 秒 context，避免客户端断开后中止已经提交的权限传播。
+
+用户导入同时接受 `.xlsx` 和 `.xls`。`.xlsx` 继续由 Excelize 解析，显式限制总解压 128 MB、
+单工作表 XML 32 MB；`.xls` 按 OLE 文件头识别，使用 Apache-2.0 的 `extrame/xls` 只读解析器，
+原文件最多 20 MB。两种格式共用同一套表头映射、字段转换、5000 行上限和错误汇总规则。
+
+**为什么**：数据库先成功、Redis 后失败会让停用/删除/改密后的旧会话继续存在；只挡
+`parent_id == id` 不能阻止父节点挂到孙节点形成环；按角色刷新会重复处理多角色用户，且请求
+取消可能让已提交的菜单变更只刷新一半；Vue 和 Java 明确接受 `.xls`，Go 只读 `.xlsx` 属于
+冻结契约缺口。Java 同样存在部分树结构缺陷，不作为复制理由。
+
+**禁止回退**：不得恢复“数据库成功后才撤销安全会话”；不得只检查父节点等于自己；不得把
+菜单传播改回角色循环或静默跳过 MGET 错误；不得只根据扩展名判断工作簿格式；不得移除 Excel
+解压/文件上限。修改这些流程时必须保留数据库失败前会话已撤销、部门根移动与三级防环、菜单
+权限改名/停用、`.xls` 解析和 `.xlsx` 原有转换测试。
+
+**相关位置**：`internal/service/user.go`、`internal/service/profile.go`、
+`internal/service/user_import.go`、`internal/service/dept.go`、`internal/service/menu.go`、
+`internal/service/token.go`、`internal/repository/menu.go`、`pkg/excelx/import.go`、
+`test/user_test.go`、`test/dept_test.go`、`test/menu_test.go`、`pkg/excelx/excelx_test.go`。
+
+---
+
+## 2026-08-30 P2 收口第二批：任务真实生命周期、字典代数、公告已读校验、下载真实路径
+
+**当前边界**：定时任务 context 超时后仍会及时记录失败并让外层调度回调返回，但配置为
+禁止并发的任务在任务函数真正退出前一直保留 `running` 标记。调度器用独立 WaitGroup 跟踪
+真实任务函数，停止时在总关闭 context 内同时等待 cron 回调和仍在运行的任务函数。
+
+字典缓存沿用既有 `sys_dict:` 前缀，新增不暴露给缓存监控的内部代数 key
+`sys_dict:__ruoyi_go_revision__`。缓存未命中时先读取代数，再查数据库；Lua 只在代数未变化且
+数据 key 不存在时回填。字典新增、修改、改名、删除和手工缓存清理统一先推进代数再删除缓存。
+内部代数不得出现在 key 列表，也不能通过缓存详情读取或被单 key 删除。
+
+单条和批量公告已读只接受当前存在且状态正常的公告。校验和写入在同一事务中完成，并对公告
+行使用 `FOR UPDATE`，避免公告在校验后、写入前被并发删除或切回草稿。批量请求只要包含一个
+不存在或未发布的 ID 就整体拒绝，不允许部分写入。接口路径、参数位置和正常响应形状不变。
+
+下载先做既有词法路径检查，再解析存储根目录和目标文件的真实路径；只有真实目标仍位于真实
+根目录内才返回，并直接使用解析后的路径打开文件。最终文件软链接和中间目录软链接都不能把
+下载带出上传目录。托管文件清理继续使用词法安全拼接及自身的逐级链接防护。
+
+**为什么**：Go 无法强行终止忽略 context 的 goroutine，超时返回不等于任务已经结束；提前
+释放禁止并发标记会让下一轮与旧任务重叠。字典原来的“查库后普通 SET”允许并发更新删除缓存
+后回填旧值。公告已读原来可以预置不存在 ID 或给草稿写孤儿记录。路径字符串位于上传目录内
+不代表实际文件也在目录内，软链接可以改变真实归属。
+
+**受控差异**：Java 同样不能强停不响应中断的任务，也没有完整解决这些竞态；Go 在禁止并发、
+公告已读和下载边界上更严格。公告无效 ID 从静默成功收紧为既有业务错误响应，这是数据完整性
+和安全修复。没有修改数据库结构、索引、HTTP 成功契约或 Redis Key 前缀。
+
+**禁止回退**：不得在 context 超时时立即释放禁止并发标记；不得把字典回填改回普通 SET 或
+允许缓存监控操作内部代数；不得把公告校验和写入拆成无锁的两段操作；不得仅凭 Abs/Rel 或
+字符串前缀判断下载路径。相关修改必须保留超时后不重叠、字典旧快照拒绝、公告非法批次零写入
+以及最终/中间软链接越界测试。
+
+**相关位置**：`internal/service/job_scheduler.go`、`internal/service/dict.go`、
+`internal/service/cache.go`、`internal/service/notice.go`、`internal/repository/notice.go`、
+`pkg/redisx/dictcache.go`、`pkg/upload/download.go`、`internal/handler/common.go`、
+`internal/service/job_scheduler_test.go`、`test/redis_consistency_test.go`、
+`test/notice_test.go`、`pkg/upload/download_test.go`。
+
+---
+
+## 2026-08-31 单实例唯一性收口与运行时边界加固
+
+**当前边界**：生产明确为单台服务器、单个 Go 进程。用户、角色、岗位、参数、部门和菜单
+各有独立的进程内领域锁，锁覆盖业务唯一性检查到数据库写入；注册、用户导入和个人资料修改
+复用用户领域锁。没有修改生产数据库结构、约束或索引。六类并发新增回归测试要求恰好一个
+请求成功。
+
+密码长度统一按 Unicode 字符数计算；用户状态只接受 `0/1`，登录仅接受正常状态 `0`；普通
+账号不能通过新增、修改或授权接口获得保留角色 ID 1。上传层把扩展名/大小错误标为可公开
+错误，文件系统和路径细节只进内部日志。JWT 解析只接受 HS512，分页 OFFSET 在整数溢出时
+饱和，缓存列表达到 500 个业务 key 后立即停止后续 SCAN。
+
+启动配置在数据库、Redis、调度器等副作用之前校验端口范围、Gin mode、Redis DB、日志等级
+和 CORS 来源。`allowedOrigins: ["*"]` 表示无凭证公开跨域，响应使用 `*` 且不发送
+`Allow-Credentials`；通配符不能与具体来源混用。显式来源仍精确回显并允许 credentials。
+监听失败和信号退出都经过 HTTP、异步池、调度器的统一关闭流程。导出限流器在未初始化时
+使用容量 1 的安全默认值；任务重复注册和源码中非法限流常量仍然 panic，因为它们属于应在
+开发/测试期立即暴露的编程错误，不是生产可变配置。
+
+**为什么**：Java 和原 Go 都把 `COUNT` 与写入分开，并发下可能产生重复业务标识；数据库
+冻结时，明确的单进程部署允许用最小改动消除本进程内竞争。其余问题会导致非 ASCII 密码
+入口行为不一致、内部路径泄露、异常状态账号登录、保留角色提权、整数回绕、JWT 算法降级、
+启动后残留后台组件、无效 Redis 全库扫描和危险 CORS 组合，均不应以 Java 同源缺陷为理由
+保留。
+
+**多实例门槛**：进程内锁不是分布式锁。只要计划启动第二个 Go 进程、使用多副本或滚动
+发布，业务唯一性 P2 必须重新打开；上线前先改成数据库唯一约束或可靠跨进程锁，并重跑并发
+写入与故障恢复测试。定时任务也必须增加分布式抢占。不得把本条的单实例结论外推到多实例。
+
+**禁止回退**：不得让唯一性检查和写入脱离同一领域锁；不得恢复未知用户状态可登录、普通
+账号可提交角色 1、任意 HMAC 可解析、上传内部错误直出、CORS 通配符带 credentials 或缓存
+列表“停止收集但继续扫描”。不得因为正常路径测试通过而删除监听失败关闭测试和配置边界测试。
+
+**相关位置**：`internal/service/write_locks.go`、`internal/service/user.go`、
+`internal/service/register.go`、`internal/service/user_import.go`、`internal/service/profile.go`、
+`internal/service/role.go`、`internal/service/post.go`、`internal/service/config.go`、
+`internal/service/dept.go`、`internal/service/menu.go`、`internal/config/config.go`、
+`internal/middleware/cors.go`、`cmd/server/main.go`、`pkg/jwtx/jwtx.go`、`pkg/page/page.go`、
+`pkg/redisx/redisx.go`、`pkg/upload/upload.go`、`test/uniqueness_concurrency_test.go`。
 
 ---

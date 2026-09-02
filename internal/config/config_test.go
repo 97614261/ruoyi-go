@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/viper"
 )
 
 func TestLoadOperationalLimits(t *testing.T) {
@@ -17,9 +19,45 @@ func TestLoadOperationalLimits(t *testing.T) {
 	}
 }
 
+func TestMySQLIdlePoolDefaultMatchesDeploymentConfig(t *testing.T) {
+	v := viper.New()
+	setDefaults(v)
+	const want = 20
+	if got := v.GetInt("mysql.maxIdleConns"); got != want {
+		t.Fatalf("mysql.maxIdleConns 默认值=%d，期望 %d", got, want)
+	}
+
+	deployment := viper.New()
+	deployment.SetConfigFile("../../configs/application.yml")
+	if err := deployment.ReadInConfig(); err != nil {
+		t.Fatalf("读取部署配置失败：%v", err)
+	}
+	if got := deployment.GetInt("mysql.maxIdleConns"); got != want {
+		t.Fatalf("部署配置 mysql.maxIdleConns=%d，期望与默认值一致为 %d", got, want)
+	}
+}
+
+func TestRedisPoolDefaultMatchesDeploymentConfig(t *testing.T) {
+	v := viper.New()
+	setDefaults(v)
+	const want = 32
+	if got := v.GetInt("redis.poolSize"); got != want {
+		t.Fatalf("redis.poolSize 默认值=%d，期望 %d", got, want)
+	}
+
+	deployment := viper.New()
+	deployment.SetConfigFile("../../configs/application.yml")
+	if err := deployment.ReadInConfig(); err != nil {
+		t.Fatalf("读取部署配置失败：%v", err)
+	}
+	if got := deployment.GetInt("redis.poolSize"); got != want {
+		t.Fatalf("部署配置 redis.poolSize=%d，期望与默认值一致为 %d", got, want)
+	}
+}
+
 func TestValidateRejectsUnsafeLimitsAndProxy(t *testing.T) {
 	valid := Config{
-		Server: ServerConfig{ReadTimeout: time.Second, WriteTimeout: time.Second,
+		Server: ServerConfig{Port: 8080, Mode: "release", ReadTimeout: time.Second, WriteTimeout: time.Second,
 			ShutdownTimeout: time.Second, RequestTimeout: time.Second, MaxRequestBodyMB: 1,
 			SlowRequestThreshold: time.Millisecond},
 		MySQL: MySQLConfig{DSN: "u:p@tcp(localhost:3306)/db", MaxOpenConns: 2, MaxIdleConns: 1,
@@ -28,6 +66,7 @@ func TestValidateRejectsUnsafeLimitsAndProxy(t *testing.T) {
 		Redis:  RedisConfig{Addr: "localhost:6379", PoolSize: 1},
 		JWT:    JWTConfig{Secret: "secret", ExpireTime: time.Hour, RefreshWindow: time.Minute},
 		Upload: UploadConfig{Path: "uploads", URLPrefix: "/profile", MaxSizeMB: 10, MaxRequestSizeMB: 20},
+		Log:    LogConfig{Level: "info"},
 	}
 	if err := valid.validate(); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
@@ -43,5 +82,35 @@ func TestValidateRejectsUnsafeLimitsAndProxy(t *testing.T) {
 	invalidProxy.Server.TrustedProxies = []string{"not-an-ip"}
 	if err := invalidProxy.validate(); err == nil || !strings.Contains(err.Error(), "trustedProxies") {
 		t.Fatalf("invalid trusted proxy should fail: %v", err)
+	}
+
+	invalidPort := valid
+	invalidPort.Server.Port = 70000
+	if err := invalidPort.validate(); err == nil || !strings.Contains(err.Error(), "server.port") {
+		t.Fatalf("invalid port should fail: %v", err)
+	}
+
+	invalidMode := valid
+	invalidMode.Server.Mode = "production"
+	if err := invalidMode.validate(); err == nil || !strings.Contains(err.Error(), "server.mode") {
+		t.Fatalf("invalid mode should fail: %v", err)
+	}
+
+	invalidRedisDB := valid
+	invalidRedisDB.Redis.DB = -1
+	if err := invalidRedisDB.validate(); err == nil || !strings.Contains(err.Error(), "redis.db") {
+		t.Fatalf("negative Redis DB should fail: %v", err)
+	}
+
+	mixedOrigins := valid
+	mixedOrigins.Server.AllowedOrigins = []string{"*", "https://example.test"}
+	if err := mixedOrigins.validate(); err == nil || !strings.Contains(err.Error(), "不能与具体来源混用") {
+		t.Fatalf("mixed wildcard origins should fail: %v", err)
+	}
+
+	invalidOrigin := valid
+	invalidOrigin.Server.AllowedOrigins = []string{"https://example.test/path"}
+	if err := invalidOrigin.validate(); err == nil || !strings.Contains(err.Error(), "allowedOrigins") {
+		t.Fatalf("origin with path should fail: %v", err)
 	}
 }

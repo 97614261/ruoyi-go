@@ -57,7 +57,15 @@ func Parse(c *gin.Context, allowedSort map[string]string) Query {
 
 // Offset 计算 SQL OFFSET。
 func (q Query) Offset() int {
-	return (q.PageNum - 1) * q.PageSize
+	if q.PageNum <= 1 || q.PageSize <= 0 {
+		return 0
+	}
+	pages := q.PageNum - 1
+	maxInt := int(^uint(0) >> 1)
+	if pages > maxInt/q.PageSize {
+		return maxInt
+	}
+	return pages * q.PageSize
 }
 
 // Stable 拼出**行序确定**的排序表达式，所有分页查询都必须用它。

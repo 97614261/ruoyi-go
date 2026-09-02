@@ -41,6 +41,9 @@ func GetProfile(ctx context.Context, userID int64) (*model.SysUser, string, stri
 // 只允许改昵称、邮箱、手机号、性别 —— 其余字段（部门、角色、状态）
 // 必须走用户管理，否则用户可以自己改部门绕过数据权限。
 func UpdateProfile(ctx context.Context, userID int64, body model.ProfileBody) error {
+	userWriteMu.Lock()
+	defer userWriteMu.Unlock()
+
 	current, err := repository.SelectUserByID(ctx, userID)
 	if err != nil {
 		return err
@@ -83,7 +86,7 @@ func UpdateProfilePwd(ctx context.Context, userID int64, oldPassword, newPasswor
 	if oldPassword == "" || newPassword == "" {
 		return errs.New("旧密码和新密码不能为空")
 	}
-	if len(newPassword) < 5 || len(newPassword) > 20 {
+	if !validPasswordLength(newPassword) {
 		return errs.New("新密码长度必须在 5 到 20 个字符之间")
 	}
 
@@ -106,10 +109,13 @@ func UpdateProfilePwd(ctx context.Context, userID int64, oldPassword, newPasswor
 	if err != nil {
 		return err
 	}
+	if err := RevokeUserSessions(ctx, userID); err != nil {
+		return err
+	}
 	if err := repository.ResetUserPwd(ctx, userID, hashed, user.UserName, time.Now()); err != nil {
 		return err
 	}
-	return RevokeUserSessions(ctx, userID)
+	return nil
 }
 
 // UnlockScreen 校验锁屏密码。

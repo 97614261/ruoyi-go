@@ -17,8 +17,6 @@ const ConfigKeyRegisterUser = "sys.account.registerUser"
 const (
 	userNameMinLength = 2
 	userNameMaxLength = 20
-	passwordMinLength = 5
-	passwordMaxLength = 20
 )
 
 // Register 用户自助注册。
@@ -52,9 +50,12 @@ func Register(ctx context.Context, body model.RegisterBody, ip, userAgent string
 		return errs.New("用户密码不能为空")
 	case len([]rune(username)) < userNameMinLength || len([]rune(username)) > userNameMaxLength:
 		return errs.Newf("账户长度必须在%d到%d个字符之间", userNameMinLength, userNameMaxLength)
-	case len(body.Password) < passwordMinLength || len(body.Password) > passwordMaxLength:
+	case !validPasswordLength(body.Password):
 		return errs.Newf("密码长度必须在%d到%d个字符之间", passwordMinLength, passwordMaxLength)
 	}
+
+	userWriteMu.Lock()
+	defer userWriteMu.Unlock()
 
 	count, err := repository.CountUserByName(ctx, username, 0)
 	if err != nil {

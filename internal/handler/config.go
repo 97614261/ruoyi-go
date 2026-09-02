@@ -48,8 +48,7 @@ func ConfigExport(c *gin.Context) {
 
 // ConfigGetByKey GET /system/config/configKey/:configKey
 //
-// 不挂权限：前端在用户管理等页面要读 sys.user.initPassword 展示初始密码，
-// 与 Java 一致不做鉴权（登录后即可访问）。
+// 权限由路由上的 CanReadConfigKey 按键名控制；响应形状仍与 Java 对齐。
 //
 // 注意参数键名带点号（sys.user.initPassword），gin 的路径参数能正常匹配。
 func ConfigGetByKey(c *gin.Context) {

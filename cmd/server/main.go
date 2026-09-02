@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"ruoyi-go/internal/config"
+	"ruoyi-go/internal/middleware"
 	"ruoyi-go/internal/repository"
 	"ruoyi-go/internal/router"
 	"ruoyi-go/internal/service"
@@ -70,14 +71,14 @@ func run() error {
 	service.InitToken(cfg.JWT)
 	service.InitCaptcha(cfg.Captcha.Type)
 
-	// 定时任务调度器：从 sys_job 装载状态正常的任务。
-	// 单个任务配错只记日志跳过，不影响服务启动。
-	if err := service.StartScheduler(ctx); err != nil {
+	// 自定义校验规则必须在构建路由前注册
+	if err := validate.Register(); err != nil {
 		return err
 	}
 
-	// 自定义校验规则必须在构建路由前注册
-	if err := validate.Register(); err != nil {
+	// 定时任务调度器：从 sys_job 装载状态正常的任务。
+	// 放在所有无副作用的启动校验之后，避免后续初始化失败时遗留任务。
+	if err := service.StartScheduler(ctx); err != nil {
 		return err
 	}
 
@@ -91,41 +92,71 @@ func run() error {
 	errCh := make(chan error, 1)
 	go func() {
 		slog.Info("服务已启动", "addr", srv.Addr, "mode", cfg.Server.Mode)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			errCh <- err
-		}
+		errCh <- srv.ListenAndServe()
 	}()
 
+	var serveErr error
 	select {
 	case err := <-errCh:
-		return fmt.Errorf("监听失败: %w", err)
+		if err == nil || errors.Is(err, http.ErrServerClosed) {
+			serveErr = errors.New("监听意外停止")
+		} else {
+			serveErr = fmt.Errorf("监听失败: %w", err)
+		}
 	case <-ctx.Done():
 		slog.Info("收到退出信号，开始优雅关闭")
 	}
 
-	if err := shutdownComponents(cfg.Server.ShutdownTimeout, srv.Shutdown, service.StopScheduler); err != nil {
-		return fmt.Errorf("优雅关闭超时: %w", err)
+	if err := finishServer(serveErr, cfg.Server.ShutdownTimeout, srv.Shutdown,
+		shutdownAsyncWorkers, service.StopScheduler); err != nil {
+		return err
 	}
 	slog.Info("服务已退出")
 	return nil
 }
 
-// shutdownComponents 先停止接收新请求，再等待调度任务结束。
-// 两个组件使用独立超时，避免前一个耗尽 deadline 后，后一个收到已过期的 context。
+func finishServer(
+	serveErr error,
+	timeout time.Duration,
+	shutdownHTTP func(context.Context) error,
+	shutdownAsync func(context.Context) error,
+	stopScheduler func(context.Context),
+) error {
+	shutdownErr := shutdownComponents(timeout, shutdownHTTP, shutdownAsync, stopScheduler)
+	if shutdownErr != nil {
+		shutdownErr = fmt.Errorf("组件关闭失败: %w", shutdownErr)
+	}
+	return errors.Join(serveErr, shutdownErr)
+}
+
+// shutdownComponents 先停止接收请求，再排空异步池，最后等待调度任务结束。
+// 各阶段使用独立超时，避免前一阶段耗尽 deadline 后污染后续关闭。
 func shutdownComponents(
 	timeout time.Duration,
 	shutdownHTTP func(context.Context) error,
+	shutdownAsync func(context.Context) error,
 	stopScheduler func(context.Context),
 ) error {
 	httpCtx, cancelHTTP := context.WithTimeout(context.Background(), timeout)
 	httpErr := shutdownHTTP(httpCtx)
 	cancelHTTP()
 
+	asyncCtx, cancelAsync := context.WithTimeout(context.Background(), timeout)
+	asyncErr := shutdownAsync(asyncCtx)
+	cancelAsync()
+
 	schedulerCtx, cancelScheduler := context.WithTimeout(context.Background(), timeout)
 	stopScheduler(schedulerCtx)
 	cancelScheduler()
 
-	return httpErr
+	return errors.Join(httpErr, asyncErr)
+}
+
+func shutdownAsyncWorkers(ctx context.Context) error {
+	results := make(chan error, 2)
+	go func() { results <- middleware.ShutdownOperLogPool(ctx) }()
+	go func() { results <- service.ShutdownManualJobPool(ctx) }()
+	return errors.Join(<-results, <-results)
 }
 
 func initLogger(level string) {

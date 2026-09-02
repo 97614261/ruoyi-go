@@ -18,7 +18,7 @@ const exportWaitTimeout = 5 * time.Second
 
 // exportSlots 导出名额。容量由 service.MaxConcurrentExports 决定，
 // 但那是 L3、这里是 L4，不能反向引用，所以在 InitExportLimit 里注入。
-var exportSlots chan struct{}
+var exportSlots = make(chan struct{}, 1)
 
 // InitExportLimit 设置同时导出的上限，必须在注册路由前调用。
 func InitExportLimit(max int) {
@@ -39,10 +39,6 @@ func InitExportLimit(max int) {
 // 前端会把这段错误当成文件存下来 —— 用户拿到一个打不开的 .xlsx，
 // 而且看不到任何提示。导出接口上的每一条错误路径都要走这里。
 func ExportLimit() gin.HandlerFunc {
-	if exportSlots == nil {
-		panic("middleware.ExportLimit: 必须先调用 InitExportLimit")
-	}
-
 	return func(c *gin.Context) {
 		timer := time.NewTimer(exportWaitTimeout)
 		defer timer.Stop()

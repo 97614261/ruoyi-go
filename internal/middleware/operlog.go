@@ -38,6 +38,11 @@ var sensitiveParamNames = []string{"password", "oldPassword", "newPassword", "co
 
 var operLogPool = asyncx.NewPool(4, 256)
 
+// ShutdownOperLogPool stops accepting logs and drains every accepted record.
+func ShutdownOperLogPool(ctx context.Context) error {
+	return operLogPool.Shutdown(ctx)
+}
+
 // OperLog 记录操作日志。
 //
 // 对应 Java 版的 @Log 注解 + LogAspect：

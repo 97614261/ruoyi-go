@@ -1,6 +1,8 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -131,6 +133,46 @@ func TestJobSchedulerScheduleAndRunLocksAreIndependent(t *testing.T) {
 		t.Fatal("调度变更不应等待任务运行锁")
 	}
 	s.runMu.Unlock()
+}
+
+func TestTimedOutTaskKeepsForbidFlagUntilTaskActuallyExits(t *testing.T) {
+	s := newTestJobScheduler()
+	target := testScheduledJob(45)
+	started := make(chan struct{})
+	release := make(chan struct{})
+
+	if !s.beginRun(&target) {
+		t.Fatal("首次运行应成功登记")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := s.runStartedTaskWith(ctx, &target, func(context.Context, *model.SysJob) error {
+		close(started)
+		<-release // 模拟完全忽略 context 的任务
+		return nil
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("超时任务应返回 DeadlineExceeded，实际 %v", err)
+	}
+	<-started
+	if s.beginRun(&target) {
+		s.endRun(&target)
+		t.Fatal("任务函数尚未退出时不能释放禁止并发标记")
+	}
+
+	close(release)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if s.beginRun(&target) {
+			s.endRun(&target)
+			if !s.waitForRuns(context.Background()) {
+				t.Fatal("任务退出后 runWG 应完成")
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("任务函数退出后禁止并发标记没有释放")
 }
 
 func TestTruncateUTF8Bytes(t *testing.T) {

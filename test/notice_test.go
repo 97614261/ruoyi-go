@@ -231,6 +231,32 @@ func TestNoticeMarkRead(t *testing.T) {
 	mustOK(t, doPost(t, "/system/notice/markRead?noticeId="+idPath(id), nil), "重复标记已读")
 }
 
+func TestNoticeMarkReadRejectsMissingDraftAndPartialBatch(t *testing.T) {
+	const missingID = int64(9_999_999_999)
+	mustFail(t, doPost(t, "/system/notice/markRead?noticeId="+idPath(missingID), nil),
+		"不存在或无权访问", "不存在的公告不能标记已读")
+
+	draft := newNoticePayload("read-draft")
+	draft["status"] = model.StatusDisable
+	draftID := createNotice(t, draft)
+	mustFail(t, doPost(t, "/system/notice/markRead?noticeId="+idPath(draftID), nil),
+		"不存在或无权访问", "未发布公告不能标记已读")
+
+	publishedID := createNotice(t, newNoticePayload("read-partial"))
+	mustFail(t, doPost(t, "/system/notice/markReadAll?ids="+idPath(publishedID)+","+idPath(missingID), nil),
+		"不存在或无权访问", "批量标记包含非法公告时应整体拒绝")
+
+	var count int64
+	if err := repository.DB(context.Background()).Model(&model.SysNoticeRead{}).
+		Where("user_id = ? AND notice_id = ?", model.AdminUserID, publishedID).
+		Count(&count).Error; err != nil {
+		t.Fatalf("检查批量标记结果失败：%v", err)
+	}
+	if count != 0 {
+		t.Fatalf("批量请求包含非法公告时不能部分写入，实际写入 %d 条", count)
+	}
+}
+
 // TestNoticeMarkReadAllWithoutIDsDoesNothing 对齐 Java：ids 缺失或为空时，
 // Convert.toLongArray 得到空数组，SysNoticeReadServiceImpl.markReadBatch 直接返回。
 // 前端正常调用始终带 ids；不带参数只用于锁定后端边界行为。

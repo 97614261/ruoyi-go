@@ -37,6 +37,34 @@ func TestSessionGenerationRejectsStaleCreate(t *testing.T) {
 	assertTokenUnauthorized(t, token, "代数递增")
 }
 
+// TestSessionReadTreatsMissingGenerationAsZero covers sessions created before the
+// generation key existed. Authentication still accepts generation zero, while a
+// later revocation creates a non-zero generation and rejects the same session.
+func TestSessionReadTreatsMissingGenerationAsZero(t *testing.T) {
+	body := newUserPayload("gen_zero")
+	id := createUser(t, body)
+	token, err := loginAs(fmt.Sprint(body["userName"]), "test123456")
+	if err != nil {
+		t.Fatalf("测试账号登录失败：%v", err)
+	}
+
+	ctx := context.Background()
+	if err := redisx.C().Del(ctx, redisx.LoginUserGenerationKey(id)).Err(); err != nil {
+		t.Fatalf("删除会话代数失败：%v", err)
+	}
+	loginUser, err := service.GetLoginUser(ctx, token)
+	if err != nil || loginUser == nil {
+		t.Fatalf("缺少代数 key 时应按 0 读取：loginUser=%v err=%v", loginUser, err)
+	}
+	if loginUser.SessionGeneration != 0 {
+		t.Fatalf("旧会话代数应为 0，实际 %d", loginUser.SessionGeneration)
+	}
+	if err := service.RevokeUserSessions(ctx, id); err != nil {
+		t.Fatalf("撤销缺少代数 key 的旧会话失败：%v", err)
+	}
+	assertTokenUnauthorized(t, token, "缺少代数 key 的旧会话被撤销")
+}
+
 // TestRevokeUserSessionsRejectsUnindexedSessionByGeneration 证明撤销不需要兼容 SCAN：
 // 即使存在部署时本应清理的无索引残余，代数递增也会让它无法继续鉴权。
 func TestRevokeUserSessionsRejectsUnindexedSessionByGeneration(t *testing.T) {

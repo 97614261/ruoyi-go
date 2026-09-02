@@ -72,6 +72,34 @@ func HasPermission(perm string) gin.HandlerFunc {
 	}
 }
 
+// CanReadConfigKey protects the dynamic config-key endpoint. Config managers
+// may read any key; user managers may only read the initial-password contract
+// value used by the user-management screen.
+func CanReadConfigKey() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		loginUser := CurrentUser(c)
+		if loginUser == nil {
+			unauthorized(c)
+			return
+		}
+
+		key := c.Param("configKey")
+		allowed := loginUser.HasPermission("system:config:query")
+		if key == service.ConfigKeyInitPassword {
+			allowed = allowed || loginUser.HasPermission("system:user:list") ||
+				loginUser.HasPermission("system:user:add") ||
+				loginUser.HasPermission("system:user:import") ||
+				loginUser.HasPermission("system:user:resetPwd")
+		}
+		if !allowed {
+			response.FailCode(c, response.CodeForbidden, "没有权限，请联系管理员授权")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 // CurrentUser 取当前会话，未登录返回 nil。
 func CurrentUser(c *gin.Context) *model.LoginUser {
 	value, ok := c.Get(ctxKeyLoginUser)

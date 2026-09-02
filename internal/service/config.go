@@ -116,6 +116,9 @@ func GetConfig(ctx context.Context, configID int64) (*model.SysConfig, error) {
 
 // CreateConfig 新增参数。
 func CreateConfig(ctx context.Context, config *model.SysConfig, operator string) error {
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+
 	count, err := repository.CountConfigByKey(ctx, config.ConfigKey, 0)
 	if err != nil {
 		return err
@@ -140,6 +143,9 @@ func CreateConfig(ctx context.Context, config *model.SysConfig, operator string)
 //
 // 键名可能被改，所以新旧两个 key 的缓存都要清。
 func UpdateConfig(ctx context.Context, config *model.SysConfig, operator string) error {
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+
 	if config.ConfigID == 0 {
 		return errs.New("参数ID不能为空")
 	}

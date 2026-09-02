@@ -55,9 +55,10 @@ func New(cfg *config.Config) *gin.Engine {
 		middleware.Logger(),
 		middleware.CORS(),
 		middleware.RequestTimeout(cfg.Server.RequestTimeout),
-		middleware.RequestBodyLimit(cfg.Server.MaxRequestBodyMB<<20),
-		middleware.MultipartBodyLimit(cfg.Upload.MaxRequestSizeMB<<20, cfg.Upload.MaxSizeMB<<20),
 	)
+	bodyLimit := middleware.RequestBodyLimit(cfg.Server.MaxRequestBodyMB << 20)
+	multipartLimit := middleware.MultipartBodyLimit(
+		cfg.Upload.MaxRequestSizeMB<<20, cfg.Upload.MaxSizeMB<<20)
 
 	// 健康检查，不鉴权。真去 ping MySQL 和 Redis，依赖挂了返回 503
 	r.GET("/health", handler.Health)
@@ -71,8 +72,8 @@ func New(cfg *config.Config) *gin.Engine {
 	handler.InitUpload(cfg.Upload)
 	r.StaticFS(cfg.Upload.URLPrefix, gin.Dir(cfg.Upload.Path, false))
 
-	registerAnonymous(r)
-	registerAuthed(r)
+	registerAnonymous(r, bodyLimit, multipartLimit)
+	registerAuthed(r, bodyLimit, multipartLimit)
 
 	return r
 }
@@ -81,7 +82,7 @@ func New(cfg *config.Config) *gin.Engine {
 //
 // 与 Java 版 SecurityConfig 的放行清单保持一致。
 // /logout 也放这里：会话过期后前端仍要能正常退出。
-func registerAnonymous(r *gin.Engine) {
+func registerAnonymous(r *gin.Engine, bodyLimit, multipartLimit gin.HandlerFunc) {
 	// 【限流只挂匿名接口】它们是唯一不需要 token 就能打的入口，
 	// 也是暴力破解的入口。登录还走 bcrypt，是全站最贵的一次请求。
 	//
@@ -106,20 +107,22 @@ func registerAnonymous(r *gin.Engine) {
 		middleware.RateLimit(middleware.RateLimitOptions{
 			Key: "login", Count: 60, Window: time.Minute, ByIP: true,
 		}),
+		bodyLimit, multipartLimit,
 		handler.Login)
 
 	r.POST("/register",
 		middleware.RateLimit(middleware.RateLimitOptions{
 			Key: "register", Count: 5, Window: time.Minute, ByIP: true,
 		}),
+		bodyLimit, multipartLimit,
 		handler.Register)
 
 	r.POST("/logout", handler.Logout)
 }
 
 // registerAuthed 需要登录的路由。
-func registerAuthed(r *gin.Engine) {
-	authed := r.Group("", middleware.Auth())
+func registerAuthed(r *gin.Engine, bodyLimit, multipartLimit gin.HandlerFunc) {
+	authed := r.Group("", middleware.Auth(), bodyLimit, multipartLimit)
 
 	authed.GET("/getInfo", handler.GetInfo)
 	authed.GET("/getRouters", handler.GetRouters)
@@ -351,8 +354,8 @@ func registerConfig(g *gin.RouterGroup) {
 	cfg.GET("/list", middleware.HasPermission("system:config:list"), handler.ConfigList)
 	cfg.POST("/export", middleware.ExportLimit(), middleware.HasPermission("system:config:export"),
 		middleware.OperLog(title, model.BusinessTypeExport), handler.ConfigExport)
-	// configKey 不挂权限：用户管理等页面要读 sys.user.initPassword，与 Java 一致
-	cfg.GET("/configKey/:configKey", handler.ConfigGetByKey)
+	// 参数值可能包含初始密码等敏感信息，按键名和调用方权限做最小授权。
+	cfg.GET("/configKey/:configKey", middleware.CanReadConfigKey(), handler.ConfigGetByKey)
 	cfg.DELETE("/refreshCache", middleware.HasPermission("system:config:remove"),
 		middleware.OperLog(title, model.BusinessTypeClean), handler.ConfigRefreshCache)
 	cfg.GET("/:configId", middleware.HasPermission("system:config:query"), handler.ConfigGet)

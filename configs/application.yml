@@ -16,6 +16,7 @@ server:
   # 前端走 Vite 代理（开发）或 Nginx 反代（生产）时是同源的，不需要配。
   # 真要跨域访问时在这里列出完整来源，例如：
   #   allowedOrigins: ["http://localhost:5173"]
+  # "*" 表示公开跨域且不会允许携带 credentials，不能与具体来源混用。
   allowedOrigins: []
   # 仅填写实际反向代理的 IP/CIDR；直连部署保持空列表，防止伪造转发头绕过限流。
   trustedProxies: []
@@ -24,7 +25,7 @@ mysql:
   # 与 RuoYi Java 版共用同一个库，表结构来自 sql/ry_20260417.sql
   dsn: "root:aaa111!!@tcp(127.0.0.1:3306)/ry-vue?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai"
   maxOpenConns: 50
-  maxIdleConns: 10
+  maxIdleConns: 20
   connMaxLifetime: 1h
   # 超过该耗时的 SQL 记 warn 日志
   slowThreshold: 200ms
@@ -36,7 +37,7 @@ redis:
   addr: "127.0.0.1:6379"
   password: ""
   db: 0
-  poolSize: 20
+  poolSize: 32
 
 jwt:
   # 生产环境必须改，且从环境变量注入，不要提交到仓库

@@ -46,6 +46,9 @@ func GetPost(ctx context.Context, postID int64) (*model.SysPost, error) {
 
 // CreatePost 新增岗位。
 func CreatePost(ctx context.Context, post *model.SysPost, operator string) error {
+	postWriteMu.Lock()
+	defer postWriteMu.Unlock()
+
 	if err := checkPostUnique(ctx, post, "新增"); err != nil {
 		return err
 	}
@@ -57,6 +60,9 @@ func CreatePost(ctx context.Context, post *model.SysPost, operator string) error
 
 // UpdatePost 修改岗位。
 func UpdatePost(ctx context.Context, post *model.SysPost, operator string) error {
+	postWriteMu.Lock()
+	defer postWriteMu.Unlock()
+
 	if post.PostID <= 0 {
 		return errs.New("岗位ID不能为空")
 	}

@@ -38,11 +38,10 @@ func StripResourcePrefix(resource, prefix string) string {
 	return resource[index+len(prefix):]
 }
 
-// SafeJoin 把相对路径拼到 baseDir 下，并确认结果没有跑出 baseDir。
+// SafeJoin 把相对路径拼到 baseDir 下，并执行词法边界检查。
 //
-// 【比 Java 版更严】Java 只挡了 .. 和扩展名，没有校验最终路径的归属。
-// 绝对路径、软链接、Windows 盘符（C:/Windows/...）这些都绕得过去。
-// 这里统一收敛到"必须落在 baseDir 内"，正常下载完全无感。
+// 需要打开现有文件时必须继续调用 SafeJoinExisting，不能把词法检查误当成
+// 真实路径检查；清理不存在的托管文件仍需要本函数只负责安全拼接。
 func SafeJoin(baseDir, relPath string) (string, error) {
 	absBase, err := filepath.Abs(baseDir)
 	if err != nil {
@@ -54,10 +53,35 @@ func SafeJoin(baseDir, relPath string) (string, error) {
 		return "", fmt.Errorf("解析文件路径失败: %w", err)
 	}
 
-	if target != absBase && !strings.HasPrefix(target, absBase+string(filepath.Separator)) {
+	if !isWithin(absBase, target) {
 		return "", fmt.Errorf("非法的文件路径")
 	}
 	return target, nil
+}
+
+// SafeJoinExisting 在词法边界检查后解析真实路径，供下载现有文件使用。
+// 返回解析后的路径，后续打开文件时不会再经过用户可控的软链接入口。
+func SafeJoinExisting(baseDir, relPath string) (string, error) {
+	absBase, err := filepath.Abs(baseDir)
+	if err != nil {
+		return "", fmt.Errorf("解析存储根目录失败: %w", err)
+	}
+	target, err := SafeJoin(absBase, relPath)
+	if err != nil {
+		return "", err
+	}
+	realBase, err := filepath.EvalSymlinks(absBase)
+	if err != nil {
+		return "", fmt.Errorf("解析存储根目录真实路径失败: %w", err)
+	}
+	realTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return "", fmt.Errorf("解析文件真实路径失败: %w", err)
+	}
+	if !isWithin(realBase, realTarget) {
+		return "", fmt.Errorf("文件真实路径不属于存储根目录")
+	}
+	return realTarget, nil
 }
 
 // PercentEncode 百分号编码，对齐 Java 版 FileUtils.percentEncode。

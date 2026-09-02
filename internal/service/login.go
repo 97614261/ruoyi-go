@@ -26,6 +26,9 @@ const (
 
 const ConfigKeyLoginBlackIPList = "sys.login.blackIPList"
 
+// 用户不存在时也执行同成本的 bcrypt，避免通过响应耗时枚举账号。
+const dummyPasswordHash = "$2a$10$7JB720yubVSZvUI0rEqK/.VqGOZTH.ulu33dHOiBE8ByOhJIrdAu2"
+
 // msgPasswordNotMatch 用户不存在与密码错误必须返回同一句话，
 // 否则攻击者可以据此枚举出系统里有哪些账号。
 const msgPasswordNotMatch = "用户不存在/密码错误"
@@ -97,13 +100,19 @@ func Login(ctx context.Context, body model.LoginBody, ip, userAgent string) (str
 	if count >= maxPasswordRetry {
 		return fail(passwordLockedError())
 	}
-	if user == nil || user.DelFlag == model.DelFlagDeleted {
+	accountExists := user != nil && user.DelFlag != model.DelFlagDeleted
+	passwordHash := dummyPasswordHash
+	if accountExists {
+		passwordHash = user.Password
+	}
+	passwordMatches := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(body.Password)) == nil
+	if !accountExists {
 		return fail(recordPasswordFailure(ctx, retryKey))
 	}
-	if user.Status == model.StatusDisable {
+	if user.Status != model.StatusNormal {
 		return fail(errs.New("对不起，您的帐号已停用"))
 	}
-	if bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(body.Password)) != nil {
+	if !passwordMatches {
 		return fail(recordPasswordFailure(ctx, retryKey))
 	}
 
@@ -117,7 +126,7 @@ func Login(ctx context.Context, body model.LoginBody, ip, userAgent string) (str
 	if err != nil {
 		return "", err
 	}
-	if fresh == nil || fresh.DelFlag == model.DelFlagDeleted || fresh.Status == model.StatusDisable ||
+	if fresh == nil || fresh.DelFlag == model.DelFlagDeleted || fresh.Status != model.StatusNormal ||
 		bcrypt.CompareHashAndPassword([]byte(fresh.Password), []byte(body.Password)) != nil {
 		return fail(errSessionChanged)
 	}
@@ -164,8 +173,7 @@ func Login(ctx context.Context, body model.LoginBody, ip, userAgent string) (str
 
 func loginPreCheck(ctx context.Context, username, password, ip string) error {
 	usernameLen := len([]rune(username))
-	passwordLen := len([]rune(password))
-	if usernameLen < 2 || usernameLen > 20 || passwordLen < 5 || passwordLen > 20 {
+	if usernameLen < 2 || usernameLen > 20 || !validPasswordLength(password) {
 		return errs.New(msgPasswordNotMatch)
 	}
 	filter, err := GetConfigValueByKey(ctx, ConfigKeyLoginBlackIPList)

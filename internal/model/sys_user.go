@@ -35,7 +35,7 @@ type SysUser struct {
 	// Password 用 omitempty + MarshalJSON 置空实现"可输入、不可输出"：
 	// 直接标 json:"-" 会连输入也一起挡掉，新增用户就收不到密码了。
 	Password      string     `gorm:"column:password" json:"password,omitempty" binding:"omitempty,min=5,max=20"`
-	Status        string     `gorm:"column:status" json:"status" excel:"name:账号状态;converter:0=正常,1=停用"`
+	Status        string     `gorm:"column:status" json:"status" binding:"omitempty,oneof=0 1" excel:"name:账号状态;converter:0=正常,1=停用"`
 	DelFlag       string     `gorm:"column:del_flag" json:"delFlag"`
 	LoginIP       string     `gorm:"column:login_ip" json:"loginIp" excel:"name:最后登录IP;type:export"`
 	LoginDate     types.Time `gorm:"column:login_date" json:"loginDate" excel:"name:最后登录时间;type:export;width:30"`
@@ -143,5 +143,5 @@ type UpdatePwdBody struct {
 // UserStatusBody /system/user/changeStatus 的请求体。
 type UserStatusBody struct {
 	UserID int64  `json:"userId" binding:"required"`
-	Status string `json:"status" binding:"required"`
+	Status string `json:"status" binding:"required,oneof=0 1"`
 }

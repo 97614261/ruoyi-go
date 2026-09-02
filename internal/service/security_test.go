@@ -24,6 +24,37 @@ func TestLoginLengthValidationRunsBeforeLookup(t *testing.T) {
 	}
 }
 
+func TestPasswordLengthCountsUnicodeCharacters(t *testing.T) {
+	if !validPasswordLength("密码安全测试甲") {
+		t.Fatal("five-or-more non-ASCII characters should not be rejected by byte length")
+	}
+	if validPasswordLength("密码四字") {
+		t.Fatal("four Unicode characters must be rejected")
+	}
+}
+
+func TestUserStatusIsStrict(t *testing.T) {
+	for _, status := range []string{model.StatusNormal, model.StatusDisable} {
+		if err := checkUserStatus(status); err != nil {
+			t.Fatalf("valid status %q rejected: %v", status, err)
+		}
+	}
+	for _, status := range []string{"", "2", "normal"} {
+		if err := checkUserStatus(status); err == nil {
+			t.Fatalf("invalid status %q accepted", status)
+		}
+	}
+}
+
+func TestReservedAdminRoleCannotBeAssignedToOrdinaryUser(t *testing.T) {
+	if err := checkReservedAdminRole(2, []int64{model.AdminRoleID}); err == nil {
+		t.Fatal("ordinary user accepted reserved admin role")
+	}
+	if err := checkReservedAdminRole(model.AdminUserID, []int64{model.AdminRoleID}); err != nil {
+		t.Fatalf("admin user should retain its reserved role: %v", err)
+	}
+}
+
 func TestIPMatchesFilter(t *testing.T) {
 	filter := "10.0.0.1;192.168.1.*;172.16.0.10-172.16.0.20;2001:db8::/32"
 	for _, ip := range []string{"10.0.0.1", "192.168.1.99", "172.16.0.15", "2001:db8::1"} {

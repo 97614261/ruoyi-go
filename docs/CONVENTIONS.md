@@ -245,7 +245,7 @@ java -Xmx512m -jar ..\RuoYi-Vue-master\ruoyi-admin\target\ruoyi-admin.jar `
 go run ./cmd/server
 
 # 4. 对拍（手动启动双服务时）
-go run ./cmd/contractcheck                       # 36 个核心 GET（23 个固定路径 + 13 个动态路径）
+go run ./cmd/contractcheck                       # 36 个核心 GET + 57 个补充路由场景
 go run ./cmd/contractcheck -file-probes          # 加 4 项上传 / Excel 探针
 go run ./cmd/contractcheck -write-probes         # 加 7 项非持久化错误场景
 go run ./cmd/contractcheck -crud-probes          # 加 10 组、60 项一次性 CRUD
@@ -263,14 +263,20 @@ go run ./cmd/routeaudit -java-root ..\RuoYi-Vue-master
 
 ```text
 SUMMARY matched=36 different=0 total=36 percent=100.00%
+SUPPLEMENTAL_PROBE_SUMMARY matched=52 different=5 total=57 percent=91.23%
 ```
 
-有差异时进程返回非零，可以直接进 CI。
+补充场景中的当前 5 项受控差异见 `DECISIONS.md`；不传 `-AllowDifferences` 时进程返回非零。
+严格 CI 可以直接使用该退出码，允许既有差异的人工复核才传 `-AllowDifferences`。
 
 默认 36 个探针由 **23 个固定路径 + 13 个动态路径**组成。动态部分覆盖
 **11 个详情接口和 2 个角色树接口**；工具先读取两端列表，自动找出双方共有的 ID，
 再请求同一条记录，禁止把种子库里的 `1`、`2`、`100`、`103` 写死到探针里。
 这依赖两端连接**同一个 MySQL**，Redis 则必须继续使用不同 DB。
+
+补充 57 项覆盖剩余读取、登录/登出、解锁、导出和写路由。依赖实体 ID 的读取同样先从两端
+列表取共同 ID；当前库没有对应记录时才用非法 ID 执行双方错误语义。破坏性写路由只执行未登录
+拒绝场景，证明路由和共同认证边界，不能据此宣称成功副作用已经对拍。
 
 **判定口径**：比较的是规范化后的 JSON，不是只看 `code=200`。
 字段缺失、`null` 与空串、数字与字符串的类型差异、数组顺序变化都会判失败。
@@ -302,7 +308,8 @@ Go 或 Java 的默认 `uploadPath`。
 
 `cmd/routeaudit` 静态提取 Go 路由和 Java Controller，统一尾斜杠与路径参数名，比较
 HTTP 方法、结构化路径和权限标识，并标注上述探针覆盖。代码生成器、Swagger 内存演示
-接口和 dev/test Profile 必须列在报告排除项中，不能混入业务接口对齐率。
+接口和 dev/test Profile 必须列在报告排除项中，不能混入业务接口对齐率。清单中的
+“已纳入探针”只表示存在自动执行场景，实际通过与差异必须看当次 `contractcheck` 日志。
 
 ### 测试和 Race Detector
 
@@ -364,9 +371,12 @@ claims = { "login_user_key": "<uuid>", "sub": "<username>" }
 - 登出即删除 Redis key
 - 新会话必须同时维护 `login_user_sessions:<userId>` 反向索引和
   `login_user_generation:<userId>` 会话代数
-- 普通续期只能在 Redis 最新会话上原地更新时间和 TTL，禁止整体写回请求读取的权限快照
+- 普通续期必须比较当前 `sessionRevision`，冲突后重新读取最新会话；只能从最新快照生成
+  完整 JSON，禁止整体写回请求最初读取的旧权限快照
 - 权限更新必须比较 `sessionRevision` 和会话代数；冲突后重新读会话、重新查数据库，
   无法确认最终权限时安全撤销会话
+- 会话 JSON 必须由 Go 编码后由 Lua 原样写入；禁止 `cjson.decode -> cjson.encode`，否则
+  空权限数组会被 Redis Lua 改成对象。菜单 `perms/status` 变化必须刷新所有关联角色会话
 - 按用户刷新权限和撤销会话只走反向索引，禁止退回 `SCAN login_tokens:*`；过期 token
   留下的索引成员要清理
 - Java 完全切换到 Go 时如存在旧会话残余，必须按 [DEPLOYMENT.md](./DEPLOYMENT.md)
@@ -375,6 +385,7 @@ claims = { "login_user_key": "<uuid>", "sub": "<username>" }
 ### 密码
 
 bcrypt，直接沿用 `sys_user.password` 里现有的 hash，**Java 版生成的密码 Go 能直接校验**。默认账号 `admin / admin123`。
+用户不存在或已删除时也必须比较一个同 cost 的固定合法 hash，不能通过响应耗时暴露账号是否存在。
 
 ### 匿名放行路径
 
@@ -807,11 +818,16 @@ remark       varchar(500) default null
 
 ## 十一、运行时资源与关联写入
 
+- 当前部署边界是单台服务器、单个 Go 进程、单实例。用户、角色、岗位、参数、部门、菜单的
+  业务唯一性检查与写入必须持有各自的进程内领域锁；自助注册、用户导入和个人资料修改也
+  必须复用用户领域锁。不得在没有替换机制时启动第二个 Go 进程。改为多实例前，必须先把
+  这些锁替换为数据库唯一约束或可靠的跨进程锁，并重新跑并发写入测试。
 - Gin 的 `ClientIP()` 只能信任 `server.trustedProxies` 显式列出的 IP/CIDR；直连部署保持
   空列表，经过本机 Nginx 时通常只配置 `127.0.0.1` / `::1`，不能填全网段图省事。
 - `server.maxRequestBodyMB` 管普通 JSON/form；`upload.maxSizeMB` 管单文件；
   `upload.maxRequestSizeMB` 管 multipart 整个请求，且必须不小于单文件上限。总请求超限
-  使用已登记的 HTTP 413。
+  使用已登记的 HTTP 413。完整读取/解析必须位于受保护接口鉴权之后、匿名接口 IP 限流
+  之后；未认证和 404 请求不得为大小检查预读完整 body。
 - 每个请求必须继承 `server.requestTimeout`；MySQL 同时配置 connect/read/write timeout。
   HTTP Server 的 Read/WriteTimeout 不能代替数据库和请求 context deadline。
 - 路径批量 ID 和 JSON 关联 ID 都必须为正数、去重并限制为 200 个；写关系表前一次性验证
@@ -820,7 +836,10 @@ remark       varchar(500) default null
   统计所有非空行，解析失败行同样计数，返回详情数量和单条长度都必须有上限。
 - 异步工作必须进入有界执行器。操作日志队列满时同步降级，不能静默丢审计；手工任务队列
   满时返回可读的繁忙错误。注册任务必须响应 `ctx.Done()`，调度器 deadline 只能释放自身
-  状态，Go 不能安全强杀一个忽略 context 的 goroutine。
+  状态，Go 不能安全强杀一个忽略 context 的 goroutine。服务退出时必须先停止 HTTP，
+  再停止接收并排空操作日志/手工任务池，最后停止 scheduler 和关闭依赖。
+- 动态参数键接口必须最小授权：`system:config:query` 可读任意键；用户管理相关权限只能读
+  `sys.user.initPassword`。新增前端消费者必须显式登记键和权限，不能恢复“登录即可读取”。
 - 批量上传属于一个文件副作用单元：任一文件失败时，只回滚本请求此前创建且通过托管目录
   校验的文件，不触碰历史文件或目录外资源。
 - 参数缓存回源前必须读取 `sys_config:` 内部代数，回填时用 Lua 校验代数；新增、修改、

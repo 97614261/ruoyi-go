@@ -131,6 +131,32 @@ func TestDeptAncestorsRebuild(t *testing.T) {
 	assertField(t, bDetail, "ancestors", wantB, "父部门挪动后，子部门的 ancestors 必须同步重算")
 }
 
+func TestDeptRejectsDescendantParentAndRebuildsRootMove(t *testing.T) {
+	aID := createDept(t, newDeptPayload(rootDeptID, "cycle_a"))
+	bID := createDept(t, newDeptPayload(aID, "cycle_b"))
+	cID := createDept(t, newDeptPayload(bID, "cycle_c"))
+
+	cycle := newDeptPayload(cID, "cycle_a")
+	cycle["deptId"] = aID
+	mustFail(t, doPut(t, "/system/dept", cycle), "上级部门不能是自己的下级", "部门不能挂到后代下")
+
+	aDetail := dataObject(t, doGet(t, "/system/dept/"+idPath(aID)), "循环修改失败后查询 A")
+	assertField(t, aDetail, "parentId", rootDeptID, "循环修改不得写入")
+	assertField(t, aDetail, "ancestors", "0,100", "循环修改不得破坏 ancestors")
+
+	moveRoot := newDeptPayload(0, "cycle_a")
+	moveRoot["deptId"] = aID
+	mustOK(t, doPut(t, "/system/dept", moveRoot), "把 A 移到根节点")
+
+	aDetail = dataObject(t, doGet(t, "/system/dept/"+idPath(aID)), "移到根后查询 A")
+	assertField(t, aDetail, "parentId", 0, "根部门 parentId")
+	assertField(t, aDetail, "ancestors", "0", "根部门 ancestors")
+	bDetail := dataObject(t, doGet(t, "/system/dept/"+idPath(bID)), "移到根后查询 B")
+	assertField(t, bDetail, "ancestors", fmt.Sprintf("0,%d", aID), "根移动后 B ancestors")
+	cDetail := dataObject(t, doGet(t, "/system/dept/"+idPath(cID)), "移到根后查询 C")
+	assertField(t, cDetail, "ancestors", fmt.Sprintf("0,%d,%d", aID, bID), "根移动后 C ancestors")
+}
+
 // TestDeptExcludeChild 排除子部门：上级下拉里不能出现自己和自己的下级。
 func TestDeptExcludeChild(t *testing.T) {
 	aID := createDept(t, newDeptPayload(rootDeptID, "ex_a"))

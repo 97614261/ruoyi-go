@@ -106,7 +106,7 @@ func authUserList(c *gin.Context, allocated bool) {
 		fail(c, err)
 		return
 	}
-	response.Page(c, list, total)
+	response.Page(c, contractAuthUserList(list), total)
 }
 
 // RoleAuthUserCancel PUT /system/role/authUser/cancel

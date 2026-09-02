@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -132,7 +133,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.slowRequestThreshold", "500ms")
 
 	v.SetDefault("mysql.maxOpenConns", 50)
-	v.SetDefault("mysql.maxIdleConns", 10)
+	v.SetDefault("mysql.maxIdleConns", 20)
 	v.SetDefault("mysql.connMaxLifetime", "1h")
 	v.SetDefault("mysql.slowThreshold", "200ms")
 	v.SetDefault("mysql.connectTimeout", "5s")
@@ -140,7 +141,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("mysql.writeTimeout", "30s")
 
 	v.SetDefault("redis.db", 0)
-	v.SetDefault("redis.poolSize", 20)
+	v.SetDefault("redis.poolSize", 32)
 
 	v.SetDefault("jwt.expireTime", "30m")
 	v.SetDefault("jwt.refreshWindow", "20m")
@@ -157,6 +158,14 @@ func setDefaults(v *viper.Viper) {
 }
 
 func (c *Config) validate() error {
+	if c.Server.Port < 1 || c.Server.Port > 65535 {
+		return fmt.Errorf("server.port 必须在 1 到 65535 之间")
+	}
+	switch c.Server.Mode {
+	case "debug", "release", "test":
+	default:
+		return fmt.Errorf("server.mode 只能是 debug、release 或 test")
+	}
 	if c.Server.MaxRequestBodyMB <= 0 {
 		return fmt.Errorf("server.maxRequestBodyMB 必须大于 0")
 	}
@@ -171,6 +180,9 @@ func (c *Config) validate() error {
 			}
 		}
 	}
+	if err := validateAllowedOrigins(c.Server.AllowedOrigins); err != nil {
+		return err
+	}
 	if c.MySQL.DSN == "" {
 		return fmt.Errorf("mysql.dsn 不能为空")
 	}
@@ -184,6 +196,9 @@ func (c *Config) validate() error {
 	}
 	if c.Redis.PoolSize <= 0 {
 		return fmt.Errorf("redis.poolSize 必须大于 0")
+	}
+	if c.Redis.DB < 0 {
+		return fmt.Errorf("redis.db 不能小于 0")
 	}
 	if c.JWT.Secret == "" {
 		return fmt.Errorf("jwt.secret 不能为空")
@@ -203,6 +218,36 @@ func (c *Config) validate() error {
 	}
 	if strings.TrimSpace(c.Upload.Path) == "" || c.Upload.URLPrefix != "/profile" {
 		return fmt.Errorf("upload.path 不能为空且 upload.urlPrefix 必须为 /profile")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Log.Level)) {
+	case "debug", "info", "warn", "error":
+	default:
+		return fmt.Errorf("log.level 只能是 debug、info、warn 或 error")
+	}
+	return nil
+}
+
+func validateAllowedOrigins(origins []string) error {
+	hasWildcard := false
+	hasExplicit := false
+	for _, raw := range origins {
+		origin := strings.TrimSpace(raw)
+		if origin == "" {
+			return fmt.Errorf("server.allowedOrigins 不能包含空值")
+		}
+		if origin == "*" {
+			hasWildcard = true
+			continue
+		}
+		hasExplicit = true
+		parsed, err := url.Parse(origin)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" ||
+			parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("server.allowedOrigins 包含非法来源 %q", raw)
+		}
+	}
+	if hasWildcard && hasExplicit {
+		return fmt.Errorf("server.allowedOrigins 的 * 不能与具体来源混用")
 	}
 	return nil
 }

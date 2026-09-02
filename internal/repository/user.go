@@ -96,13 +96,13 @@ const UserTableAlias = "u"
 
 // userListDB 构造用户列表的基础查询。
 //
-// 【没有 LEFT JOIN sys_dept，是刻意的】
-// Java 版 join 它有两个用途：给数据权限提供 d.dept_id，以及顺带取
-// d.dept_name / d.leader。这两条在 Go 侧都不成立 ——
-// 数据权限已改用 u.dept_id（等价性证明见 service.userScope），
-// 部门信息由 attachDepts 批量补齐。留着就是纯开销。
+// 【基础查询没有 LEFT JOIN sys_dept，是刻意的】
+// Java 版 join 还给数据权限提供 d.dept_id；Go 已改用 u.dept_id（等价性证明见
+// service.userScope），所以 COUNT 和导出的基础查询不需要 JOIN。分页取数阶段会在
+// LIMIT 生效的同一条查询中只补 dept_id/dept_name/leader，导出则由 attachDepts
+// 批量补齐完整部门对象。
 //
-// 10 万用户下实测：这次 JOIN 让分页的 COUNT 达到 432ms，
+// 10 万用户下实测：把 JOIN 留在基础查询会让分页 COUNT 达到 432ms，
 // 并发 50 压测时 5214 条慢 SQL 全是它。
 func userListDB(ctx context.Context, query model.UserQuery, scope func(*gorm.DB) *gorm.DB) *gorm.DB {
 	db := DB(ctx).
@@ -138,12 +138,32 @@ func userListDB(ctx context.Context, query model.UserQuery, scope func(*gorm.DB)
 	return db
 }
 
+type userPageRow struct {
+	model.SysUser    `gorm:"embedded"`
+	JoinedDeptID     *int64  `gorm:"column:joined_dept_id"`
+	JoinedDeptName   *string `gorm:"column:joined_dept_name"`
+	JoinedDeptLeader *string `gorm:"column:joined_dept_leader"`
+}
+
+func (row userPageRow) user() model.SysUser {
+	user := row.SysUser
+	if row.JoinedDeptID == nil {
+		return user
+	}
+	dept := &model.SysDept{DeptID: *row.JoinedDeptID, Leader: row.JoinedDeptLeader}
+	if row.JoinedDeptName != nil {
+		dept.DeptName = *row.JoinedDeptName
+	}
+	user.Dept = dept
+	return user
+}
+
 // SelectUserPage 分页查询用户，附带部门信息。
 //
 // 【这里没有 DISTINCT，是刻意的】
-// userListDB 只 LEFT JOIN 了 sys_dept，而且是按主键 join，一个用户至多对应
+// 分页取数只 LEFT JOIN 了 sys_dept，而且是按主键 join，一个用户至多对应
 // 一个部门，不可能产生重复行 —— DISTINCT 去不掉任何东西，只会让 MySQL
-// 为整个结果集建一张临时表。
+// 为整个结果集建一张临时表。COUNT 仍复用不带 JOIN 的 userListDB。
 //
 // 10 万用户下实测：带 DISTINCT 448ms，去掉后 1.5ms，差 300 倍。
 // 并发 50 压测时带 DISTINCT 的版本 100% 超时。
@@ -162,18 +182,22 @@ func SelectUserPage(ctx context.Context, query model.UserQuery, pg page.Query, s
 
 	orderBy := pg.Stable("u.user_id", "u.user_id")
 
-	var list []model.SysUser
+	var rows []userPageRow
 	err := userListDB(ctx, query, scope).
-		Select("u.*").
+		Joins("LEFT JOIN sys_dept page_dept ON u.dept_id = page_dept.dept_id").
+		Select(`u.*, page_dept.dept_id AS joined_dept_id,
+            page_dept.dept_name AS joined_dept_name,
+            page_dept.leader AS joined_dept_leader`).
 		Order(orderBy).
 		Offset(pg.Offset()).
 		Limit(pg.PageSize).
-		Find(&list).Error
+		Find(&rows).Error
 	if err != nil {
 		return nil, 0, fmt.Errorf("查询用户列表失败: %w", err)
 	}
-	if err := attachDepts(ctx, list); err != nil {
-		return nil, 0, err
+	list := make([]model.SysUser, len(rows))
+	for i := range rows {
+		list[i] = rows[i].user()
 	}
 	return list, total, nil
 }

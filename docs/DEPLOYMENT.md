@@ -99,18 +99,37 @@ Java/Go 双端契约测试不能共用 Redis DB。对拍仍按 [CONVENTIONS.md](
 - 无停机滚动切换且不能强制用户重新登录：不能清理，需要保留旧会话兼容路径。
 - 只是重启当前 Go 版本：不清理，否则会无故踢掉全部在线用户。
 
+### 2026-08-31 目标机演练记录
+
+本检查单已在 Alibaba Cloud Linux 3 单实例上完整演练：Java 停止后，先停止 Go，再用
+`SCAN` + 分批 `UNLINK` 将三个会话前缀清到 0；新版启动后旧 Token 返回 401，新登录同时
+创建 token、用户反向索引和 generation。随后切回旧发布健康通过，再恢复最终发布健康通过。
+
+演练结束时运行的是 `/opt/apps/ruoyi-go-perf/releases/20260831-final-e2a6c7da`，制品
+SHA-256 为 `e2a6c7dab7be6db08068df4fb3333c2a3f31001415dbdc8ba931d6b23365d664`；Go active、
+Java inactive、Go 进程数 1，三个会话前缀均为 0，验证码数据库配置为 `true` 且没有缓存覆盖。
+完整证据见 [VALIDATION_REPORT_2026-08-31.md](./VALIDATION_REPORT_2026-08-31.md)。
+
+这次演练不代替真实上线的摘流量步骤。真实切换仍必须先阻止新请求进入，并确认所有旧实例退出，
+再执行会话清理。
+
 ## 本次运行时配置升级
 
 部署前必须显式复核以下配置；缺失项会使用默认值，但生产环境不能不看默认值就上线：
 
 ```yaml
 server:
+  port: 8080
+  mode: release
   requestTimeout: 60s
+  allowedOrigins: []
   trustedProxies: []
 mysql:
   connectTimeout: 5s
   readTimeout: 30s
   writeTimeout: 30s
+redis:
+  poolSize: 32
 upload:
   maxSizeMB: 10
   maxRequestSizeMB: 20
@@ -121,6 +140,33 @@ upload:
 这是预期保护，不要通过删除校验绕过。上传总上限必须覆盖一个合法单文件，并结合反向代理的
 `client_max_body_size` 一起设置；代理上限应不小于 Go 上限，否则客户端先收到代理错误页。
 
+`server.port` 必须在 1～65535，`server.mode` 只能是 `debug/release/test`，Redis DB 不能为
+负数，日志等级只能是 `debug/info/warn/error`。跨域配置只能是具体的 `http(s)://来源`
+列表，或单独一个 `*`；两者不能混用。`*` 模式不会返回 credentials，生产后台优先保持
+同源并使用空列表。
+
+## 单实例部署边界
+
+当前生产方案明确为一台服务器只运行一个 Go 进程。业务唯一性采用进程内领域锁保护
+“检查 + 写入”，定时任务同样是进程内调度；因此部署脚本必须确认旧进程完全退出后再启动
+新进程，不能用两个端口同时跑两个 Go 实例，也不能临时开启多副本。
+
+如果以后需要多实例或滚动发布，必须先完成以下改造，不能直接复制进程：
+
+1. 用户、角色、岗位、参数、部门、菜单唯一性改为数据库唯一约束或可靠的跨进程锁；
+2. 定时任务增加分布式抢占，保证同一计划只执行一次；
+3. 重新执行并发唯一性、会话刷新、任务不重叠和故障恢复测试。
+
 上线验证至少包含：伪造 `X-Forwarded-For` 不改变直连客户端 IP；超出 multipart 总上限返回
 JSON 结构的 413；MySQL 网络异常在配置时间内结束请求；普通用户不能读取草稿公告；完整编辑
 停用用户后旧 Token 立即失效。
+
+### 2026-09-02 依赖恢复演练
+
+目标 2C2G 单实例已分别停止 Redis 和 MySQL 验证真实恢复路径。依赖停止期间 `/health` 均返回
+HTTP 503 并准确标记对应依赖为 `down`；重新启动后，Redis 约 42ms、MySQL 约 1323ms 恢复
+为 `up`，随后用户列表接口均返回业务码 200。演练后 Go、Redis、MySQL 都为 active，测试
+会话和登录记录已精确清理。
+
+本记录证明客户端连接池可以在依赖重启后自动恢复，不代表生产可以无维护窗口随意重启数据库。
+单实例没有冗余，依赖停止期间业务必然不可用；真实操作仍须先摘流量并确认备份可用。

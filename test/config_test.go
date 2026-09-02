@@ -74,6 +74,40 @@ func TestConfigGetByKeyContract(t *testing.T) {
 	mustOK(t, r, "带点号的参数键")
 }
 
+func TestConfigGetByKeyUsesLeastPrivilege(t *testing.T) {
+	menuIDForPermission := func(permission string) int64 {
+		t.Helper()
+		for _, menu := range dataArray(t, doGet(t, "/system/menu/list"), "菜单列表") {
+			if menu["perms"] == permission {
+				return idOf(t, menu, "menuId")
+			}
+		}
+		t.Fatalf("找不到权限 %s 对应的菜单", permission)
+		return 0
+	}
+	tokenWithPermission := func(suffix, permission string) string {
+		t.Helper()
+		role := newRolePayload("config_key_" + suffix)
+		role["menuIds"] = []int64{menuIDForPermission(permission)}
+		roleID := createRole(t, role)
+		user := newUserPayload("config_key_" + suffix)
+		user["roleIds"] = []int64{roleID}
+		createUser(t, user)
+		return mustLogin(t, fmt.Sprint(user["userName"]))
+	}
+
+	userToken := tokenWithPermission("user", "system:user:list")
+	mustOK(t, request("GET", "/system/config/configKey/sys.user.initPassword", userToken, nil),
+		"用户管理员读取初始密码")
+	if got := request("GET", "/system/config/configKey/sys.account.captchaEnabled", userToken, nil); got.Code != 403 {
+		t.Fatalf("用户管理员不应读取任意参数，实际 code=%d msg=%q", got.Code, got.Msg)
+	}
+
+	configToken := tokenWithPermission("config", "system:config:query")
+	mustOK(t, request("GET", "/system/config/configKey/sys.account.captchaEnabled", configToken, nil),
+		"参数管理员读取参数")
+}
+
 // TestConfigCacheInvalidation 改参数后，按键取值要立刻反映。
 func TestConfigCacheInvalidation(t *testing.T) {
 	body := newConfigPayload("cache")

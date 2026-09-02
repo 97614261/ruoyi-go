@@ -34,7 +34,7 @@ func ProfileGet(c *gin.Context) {
 		return
 	}
 	response.New(response.CodeSuccess, response.MsgSuccess).
-		Put("data", user).
+		Put("data", contractLoginUser(*user)).
 		Put("roleGroup", roleGroup).
 		Put("postGroup", postGroup).
 		JSON(c)
@@ -117,7 +117,7 @@ func ProfileAvatar(c *gin.Context) {
 		DatePath:   time.Now().In(types.Location).Format("2006/01/02"),
 	})
 	if err != nil {
-		response.Fail(c, err.Error())
+		response.Fail(c, uploadFailureMessage(c, err))
 		return
 	}
 
