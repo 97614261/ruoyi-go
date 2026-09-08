@@ -13,6 +13,8 @@ const (
 	KeyLoginUserSessions = "login_user_sessions:"
 	// KeyLoginUserGeneration 防止撤销会话时，并发登录把旧认证结果重新写回。
 	KeyLoginUserGeneration = "login_user_generation:"
+	// KeyLoginUserPermissionVersion 标记用户权限版本，跨进程重启识别旧权限快照。
+	KeyLoginUserPermissionVersion = "login_user_permission_version:"
 	// KeyCaptchaCode 验证码，后接 uuid，TTL 2 分钟。
 	KeyCaptchaCode = "captcha_codes:"
 	// KeySysConfig 参数缓存，后接 configKey。
@@ -38,6 +40,11 @@ func LoginUserSessionsKey(userID int64) string {
 // LoginUserGenerationKey 拼接用户会话代数 key。
 func LoginUserGenerationKey(userID int64) string {
 	return KeyLoginUserGeneration + strconv.FormatInt(userID, 10)
+}
+
+// LoginUserPermissionVersionKey 拼接用户权限版本 key。
+func LoginUserPermissionVersionKey(userID int64) string {
+	return KeyLoginUserPermissionVersion + strconv.FormatInt(userID, 10)
 }
 
 // CaptchaKey 拼接验证码 key。

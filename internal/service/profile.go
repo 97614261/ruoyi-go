@@ -74,7 +74,9 @@ func UpdateProfile(ctx context.Context, userID int64, body model.ProfileBody) er
 	if err := repository.UpdateUserProfile(ctx, userID, body); err != nil {
 		return err
 	}
-	return RefreshOnlineUserByID(ctx, userID)
+	return runPostCommit(ctx, func(postCtx context.Context) error {
+		return RefreshOnlineUserByID(postCtx, userID)
+	})
 }
 
 // UpdateProfilePwd 修改自己的密码。
@@ -83,6 +85,9 @@ func UpdateProfile(ctx context.Context, userID int64, body model.ProfileBody) er
 // LoginUser 序列化进 Redis 时密码被剔除了（SysUser.MarshalJSON 置空），
 // 拿会话里的值比对永远失败。
 func UpdateProfilePwd(ctx context.Context, userID int64, oldPassword, newPassword string) error {
+	userWriteMu.Lock()
+	defer userWriteMu.Unlock()
+
 	if oldPassword == "" || newPassword == "" {
 		return errs.New("旧密码和新密码不能为空")
 	}
@@ -152,6 +157,9 @@ type AvatarUpdateResult struct {
 
 // UpdateAvatar 保存头像地址，并返回被替换的旧头像。
 func UpdateAvatar(ctx context.Context, userID int64, avatar string) (AvatarUpdateResult, error) {
+	userWriteMu.Lock()
+	defer userWriteMu.Unlock()
+
 	oldAvatar, found, err := repository.ReplaceUserAvatar(ctx, userID, avatar)
 	if err != nil {
 		return AvatarUpdateResult{}, err
@@ -161,7 +169,9 @@ func UpdateAvatar(ctx context.Context, userID int64, avatar string) (AvatarUpdat
 	}
 
 	result := AvatarUpdateResult{OldAvatar: oldAvatar, Persisted: true}
-	if err := RefreshOnlineUserByID(ctx, userID); err != nil {
+	if err := runPostCommit(ctx, func(postCtx context.Context) error {
+		return RefreshOnlineUserByID(postCtx, userID)
+	}); err != nil {
 		return result, err
 	}
 	return result, nil

@@ -178,6 +178,8 @@ func TestJobValidation(t *testing.T) {
 		{"少传 concurrent", func(p map[string]any) map[string]any { return omit(p, "concurrent") }, ""},
 		{"少传 misfirePolicy", func(p map[string]any) map[string]any { return omit(p, "misfirePolicy") }, ""},
 		{"少传 jobGroup", func(p map[string]any) map[string]any { return omit(p, "jobGroup") }, ""},
+		{"非法 concurrent", func(p map[string]any) map[string]any { return with(p, "concurrent", "x") }, "并发执行"},
+		{"非法 misfirePolicy", func(p map[string]any) map[string]any { return with(p, "misfirePolicy", "x") }, "计划策略"},
 
 		{"remark 超过 500 字", func(p map[string]any) map[string]any { return with(p, "remark", repeatText(501)) }, "Remark"},
 		{"多传未知字段", func(p map[string]any) map[string]any { return with(p, "hello", "world") }, ""},
@@ -196,7 +198,7 @@ func TestJobValidation(t *testing.T) {
 	}
 }
 
-// TestJobDefaults 三个有 DEFAULT 的列，不传时服务端要补上。
+// TestJobDefaults 缺省字段由服务端补齐。
 //
 // 补不上的话前端的状态开关拿到空串，会显示成未知状态。
 func TestJobDefaults(t *testing.T) {
@@ -207,7 +209,22 @@ func TestJobDefaults(t *testing.T) {
 	assertField(t, detail, "jobGroup", "DEFAULT", "默认任务组")
 	assertField(t, detail, "status", "1", "新建任务默认应为暂停，不能直接开跑")
 	assertField(t, detail, "concurrent", "1", "默认禁止并发")
-	assertField(t, detail, "misfirePolicy", "3", "默认放弃执行")
+	assertField(t, detail, "misfirePolicy", "0", "默认策略应对齐 Java 字段初始值")
+}
+
+// TestJobCreateIgnoresClientControlledFields uses the Vue form's actual
+// status=0 payload and a forged ID. Creation must still be a new paused task;
+// activation is guarded by monitor:job:changeStatus.
+func TestJobCreateIgnoresClientControlledFields(t *testing.T) {
+	body := newJobPayload("server-owned")
+	body["status"] = "0"
+	body["jobId"] = 1
+	id := createJob(t, body)
+	if id == 1 {
+		t.Fatal("新增任务采用了客户端伪造的 jobId")
+	}
+	detail := dataObject(t, doGet(t, "/monitor/job/"+idPath(id)), "查服务端控制字段")
+	assertField(t, detail, "status", "1", "新建任务必须暂停")
 }
 
 // TestJobChangeStatus 暂停 / 启用，只传两个字段。
@@ -224,6 +241,23 @@ func TestJobChangeStatus(t *testing.T) {
 	mustOK(t, doPut(t, "/monitor/job/changeStatus", map[string]any{
 		"jobId": id, "status": "1",
 	}), "暂停任务")
+
+	mustFail(t, doPut(t, "/monitor/job/changeStatus", map[string]any{
+		"jobId": id, "status": "x",
+	}), "任务状态只能是0或1", "非法任务状态")
+}
+
+func TestJobUpdateRejectsInvalidEnums(t *testing.T) {
+	body := newJobPayload("invalid-enums")
+	id := createJob(t, body)
+	for field, value := range map[string]string{
+		"status": "x", "concurrent": "x", "misfirePolicy": "x",
+	} {
+		candidate := payload(body)
+		candidate["jobId"] = id
+		candidate[field] = value
+		mustFail(t, doPut(t, "/monitor/job", candidate), "只能", "修改任务非法 "+field)
+	}
 }
 
 // TestJobRunOnceWritesLog 立即执行一次，必须真的跑起来并落一条调度日志。

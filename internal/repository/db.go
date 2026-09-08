@@ -16,6 +16,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"ruoyi-go/internal/config"
+	"ruoyi-go/pkg/types"
 )
 
 var db *gorm.DB
@@ -36,6 +37,10 @@ func Init(cfg config.MySQLConfig) error {
 	dsn.Timeout = cfg.ConnectTimeout
 	dsn.ReadTimeout = cfg.ReadTimeout
 	dsn.WriteTimeout = cfg.WriteTimeout
+	// types.Time.Scan requires native time.Time values. Force both options so a
+	// future DSN edit cannot pass Ping and fail only on the first business query.
+	dsn.ParseTime = true
+	dsn.Loc = types.Location
 	// RowsAffected 按匹配行而不是实际变化行统计，幂等更新仍能区分“存在”与“不存在”。
 	dsn.ClientFoundRows = true
 

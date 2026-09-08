@@ -28,6 +28,10 @@ func Register(ctx context.Context, body model.RegisterBody, ip, userAgent string
 	if err != nil {
 		return err
 	}
+	enabled = strings.TrimSpace(enabled)
+	if enabled != "" && !strings.EqualFold(enabled, "true") && !strings.EqualFold(enabled, "false") {
+		return errs.Newf("参数%s的值无效，必须是true或false", ConfigKeyRegisterUser)
+	}
 	if !strings.EqualFold(enabled, "true") {
 		return errs.New("当前系统没有开启注册功能！")
 	}

@@ -369,18 +369,32 @@ claims = { "login_user_key": "<uuid>", "sub": "<username>" }
 - 请求头：`Authorization: Bearer <token>`
 - 默认有效期 30 分钟；剩余不足 20 分钟时自动续期（刷新 Redis TTL，不换 token）
 - 登出即删除 Redis key
-- 新会话必须同时维护 `login_user_sessions:<userId>` 反向索引和
-  `login_user_generation:<userId>` 会话代数
+- 新会话必须同时维护 `login_user_sessions:<userId>` 反向索引、
+  `login_user_generation:<userId>` 会话代数，并把当前
+  `login_user_permission_version:<userId>` 写入会话 JSON
 - 普通续期必须比较当前 `sessionRevision`，冲突后重新读取最新会话；只能从最新快照生成
   完整 JSON，禁止整体写回请求最初读取的旧权限快照
-- 权限更新必须比较 `sessionRevision` 和会话代数；冲突后重新读会话、重新查数据库，
-  无法确认最终权限时安全撤销会话
+- 权限更新和续期必须同时比较 `sessionRevision`、会话代数和权限版本；冲突后重新读会话、
+  重新查数据库，无法确认最终权限时安全撤销会话
 - 会话 JSON 必须由 Go 编码后由 Lua 原样写入；禁止 `cjson.decode -> cjson.encode`，否则
   空权限数组会被 Redis Lua 改成对象。菜单 `perms/status` 变化必须刷新所有关联角色会话
 - 按用户刷新权限和撤销会话只走反向索引，禁止退回 `SCAN login_tokens:*`；过期 token
   留下的索引成员要清理
+- 按角色刷新权限必须先从 `sys_user_role` 查询当前成员，再按用户反向索引刷新；禁止为了找
+  角色成员扫描全站 Redis 会话。索引 Pipeline 每批最多 200 个用户，会话 MGET 每批最多
+  100 个；在线用户的资料、部门、角色和权限必须批量加载，禁止逐用户查库。批量读取会话
+  失败必须向上传递，不能跳过当前批次后宣告成功
+- 权限写入必须先在数据库写入前固定受影响用户 ID，再推进这些用户的 Redis 权限版本；成员
+  查询或 Redis 版本推进失败时不得提交数据库变更。数据库提交后主动刷新会话使用保留 trace
+  值、脱离客户端取消且自带 5 秒上限的 context
+- 登录的数据库权限快照、权限版本读取和 Redis 会话创建必须处于同一权限临界区。鉴权发现
+  会话版本落后时必须懒加载数据库权限并 CAS 写回；数据库、Redis 或写回失败时按未登录拒绝，
+  不能继续使用旧权限。权限版本不设 TTL，普通重启或进程崩溃后仍是安全判断依据
+- 进程内补偿队列只负责尽快回收无效会话 key，不再承担安全正确性。待处理 ID 最多 100000，
+  每批 200，错误详情最多 20 条，重试按 250ms、500ms、1s、2s、5s 指数退避；日志必须汇总
+  pending、重试次数和最老等待时间。服务退出必须停止该 worker
 - Java 完全切换到 Go 时如存在旧会话残余，必须按 [DEPLOYMENT.md](./DEPLOYMENT.md)
-  停服并精确清理三个会话前缀；普通重启不得清理
+  停服并精确清理四个会话/权限前缀；普通重启不得清理
 
 ### 密码
 
@@ -402,6 +416,7 @@ bcrypt，直接沿用 `sys_user.password` 里现有的 hash，**Java 版生成�
 | `login_tokens:` | 登录会话 |
 | `login_user_sessions:` | Go 用户到登录 UUID 的反向索引 |
 | `login_user_generation:` | Go 用户会话撤销代数 |
+| `login_user_permission_version:` | Go 用户持久权限版本（无 TTL） |
 | `captcha_codes:` | 验证码，TTL 2 分钟 |
 | `sys_config:` | 参数缓存 |
 | `sys_dict:` | 字典缓存 |
@@ -492,7 +507,9 @@ orderBy := "role_sort"
 
 内存分页同样必须先建立包含唯一键的全序，再执行切片；稳定排序不能替代唯一兜底。
 在线用户列表固定使用 `LoginTime DESC, TokenID ASC`，避免 Redis SCAN 输入顺序变化造成
-跨页重复或遗漏。
+跨页重复或遗漏。5000 条保护上限按 SCAN 返回的 key 数计数，必须在 MGET、JSON 解码和
+用户名/IP 过滤之前裁剪最后一批；不能按有效会话或过滤命中数计数，否则损坏 key 和零命中
+查询仍会扫描全部会话。
 
 > 判断 Java 到底有没有排序，要看 **service 转调到哪条 SQL**，不能只看 mapper 里
 > 有没有同名 select。例如 `selectRoleAll()` 转调的是 `selectRoleList`，
@@ -818,10 +835,23 @@ remark       varchar(500) default null
 
 ## 十一、运行时资源与关联写入
 
-- 当前部署边界是单台服务器、单个 Go 进程、单实例。用户、角色、岗位、参数、部门、菜单的
-  业务唯一性检查与写入必须持有各自的进程内领域锁；自助注册、用户导入和个人资料修改也
-  必须复用用户领域锁。不得在没有替换机制时启动第二个 Go 进程。改为多实例前，必须先把
-  这些锁替换为数据库唯一约束或可靠的跨进程锁，并重新跑并发写入测试。
+- 当前部署边界是单台服务器、单个 Go 进程、单实例。用户、角色、岗位、参数、字典、部门、
+  菜单的写入必须持有各自的进程内领域锁；锁不仅覆盖唯一性检查，也覆盖关联存在性检查、
+  删除前引用检查和随后的数据库写入。自助注册、用户导入和个人资料修改复用用户锁。
+  多领域操作统一按“用户 → 角色 → 岗位 → 部门”和“角色 → 菜单”的顺序加锁，禁止反向
+  获取。不得在没有替换机制时启动第二个 Go 进程；改为多实例前必须先换成数据库约束或
+  可靠跨进程锁，并重新跑并发写入测试。
+- 定时任务的新增、修改、状态切换、删除和立即执行必须共用 job 领域锁，锁覆盖旧值读取、
+  数据库写入和 scheduler 更新。新增时 `jobId`、`status` 是服务端控制字段：无条件清空 ID、
+  强制暂停；启用只能走带 `monitor:job:changeStatus` 权限的接口。缺省 `misfirePolicy` 按 Java
+  字段初始值使用 `0`，不能误用数据库默认值 `3` 推断 Java 行为。修改和状态切换必须校验
+  `status/concurrent` 只能为 `0/1`、`misfirePolicy` 只能为 `0/1/2/3`。
+- 被代码、Java 基线或 Vue 按名称引用的配置键、字典类型和菜单权限是契约标识符。对应写
+  接口必须拒绝改名或删除；七个代码配置键必须保持内置标记。布尔开关、密码策略和初始密码
+  等有明确消费格式的配置值必须在写入和运行时读取两端校验，非法历史值要显式报错，不能
+  通过空值、解析默认值或 `false` 静默降级。新增静态引用时必须同步
+  `internal/service/testdata/contract_identifiers.json` 和定向测试；用
+  `go test ./internal/service -run Contract -count=1` 独立核对，普通测试不得自动覆写基线。
 - Gin 的 `ClientIP()` 只能信任 `server.trustedProxies` 显式列出的 IP/CIDR；直连部署保持
   空列表，经过本机 Nginx 时通常只配置 `127.0.0.1` / `::1`，不能填全网段图省事。
 - `server.maxRequestBodyMB` 管普通 JSON/form；`upload.maxSizeMB` 管单文件；
@@ -830,6 +860,10 @@ remark       varchar(500) default null
   之后；未认证和 404 请求不得为大小检查预读完整 body。
 - 每个请求必须继承 `server.requestTimeout`；MySQL 同时配置 connect/read/write timeout。
   HTTP Server 的 Read/WriteTimeout 不能代替数据库和请求 context deadline。
+- MySQL DSN 无论用户字符串如何填写，都必须强制 `parseTime=true` 且时区使用
+  `types.Location`；否则连接检测可成功，但第一次扫描业务时间列才失败。`jwt.header` 当前
+  只能是实际实现消费的 `Authorization`，`captcha.type` 只能是 `math` 或 `char`，不支持的
+  配置必须在启动副作用前失败。
 - 路径批量 ID 和 JSON 关联 ID 都必须为正数、去重并限制为 200 个；写关系表前一次性验证
   实体存在和数据范围，禁止在循环里逐 ID 查库。
 - 导出 Repository 只取 `MaxExportRows+1` 判断超限，绝不静默截断；导入的 5000 行限制
@@ -837,7 +871,7 @@ remark       varchar(500) default null
 - 异步工作必须进入有界执行器。操作日志队列满时同步降级，不能静默丢审计；手工任务队列
   满时返回可读的繁忙错误。注册任务必须响应 `ctx.Done()`，调度器 deadline 只能释放自身
   状态，Go 不能安全强杀一个忽略 context 的 goroutine。服务退出时必须先停止 HTTP，
-  再停止接收并排空操作日志/手工任务池，最后停止 scheduler 和关闭依赖。
+  再停止接收并排空操作日志/手工任务池并停止权限补偿 worker，最后停止 scheduler 和关闭依赖。
 - 动态参数键接口必须最小授权：`system:config:query` 可读任意键；用户管理相关权限只能读
   `sys.user.initPassword`。新增前端消费者必须显式登记键和权限，不能恢复“登录即可读取”。
 - 批量上传属于一个文件副作用单元：任一文件失败时，只回滚本请求此前创建且通过托管目录
@@ -847,3 +881,5 @@ remark       varchar(500) default null
   永久缓存或绕过 `redisx.InvalidateConfigCache` 直接删除参数缓存。
 - 防重复提交必须用单段 Redis Lua 原子完成“比较最近指纹、覆盖并续期”。相同指纹在窗口内
   只能放行一个并发请求；不同指纹仍覆盖最近记录，Redis 故障仍按既有降级策略放行。
+- 操作日志只旁路捕获 JSON 响应，内存缓冲不得超过 `json_result` 的 2000 字节上限；截断后
+  必须保持合法 UTF-8，不能让多字节字符边界造成日志插入失败。

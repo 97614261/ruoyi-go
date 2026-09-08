@@ -42,6 +42,9 @@ type LoginUser struct {
 	SessionGeneration int64 `json:"sessionGeneration"`
 	// SessionRevision 只协调同一会话的权限更新；普通 TTL 续期不会递增。
 	SessionRevision int64 `json:"sessionRevision"`
+	// PermissionVersion 记录生成权限快照时的 Redis 权限版本。
+	// 权限变更会先推进版本，因此进程重启后也能识别并刷新旧快照。
+	PermissionVersion int64 `json:"permissionVersion"`
 
 	IPAddr        string `json:"ipaddr"`
 	LoginLocation string `json:"loginLocation"`

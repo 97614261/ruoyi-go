@@ -53,7 +53,15 @@ func CaptchaEnabled(ctx context.Context) (bool, error) {
 	if value == "" {
 		return true, nil
 	}
-	return strings.EqualFold(value, "true"), nil
+	value = strings.TrimSpace(value)
+	switch {
+	case strings.EqualFold(value, "true"):
+		return true, nil
+	case strings.EqualFold(value, "false"):
+		return false, nil
+	default:
+		return true, errs.Newf("参数%s的值无效，必须是true或false", ConfigKeyCaptchaEnabled)
+	}
 }
 
 // GenerateCaptcha 生成验证码并写入 Redis，返回 uuid 与 base64 图片。

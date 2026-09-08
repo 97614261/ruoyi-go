@@ -7,10 +7,13 @@ import "sync"
 // If the service is ever deployed with multiple processes, replace this with
 // a cross-process lock or database uniqueness constraints.
 var (
-	userWriteMu   sync.Mutex
-	roleWriteMu   sync.Mutex
-	postWriteMu   sync.Mutex
-	configWriteMu sync.Mutex
-	deptWriteMu   sync.Mutex
-	menuWriteMu   sync.Mutex
+	userWriteMu         sync.Mutex
+	roleWriteMu         sync.Mutex
+	postWriteMu         sync.Mutex
+	configWriteMu       sync.Mutex
+	dictWriteMu         sync.Mutex
+	deptWriteMu         sync.Mutex
+	menuWriteMu         sync.Mutex
+	jobWriteMu          sync.Mutex
+	permissionRefreshMu sync.Mutex
 )

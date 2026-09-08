@@ -5,7 +5,6 @@ import (
 	"html"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
 
 	"ruoyi-go/internal/model"
@@ -287,6 +286,10 @@ func UpdateMenu(ctx context.Context, user *model.SysUser, menu *model.SysMenu, o
 	if existing == nil {
 		return errs.New("菜单不存在")
 	}
+	if derefString(existing.Perms) != derefString(menu.Perms) &&
+		containsContractMenuPermission(derefString(existing.Perms)) {
+		return errs.Newf("契约权限标识【%s】不能改名", derefString(existing.Perms))
+	}
 	if menu.ParentID != MenuRootID {
 		parents, err := repository.SelectMenuParentIDs(ctx)
 		if err != nil {
@@ -308,12 +311,9 @@ func UpdateMenu(ctx context.Context, user *model.SysUser, menu *model.SysMenu, o
 	if err != nil {
 		return err
 	}
-	if err := repository.UpdateMenu(ctx, menu); err != nil {
-		return err
-	}
-	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	return RefreshOnlineUsersByID(refreshCtx, userIDs...)
+	return mutatePermissionState(ctx, userIDs, func() error {
+		return repository.UpdateMenu(ctx, menu)
+	})
 }
 
 func menuParentCreatesCycle(menuID, parentID int64, parents map[int64]int64) bool {
@@ -337,8 +337,21 @@ func menuParentCreatesCycle(menuID, parentID int64, parents map[int64]int64) boo
 
 // DeleteMenu 删除菜单。
 func DeleteMenu(ctx context.Context, user *model.SysUser, menuID int64) error {
+	menuWriteMu.Lock()
+	defer menuWriteMu.Unlock()
+
 	if _, err := checkMenuIDsForUser(ctx, user, []int64{menuID}); err != nil {
 		return err
+	}
+	menu, err := repository.SelectMenuByID(ctx, menuID)
+	if err != nil {
+		return err
+	}
+	if menu == nil {
+		return errs.New("菜单不存在")
+	}
+	if containsContractMenuPermission(derefString(menu.Perms)) {
+		return errs.Newf("契约权限标识【%s】不能删除", derefString(menu.Perms))
 	}
 	hasChild, err := repository.HasChildByMenuID(ctx, menuID)
 	if err != nil {
@@ -360,6 +373,9 @@ func DeleteMenu(ctx context.Context, user *model.SysUser, menuID int64) error {
 
 // UpdateMenuSort 保存菜单排序。
 func UpdateMenuSort(ctx context.Context, user *model.SysUser, body model.MenuSortBody) error {
+	menuWriteMu.Lock()
+	defer menuWriteMu.Unlock()
+
 	sorts, err := parseSortPairs(body.MenuIDs, body.OrderNums)
 	if err != nil {
 		return err

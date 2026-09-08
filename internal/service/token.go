@@ -23,7 +23,6 @@ var (
 	jwtSigner          *jwtx.Signer
 	jwtExpire          time.Duration
 	jwtRefreshWindow   time.Duration
-	errStopLoginScan   = errors.New("停止扫描登录会话")
 	errSessionChanged  = errors.New("登录状态已变更，请重新登录")
 	errSessionConflict = errors.New("登录会话已被并发更新")
 )
@@ -35,6 +34,11 @@ local current = tonumber(redis.call('get', KEYS[3]) or '0')
 local expected = tonumber(ARGV[4])
 if current ~= expected then
     return 0
+end
+local currentPermission = tonumber(redis.call('get', KEYS[4]) or '0')
+local expectedPermission = tonumber(ARGV[5])
+if currentPermission ~= expectedPermission then
+    return -1
 end
 redis.call('set', KEYS[1], ARGV[1], 'PX', ARGV[2])
 redis.call('sadd', KEYS[2], ARGV[3])
@@ -48,6 +52,11 @@ local current = tonumber(redis.call('get', KEYS[3]) or '0')
 local expected = tonumber(ARGV[4])
 if current ~= expected then
     return -1
+end
+local currentPermission = tonumber(redis.call('get', KEYS[4]) or '0')
+local expectedPermission = tonumber(ARGV[6])
+if currentPermission ~= expectedPermission then
+    return -3
 end
 local raw = redis.call('get', KEYS[1])
 if not raw then
@@ -75,6 +84,11 @@ local currentGeneration = tonumber(redis.call('get', KEYS[3]) or '0')
 local expectedGeneration = tonumber(ARGV[3])
 if currentGeneration ~= expectedGeneration then
     return -1
+end
+local currentPermission = tonumber(redis.call('get', KEYS[4]) or '0')
+local expectedPermission = tonumber(ARGV[6])
+if currentPermission ~= expectedPermission then
+    return -3
 end
 local raw = redis.call('get', KEYS[1])
 if not raw then
@@ -114,7 +128,7 @@ end
 return 1
 `)
 
-var revokeSessionsScript = redis.NewScript(`
+const revokeSessionsLua = `
 redis.call('incr', KEYS[1])
 local members = redis.call('smembers', KEYS[2])
 for _, tokenId in ipairs(members) do
@@ -123,6 +137,10 @@ end
 redis.call('del', KEYS[2])
 redis.call('pexpire', KEYS[1], ARGV[2])
 return #members
+`
+
+var advancePermissionVersionScript = redis.NewScript(`
+return redis.call('incr', KEYS[1])
 `)
 
 // InitToken 由 main 在启动时调用一次。
@@ -140,6 +158,18 @@ func CreateToken(ctx context.Context, loginUser *model.LoginUser) (string, error
 	if loginUser == nil || loginUser.User == nil {
 		return "", errors.New("创建会话失败：登录用户为空")
 	}
+	permissionRefreshMu.Lock()
+	defer permissionRefreshMu.Unlock()
+	version, err := PermissionVersion(ctx, loginUser.UserID)
+	if err != nil {
+		return "", err
+	}
+	loginUser.PermissionVersion = version
+	return createTokenLocked(ctx, loginUser)
+}
+
+// createTokenLocked 要求调用方持有 permissionRefreshMu，并已装入权限版本。
+func createTokenLocked(ctx context.Context, loginUser *model.LoginUser) (string, error) {
 	loginUser.Token = uuid.NewString()
 	if err := writeNewSession(ctx, loginUser); err != nil {
 		return "", err
@@ -154,11 +184,12 @@ func writeNewSession(ctx context.Context, loginUser *model.LoginUser) error {
 		return fmt.Errorf("序列化会话失败: %w", err)
 	}
 	result, err := createSessionScript.Run(ctx, redisx.C(), sessionKeys(loginUser),
-		data, jwtExpire.Milliseconds(), loginUser.Token, loginUser.SessionGeneration).Int64()
+		data, jwtExpire.Milliseconds(), loginUser.Token, loginUser.SessionGeneration,
+		loginUser.PermissionVersion).Int64()
 	if err != nil {
 		return fmt.Errorf("写入登录会话失败: %w", err)
 	}
-	if result == 0 {
+	if result == 0 || result == -1 {
 		return errSessionChanged
 	}
 	return nil
@@ -176,7 +207,7 @@ func RefreshToken(ctx context.Context, loginUser *model.LoginUser) error {
 		}
 		result, err := renewSessionScript.Run(ctx, redisx.C(), sessionKeys(current),
 			data, jwtExpire.Milliseconds(), current.Token, current.SessionGeneration,
-			current.SessionRevision).Int64()
+			current.SessionRevision, current.PermissionVersion).Int64()
 		if err != nil {
 			return fmt.Errorf("续期登录会话失败: %w", err)
 		}
@@ -193,7 +224,7 @@ func RefreshToken(ctx context.Context, loginUser *model.LoginUser) error {
 				return errSessionChanged
 			}
 			current = latest
-		case 0, -1:
+		case 0, -1, -3:
 			return errSessionChanged
 		default:
 			return fmt.Errorf("Redis 登录会话内容无效")
@@ -213,6 +244,7 @@ func sessionKeys(loginUser *model.LoginUser) []string {
 		redisx.LoginTokenKey(loginUser.Token),
 		redisx.LoginUserSessionsKey(loginUser.UserID),
 		redisx.LoginUserGenerationKey(loginUser.UserID),
+		redisx.LoginUserPermissionVersionKey(loginUser.UserID),
 	}
 }
 
@@ -228,6 +260,55 @@ func SessionGeneration(ctx context.Context, userID int64) (int64, error) {
 	return generation, nil
 }
 
+// PermissionVersion 返回用户当前权限版本；从未变更过时为 0。
+func PermissionVersion(ctx context.Context, userID int64) (int64, error) {
+	version, err := redisx.C().Get(ctx, redisx.LoginUserPermissionVersionKey(userID)).Int64()
+	if errors.Is(err, redis.Nil) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("读取用户权限版本失败: %w", err)
+	}
+	return version, nil
+}
+
+// advancePermissionVersions 在数据库权限写入前推进版本。版本不设置 TTL：
+// 只要旧 JWT 仍可能存在，版本就不能回退或消失。
+func advancePermissionVersions(ctx context.Context, userIDs []int64) (map[int64]int64, error) {
+	ids := uniquePositiveIDs(userIDs)
+	versions := make(map[int64]int64, len(ids))
+	const batchSize = 200
+	err := forEachIDBatch(ids, batchSize, func(batch []int64) error {
+		type command struct {
+			userID int64
+			cmd    *redis.Cmd
+		}
+		commands := make([]command, 0, len(batch))
+		_, err := redisx.C().Pipelined(ctx, func(pipe redis.Pipeliner) error {
+			for _, userID := range batch {
+				commands = append(commands, command{
+					userID: userID,
+					cmd: advancePermissionVersionScript.Run(ctx, pipe,
+						[]string{redisx.LoginUserPermissionVersionKey(userID)}),
+				})
+			}
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("推进用户权限版本失败: %w", err)
+		}
+		for _, command := range commands {
+			version, err := command.cmd.Int64()
+			if err != nil {
+				return fmt.Errorf("读取用户 %d 权限版本失败: %w", command.userID, err)
+			}
+			versions[command.userID] = version
+		}
+		return nil
+	})
+	return versions, err
+}
+
 // GetLoginUser 用 token 换会话。
 //
 // token 无效返回 error；token 有效但会话已过期/被踢返回 (nil, nil)，
@@ -237,7 +318,49 @@ func GetLoginUser(ctx context.Context, tokenStr string) (*model.LoginUser, error
 	if err != nil {
 		return nil, err
 	}
-	return GetLoginUserByKey(ctx, claims.LoginUserKey)
+	loginUser, err := GetLoginUserByKey(ctx, claims.LoginUserKey)
+	if err != nil || loginUser == nil {
+		return loginUser, err
+	}
+	if permissionRevocations.isPending(loginUser.UserID) {
+		return nil, nil
+	}
+	version, err := PermissionVersion(ctx, loginUser.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if version == loginUser.PermissionVersion {
+		return loginUser, nil
+	}
+	return refreshStaleLoginUser(ctx, loginUser)
+}
+
+// refreshStaleLoginUser 在鉴权路径懒刷新旧权限快照。全局权限锁同时
+// 协调登录建会话和权限写入，避免新会话夹在版本推进与数据库提交之间。
+func refreshStaleLoginUser(ctx context.Context, loginUser *model.LoginUser) (*model.LoginUser, error) {
+	permissionRefreshMu.Lock()
+	defer permissionRefreshMu.Unlock()
+
+	latest, err := GetLoginUserByKey(ctx, loginUser.Token)
+	if err != nil || latest == nil {
+		return latest, err
+	}
+	version, err := PermissionVersion(ctx, latest.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if version == latest.PermissionVersion {
+		return latest, nil
+	}
+	snapshot, err := loadPermissionSnapshot(ctx, latest.UserID)
+	if err != nil {
+		return nil, failClosedUserRefresh(ctx, latest.UserID, err)
+	}
+	if err := refreshSessionPermissionsRaw(ctx, latest, &snapshot, version); err != nil {
+		return nil, failClosedSessionRefresh(ctx, latest, err)
+	}
+	permissionRevocations.clear(latest.UserID)
+	return latest, nil
 }
 
 // ParseToken 只校验签名并取出 claims，不查 Redis。
@@ -288,6 +411,9 @@ type permissionSnapshot struct {
 
 // RefreshLoginUserPermissions 重新加载数据库权限，并用 revision CAS 更新指定会话。
 func RefreshLoginUserPermissions(ctx context.Context, loginUser *model.LoginUser) error {
+	permissionRefreshMu.Lock()
+	defer permissionRefreshMu.Unlock()
+
 	if loginUser == nil || loginUser.Token == "" || loginUser.UserID <= 0 {
 		return errors.New("刷新登录会话失败：会话为空")
 	}
@@ -295,32 +421,104 @@ func RefreshLoginUserPermissions(ctx context.Context, loginUser *model.LoginUser
 	if err != nil {
 		return failClosedUserRefresh(ctx, loginUser.UserID, err)
 	}
-	return refreshSessionPermissions(ctx, loginUser, &snapshot)
+	version, err := PermissionVersion(ctx, loginUser.UserID)
+	if err != nil {
+		return failClosedUserRefresh(ctx, loginUser.UserID, err)
+	}
+	return refreshSessionPermissions(ctx, loginUser, &snapshot, version)
 }
 
 func loadPermissionSnapshot(ctx context.Context, userID int64) (permissionSnapshot, error) {
-	fresh, err := repository.SelectUserByID(ctx, userID)
+	snapshots, err := loadPermissionSnapshots(ctx, []int64{userID})
 	if err != nil {
 		return permissionSnapshot{}, err
 	}
-	if fresh == nil {
+	snapshot, exists := snapshots[userID]
+	if !exists {
 		return permissionSnapshot{}, fmt.Errorf("用户 %d 不存在", userID)
 	}
-	permissions, err := GetMenuPermission(ctx, fresh)
+	return snapshot, nil
+}
+
+// loadPermissionSnapshots loads all affected users, relations and menu
+// permissions in a fixed number of queries instead of one query group per
+// online user.
+func loadPermissionSnapshots(ctx context.Context, userIDs []int64) (map[int64]permissionSnapshot, error) {
+	users, err := repository.SelectUsersByIDs(ctx, userIDs)
 	if err != nil {
-		return permissionSnapshot{}, err
+		return nil, err
 	}
-	if permissions == nil {
-		permissions = []string{}
+
+	roleIDs := make([]int64, 0)
+	usersWithoutRoles := make([]int64, 0)
+	for userID, user := range users {
+		if user.IsAdmin() {
+			continue
+		}
+		if len(user.Roles) == 0 {
+			usersWithoutRoles = append(usersWithoutRoles, userID)
+			continue
+		}
+		for _, role := range user.Roles {
+			if role.Status == model.StatusNormal {
+				roleIDs = append(roleIDs, role.RoleID)
+			}
+		}
 	}
-	return permissionSnapshot{user: fresh, permissions: permissions}, nil
+	rolePermissions, err := repository.SelectMenuPermsByRoleIDs(ctx, uniquePositiveIDs(roleIDs))
+	if err != nil {
+		return nil, err
+	}
+	userPermissions, err := repository.SelectMenuPermsByUserIDs(ctx, usersWithoutRoles)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[int64]permissionSnapshot, len(users))
+	for userID, user := range users {
+		if user.IsAdmin() {
+			result[userID] = permissionSnapshot{user: user, permissions: []string{model.AllPermission}}
+			continue
+		}
+		permissionSet := make(map[string]struct{})
+		if len(user.Roles) == 0 {
+			for _, permission := range userPermissions[userID] {
+				addSplit(permissionSet, permission)
+			}
+		} else {
+			for i := range user.Roles {
+				role := &user.Roles[i]
+				if role.Status != model.StatusNormal {
+					role.Permissions = nil
+					continue
+				}
+				roleSet := make(map[string]struct{})
+				for _, permission := range rolePermissions[role.RoleID] {
+					addSplit(roleSet, permission)
+					addSplit(permissionSet, permission)
+				}
+				role.Permissions = sortedKeys(roleSet)
+			}
+		}
+		result[userID] = permissionSnapshot{user: user, permissions: sortedKeys(permissionSet)}
+	}
+	return result, nil
 }
 
 func refreshSessionPermissions(ctx context.Context, loginUser *model.LoginUser,
-	snapshot *permissionSnapshot) error {
+	snapshot *permissionSnapshot, permissionVersion int64) error {
+	err := refreshSessionPermissionsRaw(ctx, loginUser, snapshot, permissionVersion)
+	if err == nil {
+		return nil
+	}
+	return failClosedSessionRefresh(ctx, loginUser, err)
+}
+
+func refreshSessionPermissionsRaw(ctx context.Context, loginUser *model.LoginUser,
+	snapshot *permissionSnapshot, permissionVersion int64) error {
 	current := loginUser
 	for attempt := 0; attempt < maxSessionRefreshRetries; attempt++ {
-		err := writeSessionPermissions(ctx, current, *snapshot)
+		err := writeSessionPermissions(ctx, current, *snapshot, permissionVersion)
 		if err == nil {
 			if current != loginUser {
 				*loginUser = *current
@@ -328,28 +526,32 @@ func refreshSessionPermissions(ctx context.Context, loginUser *model.LoginUser,
 			return nil
 		}
 		if !errors.Is(err, errSessionConflict) {
-			return failClosedSessionRefresh(ctx, current, err)
+			return err
 		}
 
 		latest, err := GetLoginUserByKey(ctx, current.Token)
 		if err != nil {
-			return failClosedSessionRefresh(ctx, current, err)
+			return err
 		}
 		if latest == nil {
 			return errSessionChanged
 		}
 		loaded, err := loadPermissionSnapshot(ctx, latest.UserID)
 		if err != nil {
-			return failClosedSessionRefresh(ctx, latest, err)
+			return err
 		}
 		current = latest
 		*snapshot = loaded
+		permissionVersion, err = PermissionVersion(ctx, latest.UserID)
+		if err != nil {
+			return err
+		}
 	}
-	return failClosedSessionRefresh(ctx, current, errSessionConflict)
+	return errSessionConflict
 }
 
 func writeSessionPermissions(ctx context.Context, loginUser *model.LoginUser,
-	snapshot permissionSnapshot) error {
+	snapshot permissionSnapshot, permissionVersion int64) error {
 	now := time.Now()
 	updated := *loginUser
 	updated.User = snapshot.user
@@ -358,6 +560,7 @@ func writeSessionPermissions(ctx context.Context, loginUser *model.LoginUser,
 	updated.LoginTime = now.UnixMilli()
 	updated.ExpireTime = now.Add(jwtExpire).UnixMilli()
 	updated.SessionRevision++
+	updated.PermissionVersion = permissionVersion
 	data, err := json.Marshal(&updated)
 	if err != nil {
 		return fmt.Errorf("序列化用户权限快照失败: %w", err)
@@ -365,7 +568,7 @@ func writeSessionPermissions(ctx context.Context, loginUser *model.LoginUser,
 
 	result, err := updateSessionPermissionsScript.Run(ctx, redisx.C(), sessionKeys(loginUser),
 		jwtExpire.Milliseconds(), loginUser.Token, loginUser.SessionGeneration,
-		data, loginUser.SessionRevision).Int64()
+		data, loginUser.SessionRevision, permissionVersion).Int64()
 	if err != nil {
 		return fmt.Errorf("原子更新登录权限失败: %w", err)
 	}
@@ -373,7 +576,7 @@ func writeSessionPermissions(ctx context.Context, loginUser *model.LoginUser,
 	case 1:
 		*loginUser = updated
 		return nil
-	case 2:
+	case 2, -3:
 		return errSessionConflict
 	case 0, -1:
 		return errSessionChanged
@@ -383,17 +586,19 @@ func writeSessionPermissions(ctx context.Context, loginUser *model.LoginUser,
 }
 
 func failClosedSessionRefresh(ctx context.Context, loginUser *model.LoginUser, cause error) error {
+	_ = ctx
 	if loginUser == nil || loginUser.Token == "" {
 		return cause
 	}
-	if err := DeleteLoginUser(ctx, loginUser.Token); err != nil {
+	if err := permissionRevocations.compensate(loginUser.UserID); err != nil {
 		return fmt.Errorf("刷新权限失败且安全撤销会话失败: %w", errors.Join(cause, err))
 	}
-	return fmt.Errorf("刷新权限失败，已安全撤销会话: %w", cause)
+	return fmt.Errorf("刷新权限失败，已安全撤销用户全部会话: %w", cause)
 }
 
 func failClosedUserRefresh(ctx context.Context, userID int64, cause error) error {
-	if err := RevokeUserSessions(ctx, userID); err != nil {
+	_ = ctx
+	if err := permissionRevocations.compensate(userID); err != nil {
 		return fmt.Errorf("加载用户权限失败且安全撤销会话失败: %w", errors.Join(cause, err))
 	}
 	return fmt.Errorf("加载用户权限失败，已安全撤销全部会话: %w", cause)
@@ -401,55 +606,14 @@ func failClosedUserRefresh(ctx context.Context, userID int64, cause error) error
 
 // RefreshOnlineUsersByRole 角色权限变更后，刷新所有持有该角色的在线用户。
 //
-// 对应 Java 版 TokenService.refreshPermissionByRoleId，但有三处不同：
-//
-//  1. 用 SCAN 而不是 KEYS 遍历会话。KEYS 是 O(N) 且阻塞整个 Redis 实例，
-//     在线用户上千时一次角色调整就能让全站卡几秒。
-//  2. 权限写入使用 revision CAS，冲突时重新加载，旧快照不能覆盖新权限。
-//  3. 单个会话无法确认时先安全撤销；其余会话继续处理，结束后返回首个错误。
+// 先从数据库取角色成员，再走新版用户会话反向索引。这样 Redis 工作量只和
+// 受影响用户数相关，也不会因为全站 SCAN/MGET 某一批失败而静默漏掉会话。
 func RefreshOnlineUsersByRole(ctx context.Context, roleID int64) error {
-	snapshots := make(map[int64]*permissionSnapshot)
-	failedUsers := make(map[int64]struct{})
-	var firstErr error
-
-	err := scanLoginUsers(ctx, 100, func(loginUser *model.LoginUser) error {
-		// 管理员拥有全部权限，无需刷新
-		if loginUser.User == nil || loginUser.User.IsAdmin() || !hasRole(loginUser.User, roleID) {
-			return nil
-		}
-		if _, failed := failedUsers[loginUser.UserID]; failed {
-			return nil
-		}
-
-		snapshot, ok := snapshots[loginUser.UserID]
-		if !ok {
-			loaded, err := loadPermissionSnapshot(ctx, loginUser.UserID)
-			if err != nil {
-				failedUsers[loginUser.UserID] = struct{}{}
-				err = failClosedUserRefresh(ctx, loginUser.UserID, err)
-				if firstErr == nil {
-					firstErr = err
-				}
-				slog.Warn("重新加载用户失败，已撤销会话", "userId", loginUser.UserID, "err", err)
-				return nil
-			}
-			snapshot = &loaded
-			snapshots[loginUser.UserID] = snapshot
-		}
-		if err := refreshSessionPermissions(ctx, loginUser, snapshot); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			slog.Warn("刷新会话失败或已安全撤销", "userId", loginUser.UserID, "err", err)
-			return nil
-		}
-		slog.Info("角色变更已刷新在线用户权限", "roleId", roleID, "userId", loginUser.UserID)
-		return nil
-	})
+	userIDs, err := repository.SelectUserIDsByRoleID(ctx, roleID)
 	if err != nil {
 		return err
 	}
-	return firstErr
+	return RefreshOnlineUsersByID(ctx, userIDs...)
 }
 
 // RefreshOnlineUserByID 刷新指定用户的在线会话权限。
@@ -465,38 +629,108 @@ func RefreshOnlineUserByID(ctx context.Context, userID int64) error {
 // Java 硬切 Go 时会清理全部旧会话，因此运行期只接受新版 Go 创建的索引会话。
 // 这里不再扫描 login_tokens:*；无索引残余必须按部署检查单清理。
 func RefreshOnlineUsersByID(ctx context.Context, userIDs ...int64) error {
+	permissionRefreshMu.Lock()
+	defer permissionRefreshMu.Unlock()
+
 	ids := uniquePositiveIDs(userIDs)
 	if len(ids) == 0 {
 		return nil
 	}
-
-	sessions, err := indexedLoginUsers(ctx, ids)
+	versions, err := advancePermissionVersions(ctx, ids)
 	if err != nil {
 		return err
 	}
-	var firstErr error
+	return refreshOnlineUsersByIDLocked(ctx, ids, versions)
+}
+
+// mutatePermissionState 串行化“推进权限版本 -> 写数据库 -> 主动刷新会话”。
+// Redis 不可用时数据库写入不会发生；数据库写失败时多推进一次版本是安全的，
+// 下一次鉴权只会重新加载仍未变化的数据库权限。
+func mutatePermissionState(ctx context.Context, userIDs []int64, mutate func() error) error {
+	ids := uniquePositiveIDs(userIDs)
+	permissionRefreshMu.Lock()
+	defer permissionRefreshMu.Unlock()
+	return runPermissionMutation(ctx, ids, mutate, advancePermissionVersions, refreshOnlineUsersByIDLocked)
+}
+
+func runPermissionMutation(
+	ctx context.Context,
+	ids []int64,
+	mutate func() error,
+	advance func(context.Context, []int64) (map[int64]int64, error),
+	refresh func(context.Context, []int64, map[int64]int64) error,
+) error {
+	versions, err := advance(ctx, ids)
+	if err != nil {
+		return err
+	}
+	if err := mutate(); err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return runPostCommit(ctx, func(postCtx context.Context) error {
+		return refresh(postCtx, ids, versions)
+	})
+}
+
+func refreshOnlineUsersByIDLocked(ctx context.Context, ids []int64, versions map[int64]int64) error {
+	permissionRevocations.mark(ids...)
+
+	sessions, err := indexedLoginUsers(ctx, ids)
+	if err != nil {
+		revokeErr := permissionRevocations.compensate(ids...)
+		return fmt.Errorf("读取在线会话失败: %w", errors.Join(err, revokeErr))
+	}
+	onlineIDs := make([]int64, 0, len(sessions))
 	for _, userID := range ids {
 		loginUsers := sessions[userID]
 		if len(loginUsers) == 0 {
+			permissionRevocations.clear(userID)
 			continue
 		}
-
-		snapshot, err := loadPermissionSnapshot(ctx, userID)
-		if err != nil {
-			err = failClosedUserRefresh(ctx, userID, err)
-			slog.Warn("重新加载用户失败，已撤销会话", "userId", userID, "err", err)
+		onlineIDs = append(onlineIDs, userID)
+	}
+	snapshots, err := loadPermissionSnapshots(ctx, onlineIDs)
+	if err != nil {
+		revokeErr := permissionRevocations.compensate(onlineIDs...)
+		return fmt.Errorf("批量加载用户权限失败: %w", errors.Join(err, revokeErr))
+	}
+	var firstErr error
+	failedIDs := make([]int64, 0)
+	for _, userID := range onlineIDs {
+		loginUsers := sessions[userID]
+		snapshot, exists := snapshots[userID]
+		if !exists {
+			err := fmt.Errorf("用户 %d 不存在", userID)
+			slog.Warn("重新加载用户失败，等待安全撤销会话", "userId", userID, "err", err)
 			if firstErr == nil {
 				firstErr = err
 			}
+			failedIDs = append(failedIDs, userID)
 			continue
 		}
+		failed := false
 		for _, loginUser := range loginUsers {
-			if err := refreshSessionPermissions(ctx, loginUser, &snapshot); err != nil {
+			if err := refreshSessionPermissionsRaw(ctx, loginUser, &snapshot, versions[userID]); err != nil {
 				if firstErr == nil {
 					firstErr = err
 				}
-				slog.Warn("刷新会话失败或已安全撤销", "userId", userID, "err", err)
+				slog.Warn("刷新会话失败，等待安全撤销", "userId", userID, "err", err)
+				failed = true
+				failedIDs = append(failedIDs, userID)
+				break
 			}
+		}
+		if !failed {
+			permissionRevocations.clear(userID)
+		}
+	}
+	if len(failedIDs) > 0 {
+		revokeErr := permissionRevocations.compensate(failedIDs...)
+		if revokeErr != nil {
+			firstErr = errors.Join(firstErr, revokeErr)
 		}
 	}
 	return firstErr
@@ -509,96 +743,119 @@ func indexedLoginUsers(ctx context.Context, userIDs []int64) (map[int64][]*model
 		userID int64
 		cmd    *redis.StringSliceCmd
 	}
-	commands := make([]indexCommand, 0, len(userIDs))
-	_, err := redisx.C().Pipelined(ctx, func(pipe redis.Pipeliner) error {
-		for _, userID := range userIDs {
-			commands = append(commands, indexCommand{
-				userID: userID,
-				cmd:    pipe.SMembers(ctx, redisx.LoginUserSessionsKey(userID)),
-			})
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("批量读取用户会话索引失败: %w", err)
-	}
-
-	memberships := make(map[string][]int64)
-	tokenIDs := make([]string, 0)
-	for _, command := range commands {
-		members, err := command.cmd.Result()
-		if err != nil {
-			return nil, fmt.Errorf("读取用户 %d 会话索引失败: %w", command.userID, err)
-		}
-		for _, tokenID := range members {
-			if tokenID == "" {
-				continue
-			}
-			if _, exists := memberships[tokenID]; !exists {
-				tokenIDs = append(tokenIDs, tokenID)
-			}
-			memberships[tokenID] = append(memberships[tokenID], command.userID)
-		}
+	type indexedToken struct {
+		userID  int64
+		tokenID string
 	}
 
 	result := make(map[int64][]*model.LoginUser, len(userIDs))
-	stale := make(map[int64][]string)
-	const batchSize = 100
-	for start := 0; start < len(tokenIDs); start += batchSize {
-		end := min(start+batchSize, len(tokenIDs))
-		batch := tokenIDs[start:end]
-		keys := make([]string, len(batch))
-		for i, tokenID := range batch {
-			keys[i] = redisx.LoginTokenKey(tokenID)
-		}
-		values, err := redisx.C().MGet(ctx, keys...).Result()
-		if err != nil {
-			return nil, fmt.Errorf("批量读取用户登录会话失败: %w", err)
-		}
-		for i, value := range values {
-			tokenID := batch[i]
-			raw, ok := value.(string)
-			if !ok {
-				for _, userID := range memberships[tokenID] {
-					stale[userID] = append(stale[userID], tokenID)
-				}
-				continue
-			}
-
-			var loginUser model.LoginUser
-			if err := json.Unmarshal([]byte(raw), &loginUser); err != nil {
-				slog.Warn("会话反序列化失败，跳过", "err", err)
-				continue
-			}
-			if loginUser.Token == "" {
-				loginUser.Token = tokenID
-			}
-			for _, indexedUserID := range memberships[tokenID] {
-				if loginUser.UserID == indexedUserID {
-					result[indexedUserID] = append(result[indexedUserID], &loginUser)
-				} else {
-					stale[indexedUserID] = append(stale[indexedUserID], tokenID)
-				}
-			}
-		}
-	}
-
-	if len(stale) > 0 {
+	const indexBatchSize = 200
+	const tokenBatchSize = 100
+	err := forEachIDBatch(userIDs, indexBatchSize, func(batch []int64) error {
+		commands := make([]indexCommand, 0, len(batch))
 		_, err := redisx.C().Pipelined(ctx, func(pipe redis.Pipeliner) error {
-			for userID, tokenIDs := range stale {
-				members := make([]any, len(tokenIDs))
-				for i, tokenID := range tokenIDs {
-					members[i] = tokenID
-				}
-				pipe.SRem(ctx, redisx.LoginUserSessionsKey(userID), members...)
+			for _, userID := range batch {
+				commands = append(commands, indexCommand{
+					userID: userID,
+					cmd:    pipe.SMembers(ctx, redisx.LoginUserSessionsKey(userID)),
+				})
 			}
 			return nil
 		})
 		if err != nil {
-			return nil, fmt.Errorf("清理失效用户会话索引失败: %w", err)
+			return fmt.Errorf("批量读取用户会话索引失败: %w", err)
+		}
+
+		stale := make(map[int64][]string, len(batch))
+		tokens := make([]indexedToken, 0, tokenBatchSize)
+		flushTokens := func() error {
+			if len(tokens) == 0 {
+				return nil
+			}
+			keys := make([]string, len(tokens))
+			for i, token := range tokens {
+				keys[i] = redisx.LoginTokenKey(token.tokenID)
+			}
+			values, err := redisx.C().MGet(ctx, keys...).Result()
+			if err != nil {
+				return fmt.Errorf("批量读取用户登录会话失败: %w", err)
+			}
+			for i, value := range values {
+				token := tokens[i]
+				raw, ok := value.(string)
+				if !ok {
+					stale[token.userID] = append(stale[token.userID], token.tokenID)
+					continue
+				}
+				var loginUser model.LoginUser
+				if err := json.Unmarshal([]byte(raw), &loginUser); err != nil {
+					slog.Warn("会话反序列化失败，跳过", "err", err)
+					stale[token.userID] = append(stale[token.userID], token.tokenID)
+					continue
+				}
+				if loginUser.UserID != token.userID {
+					stale[token.userID] = append(stale[token.userID], token.tokenID)
+					continue
+				}
+				if loginUser.Token == "" {
+					loginUser.Token = token.tokenID
+				}
+				result[token.userID] = append(result[token.userID], &loginUser)
+			}
+			tokens = tokens[:0]
+			return nil
+		}
+
+		for _, command := range commands {
+			members, err := command.cmd.Result()
+			if err != nil {
+				return fmt.Errorf("读取用户 %d 会话索引失败: %w", command.userID, err)
+			}
+			for _, tokenID := range members {
+				if tokenID == "" {
+					continue
+				}
+				tokens = append(tokens, indexedToken{userID: command.userID, tokenID: tokenID})
+				if len(tokens) == tokenBatchSize {
+					if err := flushTokens(); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		if err := flushTokens(); err != nil {
+			return err
+		}
+		if len(stale) > 0 {
+			_, err := redisx.C().Pipelined(ctx, func(pipe redis.Pipeliner) error {
+				for userID, tokenIDs := range stale {
+					members := make([]any, len(tokenIDs))
+					for i, tokenID := range tokenIDs {
+						members[i] = tokenID
+					}
+					pipe.SRem(ctx, redisx.LoginUserSessionsKey(userID), members...)
+				}
+				return nil
+			})
+			if err != nil {
+				return fmt.Errorf("清理失效用户会话索引失败: %w", err)
+			}
+		}
+		return nil
+	})
+	return result, err
+}
+
+func forEachIDBatch(ids []int64, size int, fn func([]int64) error) error {
+	if size <= 0 {
+		return errors.New("批次大小必须大于0")
+	}
+	for start := 0; start < len(ids); start += size {
+		if err := fn(ids[start:min(start+size, len(ids))]); err != nil {
+			return err
 		}
 	}
-	return result, nil
+	return nil
 }
 
 func uniquePositiveIDs(ids []int64) []int64 {
@@ -619,18 +876,19 @@ func uniquePositiveIDs(ids []int64) []int64 {
 
 // scanLoginUsers 用 SCAN + MGET 分批读取在线会话，避免每个 key 一次 Redis 往返。
 // 单个损坏会话只记录错误类型；会话 key 含登录 UUID，禁止写入日志。
-func scanLoginUsers(ctx context.Context, batch int64, fn func(*model.LoginUser) error) error {
-	return scanLoginUserEntries(ctx, batch, func(_ string, loginUser *model.LoginUser) error {
+func scanLoginUsers(ctx context.Context, batch int64, maxKeys int,
+	fn func(*model.LoginUser) error) (bool, error) {
+	return scanLoginUserEntries(ctx, batch, maxKeys, func(_ string, loginUser *model.LoginUser) error {
 		return fn(loginUser)
 	})
 }
 
-func scanLoginUserEntries(ctx context.Context, batch int64, fn func(string, *model.LoginUser) error) error {
-	err := redisx.ScanKeyBatches(ctx, redisx.KeyLoginToken, batch, func(keys []string) error {
+func scanLoginUserEntries(ctx context.Context, batch int64, maxKeys int,
+	fn func(string, *model.LoginUser) error) (bool, error) {
+	return redisx.ScanKeyBatchesBounded(ctx, redisx.KeyLoginToken, batch, maxKeys, func(keys []string) error {
 		values, err := redisx.C().MGet(ctx, keys...).Result()
 		if err != nil {
-			slog.Warn("批量读取在线会话失败，跳过当前批次", "count", len(keys), "err", err)
-			return nil
+			return fmt.Errorf("批量读取在线会话失败(count=%d): %w", len(keys), err)
 		}
 		for i, value := range values {
 			raw, ok := value.(string)
@@ -653,19 +911,6 @@ func scanLoginUserEntries(ctx context.Context, batch int64, fn func(string, *mod
 		}
 		return nil
 	})
-	if errors.Is(err, errStopLoginScan) {
-		return nil
-	}
-	return err
-}
-
-func hasRole(user *model.SysUser, roleID int64) bool {
-	for _, role := range user.Roles {
-		if role.RoleID == roleID {
-			return true
-		}
-	}
-	return false
 }
 
 // DeleteLoginUser 删除会话，用于登出和强制下线。
@@ -687,17 +932,49 @@ func RevokeUserSessions(ctx context.Context, userIDs ...int64) error {
 	if len(ids) == 0 {
 		return nil
 	}
-
-	var revokeErrors []error
-	for _, userID := range ids {
-		keys := []string{
-			redisx.LoginUserGenerationKey(userID),
-			redisx.LoginUserSessionsKey(userID),
-		}
-		if _, err := revokeSessionsScript.Run(ctx, redisx.C(), keys,
-			redisx.KeyLoginToken, jwtExpire.Milliseconds()).Int64(); err != nil {
-			revokeErrors = append(revokeErrors, fmt.Errorf("撤销用户 %d 会话失败: %w", userID, err))
-		}
+	failures := revokeUserSessionsBatch(ctx, ids)
+	if len(failures) == 0 {
+		return nil
 	}
-	return errors.Join(revokeErrors...)
+	return permissionRevokeSummary(failures, 0, 0)
+}
+
+// revokeUserSessionsBatch 用 Pipeline 分批执行每用户原子撤销脚本，避免大角色
+// 在 Redis 故障时产生逐用户网络往返。返回值只保留失败用户，不创建成功项。
+func revokeUserSessionsBatch(ctx context.Context, userIDs []int64) map[int64]error {
+	ids := uniquePositiveIDs(userIDs)
+	failures := make(map[int64]error)
+	const batchSize = 200
+	_ = forEachIDBatch(ids, batchSize, func(batch []int64) error {
+		type command struct {
+			userID int64
+			cmd    *redis.Cmd
+		}
+		commands := make([]command, 0, len(batch))
+		_, pipelineErr := redisx.C().Pipelined(ctx, func(pipe redis.Pipeliner) error {
+			for _, userID := range batch {
+				keys := []string{
+					redisx.LoginUserGenerationKey(userID),
+					redisx.LoginUserSessionsKey(userID),
+				}
+				commands = append(commands, command{
+					userID: userID,
+					cmd: pipe.Eval(ctx, revokeSessionsLua, keys,
+						redisx.KeyLoginToken, jwtExpire.Milliseconds()),
+				})
+			}
+			return nil
+		})
+		for _, command := range commands {
+			if err := command.cmd.Err(); err != nil {
+				failures[command.userID] = err
+			} else if pipelineErr != nil {
+				// A pipeline-level transport failure can make an apparently empty
+				// command result ambiguous, so keep that user pending.
+				failures[command.userID] = pipelineErr
+			}
+		}
+		return nil
+	})
+	return failures
 }

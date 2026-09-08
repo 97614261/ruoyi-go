@@ -164,6 +164,38 @@ func SelectMenuPermsByUserID(ctx context.Context, userID int64) ([]string, error
 	return perms, nil
 }
 
+// SelectMenuPermsByUserIDs is the batch form used by permission propagation.
+// It keeps the query count constant when many online users are affected.
+func SelectMenuPermsByUserIDs(ctx context.Context, userIDs []int64) (map[int64][]string, error) {
+	result := make(map[int64][]string, len(userIDs))
+	if len(userIDs) == 0 {
+		return result, nil
+	}
+	type userPermission struct {
+		UserID int64  `gorm:"column:user_id"`
+		Perm   string `gorm:"column:perms"`
+	}
+	var rows []userPermission
+	err := DB(ctx).
+		Table("sys_user_role ur").
+		Select("ur.user_id, IFNULL(m.perms, '') AS perms").
+		Joins("INNER JOIN sys_role r ON r.role_id = ur.role_id").
+		Joins("INNER JOIN sys_role_menu rm ON rm.role_id = ur.role_id").
+		Joins("INNER JOIN sys_menu m ON m.menu_id = rm.menu_id").
+		Where("ur.user_id IN ?", userIDs).
+		Where("r.status = ?", model.StatusNormal).
+		Where("m.status = ?", model.StatusNormal).
+		Distinct().
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("批量查询用户权限标识失败: %w", err)
+	}
+	for _, row := range rows {
+		result[row.UserID] = append(result[row.UserID], row.Perm)
+	}
+	return result, nil
+}
+
 // CountMenuByNameAndParent 同一父菜单下的同名菜单数量。
 func CountMenuByNameAndParent(ctx context.Context, menuName string, parentID, excludeID int64) (int64, error) {
 	db := DB(ctx).Model(&model.SysMenu{}).

@@ -1,11 +1,52 @@
 package middleware
 
 import (
+	"bytes"
 	"encoding/json"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"github.com/gin-gonic/gin"
 )
+
+func TestResponseCaptureNeverBuffersPastLimit(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	capture := &responseCapture{ResponseWriter: ctx.Writer, body: &bytes.Buffer{}}
+	capture.Header().Set("Content-Type", "application/json")
+
+	first := strings.Repeat("a", maxResultLength+500)
+	if _, err := capture.Write([]byte(first)); err != nil {
+		t.Fatalf("写入响应失败: %v", err)
+	}
+	if got := capture.body.Len(); got != maxResultLength {
+		t.Fatalf("单次大块写入捕获了 %d 字节，期望 %d", got, maxResultLength)
+	}
+	if _, err := capture.WriteString(strings.Repeat("b", 500)); err != nil {
+		t.Fatalf("追加响应失败: %v", err)
+	}
+	if got := capture.body.Len(); got != maxResultLength {
+		t.Fatalf("追加后捕获缓冲区增长到 %d 字节", got)
+	}
+
+	unicodeRecorder := httptest.NewRecorder()
+	unicodeCtx, _ := gin.CreateTestContext(unicodeRecorder)
+	unicodeCapture := &responseCapture{ResponseWriter: unicodeCtx.Writer, body: &bytes.Buffer{}}
+	unicodeCapture.Header().Set("Content-Type", "application/json")
+	if _, err := unicodeCapture.WriteString(strings.Repeat("a", maxResultLength-1) + "中"); err != nil {
+		t.Fatalf("写入多字节响应失败: %v", err)
+	}
+	captured := truncate(unicodeCapture.body.String(), maxResultLength)
+	if !utf8.ValidString(captured) {
+		t.Fatal("操作日志截断后包含非法 UTF-8")
+	}
+	if len(captured) != maxResultLength-1 {
+		t.Fatalf("多字节边界截断长度为 %d，期望 %d", len(captured), maxResultLength-1)
+	}
+}
 
 func TestDesensitizeJSON(t *testing.T) {
 	secretValues := []string{"upper-secret", "old-secret", "quoted-secret", "nested-secret", "array-secret"}

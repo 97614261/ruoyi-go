@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"ruoyi-go/pkg/types"
@@ -24,6 +26,10 @@ func PasswordChrtype(ctx context.Context) (string, error) {
 	if value == "" {
 		return "0", nil
 	}
+	value = strings.TrimSpace(value)
+	if len(value) != 1 || value[0] < '0' || value[0] > '4' {
+		return "0", fmt.Errorf("参数 %s 的值无效，必须是0到4", ConfigKeyAccountChrtype)
+	}
 	return value, nil
 }
 
@@ -37,8 +43,8 @@ func IsDefaultModifyPwd(ctx context.Context, pwdUpdateDate types.Time) (bool, er
 		return false, err
 	}
 	modify, convErr := strconv.Atoi(value)
-	if convErr != nil {
-		return false, nil
+	if convErr != nil || (modify != 0 && modify != 1) {
+		return false, fmt.Errorf("参数 %s 的值无效，必须是0或1", ConfigKeyInitPasswordModify)
 	}
 	return modify == 1 && pwdUpdateDate.IsZero(), nil
 }
@@ -53,7 +59,10 @@ func IsPasswordExpired(ctx context.Context, pwdUpdateDate types.Time) (bool, err
 		return false, err
 	}
 	days, convErr := strconv.Atoi(value)
-	if convErr != nil || days <= 0 {
+	if convErr != nil || days < 0 || days >= 365 {
+		return false, fmt.Errorf("参数 %s 的值无效，必须是0到364之间的整数", ConfigKeyPasswordValidateDays)
+	}
+	if days == 0 {
 		return false, nil
 	}
 	if pwdUpdateDate.IsZero() {

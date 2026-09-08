@@ -137,6 +137,9 @@ func GetDictType(ctx context.Context, dictID int64) (*model.SysDictType, error) 
 
 // CreateDictType 新增字典类型。
 func CreateDictType(ctx context.Context, dictType *model.SysDictType, operator string) error {
+	dictWriteMu.Lock()
+	defer dictWriteMu.Unlock()
+
 	count, err := repository.CountDictTypeByType(ctx, dictType.DictType, 0)
 	if err != nil {
 		return err
@@ -158,6 +161,9 @@ func CreateDictType(ctx context.Context, dictType *model.SysDictType, operator s
 //
 // 类型名改了要同步 sys_dict_data 里的引用，并把新旧两个 key 的缓存都清掉。
 func UpdateDictType(ctx context.Context, dictType *model.SysDictType, operator string) error {
+	dictWriteMu.Lock()
+	defer dictWriteMu.Unlock()
+
 	if dictType.DictID == 0 {
 		return errs.New("字典类型ID不能为空")
 	}
@@ -167,6 +173,10 @@ func UpdateDictType(ctx context.Context, dictType *model.SysDictType, operator s
 	}
 	if existing == nil {
 		return errs.New("字典类型不存在")
+	}
+	if existing.DictType != dictType.DictType &&
+		(isContractDictType(existing.DictType) || isContractDictType(dictType.DictType)) {
+		return errs.Newf("契约字典类型【%s】不能改名", existing.DictType)
 	}
 
 	count, err := repository.CountDictTypeByType(ctx, dictType.DictType, dictType.DictID)
@@ -183,18 +193,23 @@ func UpdateDictType(ctx context.Context, dictType *model.SysDictType, operator s
 		return err
 	}
 
-	if existing.DictType != dictType.DictType {
-		if err := ClearDictCache(ctx, existing.DictType); err != nil {
-			return err
+	return runPostCommit(ctx, func(postCtx context.Context) error {
+		if existing.DictType != dictType.DictType {
+			if err := ClearDictCache(postCtx, existing.DictType); err != nil {
+				return err
+			}
 		}
-	}
-	return ClearDictCache(ctx, dictType.DictType)
+		return ClearDictCache(postCtx, dictType.DictType)
+	})
 }
 
 // DeleteDictTypes 批量删除字典类型。
 //
 // 下面还有字典数据的类型不允许删除，与 Java 一致。
 func DeleteDictTypes(ctx context.Context, dictIDs []int64) error {
+	dictWriteMu.Lock()
+	defer dictWriteMu.Unlock()
+
 	if len(dictIDs) == 0 {
 		return errs.New("请选择要删除的字典类型")
 	}
@@ -209,6 +224,9 @@ func DeleteDictTypes(ctx context.Context, dictIDs []int64) error {
 	}
 	typeNames := make([]string, 0, len(dictTypes))
 	for _, dictType := range dictTypes {
+		if isContractDictType(dictType.DictType) {
+			return errs.Newf("契约字典类型【%s】不能删除", dictType.DictType)
+		}
 		if counts[dictType.DictType] > 0 {
 			return errs.Newf("%s已分配,不能删除", dictType.DictName)
 		}
@@ -218,12 +236,14 @@ func DeleteDictTypes(ctx context.Context, dictIDs []int64) error {
 	if err := repository.DeleteDictTypeByIDs(ctx, dictIDs); err != nil {
 		return err
 	}
-	for _, name := range typeNames {
-		if err := ClearDictCache(ctx, name); err != nil {
-			return err
+	return runPostCommit(ctx, func(postCtx context.Context) error {
+		for _, name := range typeNames {
+			if err := ClearDictCache(postCtx, name); err != nil {
+				return err
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // ---------- 字典数据 ----------
@@ -266,6 +286,9 @@ func GetDictData(ctx context.Context, dictCode int64) (*model.SysDictData, error
 
 // CreateDictData 新增字典数据。
 func CreateDictData(ctx context.Context, data *model.SysDictData, operator string) error {
+	dictWriteMu.Lock()
+	defer dictWriteMu.Unlock()
+
 	data.DictCode = 0
 	if data.Status == "" {
 		data.Status = model.StatusNormal
@@ -278,11 +301,16 @@ func CreateDictData(ctx context.Context, data *model.SysDictData, operator strin
 	if err := repository.InsertDictData(ctx, data); err != nil {
 		return err
 	}
-	return ClearDictCache(ctx, data.DictType)
+	return runPostCommit(ctx, func(postCtx context.Context) error {
+		return ClearDictCache(postCtx, data.DictType)
+	})
 }
 
 // UpdateDictData 修改字典数据。
 func UpdateDictData(ctx context.Context, data *model.SysDictData, operator string) error {
+	dictWriteMu.Lock()
+	defer dictWriteMu.Unlock()
+
 	if data.DictCode == 0 {
 		return errs.New("字典数据ID不能为空")
 	}
@@ -301,16 +329,21 @@ func UpdateDictData(ctx context.Context, data *model.SysDictData, operator strin
 	}
 
 	// 字典类型可能被改到另一个类型下，两边缓存都要清
-	if existing.DictType != data.DictType {
-		if err := ClearDictCache(ctx, existing.DictType); err != nil {
-			return err
+	return runPostCommit(ctx, func(postCtx context.Context) error {
+		if existing.DictType != data.DictType {
+			if err := ClearDictCache(postCtx, existing.DictType); err != nil {
+				return err
+			}
 		}
-	}
-	return ClearDictCache(ctx, data.DictType)
+		return ClearDictCache(postCtx, data.DictType)
+	})
 }
 
 // DeleteDictData 批量删除字典数据。
 func DeleteDictData(ctx context.Context, dictCodes []int64) error {
+	dictWriteMu.Lock()
+	defer dictWriteMu.Unlock()
+
 	if len(dictCodes) == 0 {
 		return errs.New("请选择要删除的字典数据")
 	}
@@ -333,10 +366,12 @@ func DeleteDictData(ctx context.Context, dictCodes []int64) error {
 	if err := repository.DeleteDictDataByCodes(ctx, dictCodes); err != nil {
 		return err
 	}
-	for dictType := range affectedTypes {
-		if err := ClearDictCache(ctx, dictType); err != nil {
-			return err
+	return runPostCommit(ctx, func(postCtx context.Context) error {
+		for dictType := range affectedTypes {
+			if err := ClearDictCache(postCtx, dictType); err != nil {
+				return err
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }

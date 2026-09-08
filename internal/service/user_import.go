@@ -50,6 +50,8 @@ func ImportUsers(ctx context.Context, operator *model.SysUser, r io.Reader, upda
 	// critical section, otherwise a concurrent create can invalidate byName.
 	userWriteMu.Lock()
 	defer userWriteMu.Unlock()
+	deptWriteMu.Lock()
+	defer deptWriteMu.Unlock()
 
 	deptSet := make(map[int64]struct{})
 	names := make([]string, 0, len(users))
@@ -98,11 +100,10 @@ func ImportUsers(ctx context.Context, operator *model.SysUser, r io.Reader, upda
 	}
 
 	var (
-		successNum    int
-		failureNum    int
-		successMsg    strings.Builder
-		failureMsg    strings.Builder
-		updatedNormal []int64
+		successNum int
+		failureNum int
+		successMsg strings.Builder
+		failureMsg strings.Builder
 	)
 
 	// 解析阶段的行错误直接计入失败
@@ -114,7 +115,7 @@ func ImportUsers(ctx context.Context, operator *model.SysUser, r io.Reader, upda
 	for i := range users {
 		user := users[i]
 		existing, exists := byName[strings.ToLower(user.UserName)]
-		updatedID, updatedStatus, err := importOneUser(ctx, operator, &user, existingIf(exists, &existing),
+		_, _, err := importOneUser(ctx, operator, &user, existingIf(exists, &existing),
 			updateSupport, operatorName, hashed)
 		if err != nil {
 			failureNum++
@@ -123,20 +124,11 @@ func ImportUsers(ctx context.Context, operator *model.SysUser, r io.Reader, upda
 			continue
 		}
 		byName[strings.ToLower(user.UserName)] = user
-		if updatedID > 0 && updatedStatus != model.StatusDisable {
-			updatedNormal = append(updatedNormal, updatedID)
-		}
 		successNum++
 		if successNum <= maxImportMessageDetails {
 			fmt.Fprintf(&successMsg, "<br/>%d、账号 %s 导入成功", successNum, html.EscapeString(user.UserName))
 		}
 	}
-	if len(updatedNormal) > 0 {
-		if err := RefreshOnlineUsersByID(ctx, updatedNormal...); err != nil {
-			return "", err
-		}
-	}
-
 	if failureNum > 0 {
 		if failureNum > maxImportMessageDetails {
 			fmt.Fprintf(&failureMsg, "<br/>仅展示前 %d 条错误，其余 %d 条已省略",
@@ -206,7 +198,13 @@ func importOneUser(ctx context.Context, operator *model.SysUser, user *model.Sys
 	}
 	// 用 UpdateUserBasic 而不是 UpdateUser：导入表里没有角色和岗位列，
 	// 走 UpdateUser 会把被更新用户的角色、岗位全部清空。理由详见该函数注释。
-	if err := repository.UpdateUserBasic(ctx, user); err != nil {
+	if user.Status == model.StatusDisable {
+		if err := repository.UpdateUserBasic(ctx, user); err != nil {
+			return 0, "", err
+		}
+	} else if err := mutatePermissionState(ctx, []int64{user.UserID}, func() error {
+		return repository.UpdateUserBasic(ctx, user)
+	}); err != nil {
 		return 0, "", err
 	}
 	return user.UserID, user.Status, nil

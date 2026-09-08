@@ -22,17 +22,26 @@ const maxOnlineScan = 5000
 // 数据来自 Redis 而不是数据库 —— 这正是 JWT + Redis 双层设计的价值：
 // 服务端始终知道谁在线，也能把谁踢下线。
 func ListOnlineUsers(ctx context.Context, query model.OnlineQuery, pg page.Query) ([]model.UserOnline, int64, error) {
-	var (
-		all       []model.UserOnline
-		truncated bool
-	)
+	all, truncated, err := collectOnlineUsers(query, func(fn func(*model.LoginUser) error) (bool, error) {
+		return scanLoginUsers(ctx, 200, maxOnlineScan, fn)
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	if truncated {
+		slog.Warn("在线会话数超过扫描上限，列表已截断", "limit", maxOnlineScan)
+	}
 
-	err := scanLoginUsers(ctx, 200, func(loginUser *model.LoginUser) error {
-		if len(all) >= maxOnlineScan {
-			truncated = true
-			return errStopLoginScan
-		}
+	items, total := paginateOnlineUsers(all, pg)
+	return items, total, nil
+}
 
+func collectOnlineUsers(
+	query model.OnlineQuery,
+	scan func(func(*model.LoginUser) error) (bool, error),
+) ([]model.UserOnline, bool, error) {
+	all := make([]model.UserOnline, 0, 128)
+	truncated, err := scan(func(loginUser *model.LoginUser) error {
 		item := model.UserOnline{
 			TokenID:       loginUser.Token,
 			IPAddr:        loginUser.IPAddr,
@@ -58,14 +67,9 @@ func ListOnlineUsers(ctx context.Context, query model.OnlineQuery, pg page.Query
 		return nil
 	})
 	if err != nil {
-		return nil, 0, err
+		return nil, false, err
 	}
-	if truncated {
-		slog.Warn("在线会话数超过扫描上限，列表已截断", "limit", maxOnlineScan)
-	}
-
-	items, total := paginateOnlineUsers(all, pg)
-	return items, total, nil
+	return all, truncated, nil
 }
 
 // paginateOnlineUsers 先建立全序再切页，避免 Redis SCAN 输入顺序变化时分页重漏。

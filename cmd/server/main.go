@@ -153,10 +153,11 @@ func shutdownComponents(
 }
 
 func shutdownAsyncWorkers(ctx context.Context) error {
-	results := make(chan error, 2)
+	results := make(chan error, 3)
 	go func() { results <- middleware.ShutdownOperLogPool(ctx) }()
 	go func() { results <- service.ShutdownManualJobPool(ctx) }()
-	return errors.Join(<-results, <-results)
+	go func() { results <- service.ShutdownPermissionRevocationQueue(ctx) }()
+	return errors.Join(<-results, <-results, <-results)
 }
 
 func initLogger(level string) {

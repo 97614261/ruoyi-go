@@ -93,6 +93,8 @@ func CheckRoleDataScope(ctx context.Context, user *model.SysUser, roleID int64) 
 func CreateRole(ctx context.Context, user *model.SysUser, role *model.SysRole, operator string) error {
 	roleWriteMu.Lock()
 	defer roleWriteMu.Unlock()
+	menuWriteMu.Lock()
+	defer menuWriteMu.Unlock()
 
 	menuIDs, err := checkMenuIDsForUser(ctx, user, role.MenuIDs)
 	if err != nil {
@@ -116,6 +118,8 @@ func CreateRole(ctx context.Context, user *model.SysUser, role *model.SysRole, o
 func UpdateRole(ctx context.Context, user *model.SysUser, role *model.SysRole, operator string) error {
 	roleWriteMu.Lock()
 	defer roleWriteMu.Unlock()
+	menuWriteMu.Lock()
+	defer menuWriteMu.Unlock()
 
 	if role.RoleID == 0 {
 		return errs.New("角色ID不能为空")
@@ -142,18 +146,18 @@ func UpdateRole(ctx context.Context, user *model.SysUser, role *model.SysRole, o
 	if existing == nil {
 		return errs.New("角色不存在")
 	}
-
 	role.UpdateBy = operator
 	role.UpdateTime = types.Now()
-	if err := repository.UpdateRole(ctx, role); err != nil {
-		return err
-	}
-	// 权限变了，在线用户的会话要跟着刷新，否则要等下次登录才生效
-	return RefreshOnlineUsersByRole(ctx, role.RoleID)
+	return mutateRolePermissionState(ctx, role.RoleID, func() error {
+		return repository.UpdateRole(ctx, role)
+	})
 }
 
 // ChangeRoleStatus 启用/停用角色。
 func ChangeRoleStatus(ctx context.Context, user *model.SysUser, roleID int64, status, operator string) error {
+	roleWriteMu.Lock()
+	defer roleWriteMu.Unlock()
+
 	if err := CheckRoleAllowed(roleID); err != nil {
 		return err
 	}
@@ -163,14 +167,18 @@ func ChangeRoleStatus(ctx context.Context, user *model.SysUser, roleID int64, st
 	if status == "" {
 		return errs.New("状态不能为空")
 	}
-	if err := repository.UpdateRoleStatus(ctx, roleID, status, operator); err != nil {
-		return err
-	}
-	return RefreshOnlineUsersByRole(ctx, roleID)
+	return mutateRolePermissionState(ctx, roleID, func() error {
+		return repository.UpdateRoleStatus(ctx, roleID, status, operator)
+	})
 }
 
 // AuthDataScope 保存角色的数据权限配置。
 func AuthDataScope(ctx context.Context, user *model.SysUser, body model.RoleDataScopeBody, operator string) error {
+	roleWriteMu.Lock()
+	defer roleWriteMu.Unlock()
+	deptWriteMu.Lock()
+	defer deptWriteMu.Unlock()
+
 	if err := CheckRoleAllowed(body.RoleID); err != nil {
 		return err
 	}
@@ -191,14 +199,35 @@ func AuthDataScope(ctx context.Context, user *model.SysUser, body model.RoleData
 		UpdateBy:          operator,
 		UpdateTime:        types.Now(),
 	}
-	if err := repository.AuthDataScope(ctx, role); err != nil {
+	return mutateRolePermissionState(ctx, body.RoleID, func() error {
+		return repository.AuthDataScope(ctx, role)
+	})
+}
+
+func mutateRolePermissionState(ctx context.Context, roleID int64, mutate func() error) error {
+	return mutateRolePermissionStateWith(ctx, roleID, repository.SelectUserIDsByRoleID,
+		mutatePermissionState, mutate)
+}
+
+func mutateRolePermissionStateWith(
+	ctx context.Context,
+	roleID int64,
+	loadMembers func(context.Context, int64) ([]int64, error),
+	apply func(context.Context, []int64, func() error) error,
+	mutate func() error,
+) error {
+	userIDs, err := loadMembers(ctx, roleID)
+	if err != nil {
 		return err
 	}
-	return RefreshOnlineUsersByRole(ctx, body.RoleID)
+	return apply(ctx, userIDs, mutate)
 }
 
 // DeleteRoles 批量删除角色。
 func DeleteRoles(ctx context.Context, user *model.SysUser, roleIDs []int64) error {
+	roleWriteMu.Lock()
+	defer roleWriteMu.Unlock()
+
 	if len(roleIDs) == 0 {
 		return errs.New("请选择要删除的角色")
 	}
@@ -235,6 +264,11 @@ func ListAuthUserPage(ctx context.Context, operator *model.SysUser, roleID int64
 
 // CancelAuthUser 取消若干用户的角色授权。
 func CancelAuthUser(ctx context.Context, operator *model.SysUser, roleID int64, userIDs []int64) error {
+	userWriteMu.Lock()
+	defer userWriteMu.Unlock()
+	roleWriteMu.Lock()
+	defer roleWriteMu.Unlock()
+
 	if err := CheckRoleAllowed(roleID); err != nil {
 		return err
 	}
@@ -249,14 +283,18 @@ func CancelAuthUser(ctx context.Context, operator *model.SysUser, roleID int64, 
 	if err != nil {
 		return err
 	}
-	if err := repository.DeleteUserRole(ctx, roleID, userIDs); err != nil {
-		return err
-	}
-	return refreshUsers(ctx, userIDs)
+	return mutatePermissionState(ctx, userIDs, func() error {
+		return repository.DeleteUserRole(ctx, roleID, userIDs)
+	})
 }
 
 // GrantAuthUser 批量授予角色。
 func GrantAuthUser(ctx context.Context, operator *model.SysUser, roleID int64, userIDs []int64) error {
+	userWriteMu.Lock()
+	defer userWriteMu.Unlock()
+	roleWriteMu.Lock()
+	defer roleWriteMu.Unlock()
+
 	if err := CheckRoleAllowed(roleID); err != nil {
 		return err
 	}
@@ -271,15 +309,9 @@ func GrantAuthUser(ctx context.Context, operator *model.SysUser, roleID int64, u
 	if err != nil {
 		return err
 	}
-	if err := repository.InsertUserRole(ctx, roleID, userIDs); err != nil {
-		return err
-	}
-	return refreshUsers(ctx, userIDs)
-}
-
-// refreshUsers 按用户会话索引批量刷新在线会话。
-func refreshUsers(ctx context.Context, userIDs []int64) error {
-	return RefreshOnlineUsersByID(ctx, userIDs...)
+	return mutatePermissionState(ctx, userIDs, func() error {
+		return repository.InsertUserRole(ctx, roleID, userIDs)
+	})
 }
 
 // RoleDeptTree 返回部门树和该角色已选中的部门 ID。

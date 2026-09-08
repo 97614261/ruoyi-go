@@ -142,23 +142,33 @@ func Login(ctx context.Context, body model.LoginBody, ip, userAgent string) (str
 		return fail(passwordLockedError())
 	}
 
-	permissions, err := GetMenuPermission(ctx, user)
-	if err != nil {
-		return "", err
-	}
+	// 权限快照、权限版本和 Redis 会话必须在同一临界区生成。
+	// 否则登录可能夹在“版本推进”和权限数据库提交之间，写出永久陈旧的快照。
+	token, err := func() (string, error) {
+		permissionRefreshMu.Lock()
+		defer permissionRefreshMu.Unlock()
 
-	loginUser := &model.LoginUser{
-		UserID:            user.UserID,
-		DeptID:            user.DeptID,
-		IPAddr:            ip,
-		Browser:           browser,
-		OS:                os,
-		Permissions:       permissions,
-		User:              user,
-		SessionGeneration: generation,
-	}
-
-	token, err := CreateToken(ctx, loginUser)
+		permissions, err := GetMenuPermission(ctx, user)
+		if err != nil {
+			return "", err
+		}
+		permissionVersion, err := PermissionVersion(ctx, user.UserID)
+		if err != nil {
+			return "", err
+		}
+		loginUser := &model.LoginUser{
+			UserID:            user.UserID,
+			DeptID:            user.DeptID,
+			IPAddr:            ip,
+			Browser:           browser,
+			OS:                os,
+			Permissions:       permissions,
+			User:              user,
+			SessionGeneration: generation,
+			PermissionVersion: permissionVersion,
+		}
+		return createTokenLocked(ctx, loginUser)
+	}()
 	if err != nil {
 		return "", err
 	}

@@ -108,6 +108,61 @@ func ScanKeyBatches(ctx context.Context, prefix string, batch int64, fn func(key
 	}, fn)
 }
 
+// ScanKeyBatchesBounded 最多把 limit 个 key 交给回调，并准确报告 Redis 中
+// 是否还有未处理 key。最后一个 SCAN 批次会在调用回调前裁剪。
+func ScanKeyBatchesBounded(ctx context.Context, prefix string, batch int64, limit int,
+	fn func(keys []string) error) (bool, error) {
+	return scanKeyBatchesBounded(ctx, prefix, batch, limit,
+		func(ctx context.Context, cursor uint64, pattern string, count int64) ([]string, uint64, error) {
+			return client.Scan(ctx, cursor, pattern, count).Result()
+		}, fn)
+}
+
+func scanKeyBatchesBounded(
+	ctx context.Context,
+	prefix string,
+	batch int64,
+	limit int,
+	scan func(context.Context, uint64, string, int64) ([]string, uint64, error),
+	fn func(keys []string) error,
+) (bool, error) {
+	if limit <= 0 {
+		return true, nil
+	}
+	if batch <= 0 {
+		batch = 100
+	}
+	processed := 0
+	var cursor uint64
+	for {
+		keys, next, err := scan(ctx, cursor, prefix+"*", batch)
+		if err != nil {
+			return false, fmt.Errorf("SCAN %s* 失败: %w", prefix, err)
+		}
+		remaining := limit - processed
+		truncatedBatch := len(keys) > remaining
+		if truncatedBatch {
+			keys = keys[:remaining]
+		}
+		if len(keys) > 0 {
+			if err := fn(keys); err != nil {
+				if errors.Is(err, ErrStopScan) {
+					return false, nil
+				}
+				return false, err
+			}
+			processed += len(keys)
+		}
+		if truncatedBatch || (processed >= limit && next != 0) {
+			return true, nil
+		}
+		if next == 0 {
+			return false, nil
+		}
+		cursor = next
+	}
+}
+
 func scanKeyBatches(
 	ctx context.Context,
 	prefix string,

@@ -63,10 +63,12 @@ func TestValidateRejectsUnsafeLimitsAndProxy(t *testing.T) {
 		MySQL: MySQLConfig{DSN: "u:p@tcp(localhost:3306)/db", MaxOpenConns: 2, MaxIdleConns: 1,
 			ConnMaxLifetime: time.Minute, SlowThreshold: time.Millisecond, ConnectTimeout: time.Second,
 			ReadTimeout: time.Second, WriteTimeout: time.Second},
-		Redis:  RedisConfig{Addr: "localhost:6379", PoolSize: 1},
-		JWT:    JWTConfig{Secret: "secret", ExpireTime: time.Hour, RefreshWindow: time.Minute},
-		Upload: UploadConfig{Path: "uploads", URLPrefix: "/profile", MaxSizeMB: 10, MaxRequestSizeMB: 20},
-		Log:    LogConfig{Level: "info"},
+		Redis: RedisConfig{Addr: "localhost:6379", PoolSize: 1},
+		JWT: JWTConfig{Secret: "secret", ExpireTime: time.Hour, RefreshWindow: time.Minute,
+			Header: "Authorization"},
+		Captcha: CaptchaConfig{Type: "math"},
+		Upload:  UploadConfig{Path: "uploads", URLPrefix: "/profile", MaxSizeMB: 10, MaxRequestSizeMB: 20},
+		Log:     LogConfig{Level: "info"},
 	}
 	if err := valid.validate(); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
@@ -112,5 +114,17 @@ func TestValidateRejectsUnsafeLimitsAndProxy(t *testing.T) {
 	invalidOrigin.Server.AllowedOrigins = []string{"https://example.test/path"}
 	if err := invalidOrigin.validate(); err == nil || !strings.Contains(err.Error(), "allowedOrigins") {
 		t.Fatalf("origin with path should fail: %v", err)
+	}
+
+	invalidHeader := valid
+	invalidHeader.JWT.Header = "X-Token"
+	if err := invalidHeader.validate(); err == nil || !strings.Contains(err.Error(), "jwt.header") {
+		t.Fatalf("未使用的 JWT header 应被拒绝: %v", err)
+	}
+
+	invalidCaptcha := valid
+	invalidCaptcha.Captcha.Type = "text"
+	if err := invalidCaptcha.validate(); err == nil || !strings.Contains(err.Error(), "captcha.type") {
+		t.Fatalf("非法验证码类型应被拒绝: %v", err)
 	}
 }

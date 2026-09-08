@@ -71,6 +71,84 @@ func SelectUserByID(ctx context.Context, userID int64) (*model.SysUser, error) {
 	return &user, nil
 }
 
+// SelectUsersByIDs loads users and their departments/roles with a fixed
+// number of queries. Permission propagation can involve thousands of role
+// members, so calling SelectUserByID in a loop is not acceptable here.
+func SelectUsersByIDs(ctx context.Context, userIDs []int64) (map[int64]*model.SysUser, error) {
+	result := make(map[int64]*model.SysUser, len(userIDs))
+	if len(userIDs) == 0 {
+		return result, nil
+	}
+
+	var users []model.SysUser
+	if err := DB(ctx).
+		Where("user_id IN ?", userIDs).
+		Where("del_flag = ?", model.DelFlagExist).
+		Find(&users).Error; err != nil {
+		return nil, fmt.Errorf("批量查询用户失败: %w", err)
+	}
+
+	deptIDs := make([]int64, 0, len(users))
+	for i := range users {
+		user := &users[i]
+		result[user.UserID] = user
+		if user.DeptID != nil {
+			deptIDs = append(deptIDs, *user.DeptID)
+		}
+	}
+	if len(deptIDs) > 0 {
+		var depts []model.SysDept
+		if err := DB(ctx).Where("dept_id IN ?", deptIDs).Find(&depts).Error; err != nil {
+			return nil, fmt.Errorf("批量查询用户部门失败: %w", err)
+		}
+		deptByID := make(map[int64]*model.SysDept, len(depts))
+		for i := range depts {
+			deptByID[depts[i].DeptID] = &depts[i]
+		}
+		for i := range users {
+			if users[i].DeptID != nil {
+				users[i].Dept = deptByID[*users[i].DeptID]
+			}
+		}
+	}
+
+	var relations []model.SysUserRole
+	if err := DB(ctx).Where("user_id IN ?", userIDs).Find(&relations).Error; err != nil {
+		return nil, fmt.Errorf("批量查询用户角色关系失败: %w", err)
+	}
+	roleIDs := make([]int64, 0, len(relations))
+	seenRole := make(map[int64]struct{}, len(relations))
+	for _, relation := range relations {
+		if _, exists := seenRole[relation.RoleID]; !exists {
+			seenRole[relation.RoleID] = struct{}{}
+			roleIDs = append(roleIDs, relation.RoleID)
+		}
+	}
+	if len(roleIDs) == 0 {
+		return result, nil
+	}
+
+	var roles []model.SysRole
+	if err := DB(ctx).
+		Where("role_id IN ?", roleIDs).
+		Where("del_flag = ?", model.DelFlagExist).
+		Find(&roles).Error; err != nil {
+		return nil, fmt.Errorf("批量查询角色失败: %w", err)
+	}
+	roleByID := make(map[int64]model.SysRole, len(roles))
+	for _, role := range roles {
+		roleByID[role.RoleID] = role
+	}
+	for _, relation := range relations {
+		user := result[relation.UserID]
+		role, exists := roleByID[relation.RoleID]
+		if user != nil && exists {
+			user.Roles = append(user.Roles, role)
+		}
+	}
+	return result, nil
+}
+
 func fillUserRelations(ctx context.Context, user *model.SysUser) error {
 	if user.DeptID != nil {
 		var dept model.SysDept

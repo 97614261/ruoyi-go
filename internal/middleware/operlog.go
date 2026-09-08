@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 
@@ -172,14 +173,24 @@ func (w *responseCapture) shouldCapture() bool {
 
 func (w *responseCapture) Write(b []byte) (int, error) {
 	if w.shouldCapture() {
-		w.body.Write(b)
+		remaining := maxResultLength - w.body.Len()
+		if len(b) > remaining {
+			w.body.Write(b[:remaining])
+		} else {
+			w.body.Write(b)
+		}
 	}
 	return w.ResponseWriter.Write(b)
 }
 
 func (w *responseCapture) WriteString(s string) (int, error) {
 	if w.shouldCapture() {
-		w.body.WriteString(s)
+		remaining := maxResultLength - w.body.Len()
+		if len(s) > remaining {
+			w.body.WriteString(s[:remaining])
+		} else {
+			w.body.WriteString(s)
+		}
 	}
 	return w.ResponseWriter.WriteString(s)
 }
@@ -297,11 +308,16 @@ func isSensitiveParam(key string) bool {
 // 直接按字节切会切断多字节字符，产生非法 UTF-8 导致 MySQL 插入失败；
 // 这里从字节位置回退到最近的字符边界。
 func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
+	cut := len(s)
+	if cut > max {
+		cut = max
 	}
-	cut := max
 	for cut > 0 && !utf8StartsAt(s, cut) {
+		cut--
+	}
+	// responseCapture may stop in the middle of the final UTF-8 sequence when
+	// the response itself is longer than the capture limit.
+	for cut > 0 && !utf8.ValidString(s[:cut]) {
 		cut--
 	}
 	return s[:cut]

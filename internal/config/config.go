@@ -210,6 +210,14 @@ func (c *Config) validate() error {
 		return fmt.Errorf("jwt.refreshWindow(%s) 必须小于 jwt.expireTime(%s)，否则每次请求都会续期",
 			c.JWT.RefreshWindow, c.JWT.ExpireTime)
 	}
+	if c.JWT.Header != "Authorization" {
+		return fmt.Errorf("jwt.header 必须为 Authorization")
+	}
+	switch c.Captcha.Type {
+	case "math", "char":
+	default:
+		return fmt.Errorf("captcha.type 只能是 math 或 char")
+	}
 	if c.Upload.MaxSizeMB <= 0 || c.Upload.MaxRequestSizeMB <= 0 {
 		return fmt.Errorf("upload.maxSizeMB 和 upload.maxRequestSizeMB 必须大于 0")
 	}

@@ -246,6 +246,9 @@ func parseAncestorIDs(ancestors string) []int64 {
 
 // DeleteDept 删除部门。
 func DeleteDept(ctx context.Context, user *model.SysUser, deptID int64) error {
+	deptWriteMu.Lock()
+	defer deptWriteMu.Unlock()
+
 	hasChild, err := repository.HasChildByDeptID(ctx, deptID)
 	if err != nil {
 		return err
@@ -272,6 +275,9 @@ func DeleteDept(ctx context.Context, user *model.SysUser, deptID int64) error {
 //
 // 传输格式与菜单排序一致，解析逻辑共用 parseSortPairs。
 func UpdateDeptSort(ctx context.Context, user *model.SysUser, body model.DeptSortBody) error {
+	deptWriteMu.Lock()
+	defer deptWriteMu.Unlock()
+
 	sorts, err := parseSortPairs(body.DeptIDs, body.OrderNums)
 	if err != nil {
 		return err

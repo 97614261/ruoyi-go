@@ -49,6 +49,25 @@ func SelectRoleIDsByUserID(ctx context.Context, userID int64) ([]int64, error) {
 	return ids, nil
 }
 
+// SelectUserIDsByRoleID returns non-deleted user IDs assigned to a role.
+// Role permission propagation uses this relation instead of scanning every
+// login session in Redis.
+func SelectUserIDsByRoleID(ctx context.Context, roleID int64) ([]int64, error) {
+	var userIDs []int64
+	err := DB(ctx).
+		Table("sys_user_role ur").
+		Joins("INNER JOIN sys_user u ON u.user_id = ur.user_id").
+		Where("ur.role_id = ?", roleID).
+		Where("u.del_flag = ?", model.DelFlagExist).
+		Distinct().
+		Order("ur.user_id").
+		Pluck("ur.user_id", &userIDs).Error
+	if err != nil {
+		return nil, fmt.Errorf("查询角色 %d 的用户失败: %w", roleID, err)
+	}
+	return userIDs, nil
+}
+
 // roleListDB 构造角色列表的基础查询。
 //
 // 与 Java 版 selectRoleVo 一致，join 出 sys_dept 供数据权限过滤使用

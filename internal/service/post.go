@@ -86,6 +86,9 @@ func UpdatePost(ctx context.Context, post *model.SysPost, operator string) error
 // 已分配给用户的岗位不允许删除，与 Java 版行为一致：
 // 逐个检查并在第一个冲突处中止，提示里带上岗位名。
 func DeletePosts(ctx context.Context, postIDs []int64) error {
+	postWriteMu.Lock()
+	defer postWriteMu.Unlock()
+
 	if len(postIDs) == 0 {
 		return errs.New("请选择要删除的岗位")
 	}

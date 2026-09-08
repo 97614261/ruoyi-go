@@ -131,12 +131,17 @@ func CreateConfig(ctx context.Context, config *model.SysConfig, operator string)
 	if config.ConfigType == "" {
 		config.ConfigType = model.ConfigTypeCustom
 	}
+	if err := validateConfigCreate(config); err != nil {
+		return err
+	}
 	config.CreateBy = operator
 	config.CreateTime = types.Now()
 	if err := repository.InsertConfig(ctx, config); err != nil {
 		return err
 	}
-	return ClearConfigCache(ctx, config.ConfigKey)
+	return runPostCommit(ctx, func(postCtx context.Context) error {
+		return ClearConfigCache(postCtx, config.ConfigKey)
+	})
 }
 
 // UpdateConfig 修改参数。
@@ -156,6 +161,9 @@ func UpdateConfig(ctx context.Context, config *model.SysConfig, operator string)
 	if existing == nil {
 		return errs.New("参数不存在")
 	}
+	if err := validateConfigUpdate(existing, config); err != nil {
+		return err
+	}
 
 	count, err := repository.CountConfigByKey(ctx, config.ConfigKey, config.ConfigID)
 	if err != nil {
@@ -170,13 +178,18 @@ func UpdateConfig(ctx context.Context, config *model.SysConfig, operator string)
 	if err := repository.UpdateConfig(ctx, config); err != nil {
 		return err
 	}
-	return clearConfigCacheKeys(ctx, existing.ConfigKey, config.ConfigKey)
+	return runPostCommit(ctx, func(postCtx context.Context) error {
+		return clearConfigCacheKeys(postCtx, existing.ConfigKey, config.ConfigKey)
+	})
 }
 
 // DeleteConfigs 批量删除参数。
 //
 // 系统内置参数（config_type = 'Y'）不允许删除，与 Java 一致。
 func DeleteConfigs(ctx context.Context, configIDs []int64) error {
+	configWriteMu.Lock()
+	defer configWriteMu.Unlock()
+
 	if len(configIDs) == 0 {
 		return errs.New("请选择要删除的参数")
 	}
@@ -191,7 +204,7 @@ func DeleteConfigs(ctx context.Context, configIDs []int64) error {
 	}
 	keys := make([]string, 0, len(configs))
 	for _, config := range configs {
-		if config.ConfigType == model.ConfigTypeBuiltin {
+		if config.ConfigType == model.ConfigTypeBuiltin || isContractConfigKey(config.ConfigKey) {
 			return errs.Newf("内置参数【%s】不能删除", config.ConfigKey)
 		}
 		keys = append(keys, config.ConfigKey)
@@ -200,5 +213,7 @@ func DeleteConfigs(ctx context.Context, configIDs []int64) error {
 	if err := repository.DeleteConfigByIDs(ctx, configIDs); err != nil {
 		return err
 	}
-	return clearConfigCacheKeys(ctx, keys...)
+	return runPostCommit(ctx, func(postCtx context.Context) error {
+		return clearConfigCacheKeys(postCtx, keys...)
+	})
 }

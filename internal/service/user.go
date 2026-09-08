@@ -116,6 +116,12 @@ func CheckUserDataScope(ctx context.Context, operator *model.SysUser, userID int
 func CreateUser(ctx context.Context, operator *model.SysUser, user *model.SysUser, operatorName string) error {
 	userWriteMu.Lock()
 	defer userWriteMu.Unlock()
+	roleWriteMu.Lock()
+	defer roleWriteMu.Unlock()
+	postWriteMu.Lock()
+	defer postWriteMu.Unlock()
+	deptWriteMu.Lock()
+	defer deptWriteMu.Unlock()
 
 	// The client must never influence the auto-increment identity. It also must
 	// not smuggle the reserved role through a forged userId=1 on a create request.
@@ -163,6 +169,12 @@ func CreateUser(ctx context.Context, operator *model.SysUser, user *model.SysUse
 func UpdateUser(ctx context.Context, operator *model.SysUser, user *model.SysUser, operatorName string) error {
 	userWriteMu.Lock()
 	defer userWriteMu.Unlock()
+	roleWriteMu.Lock()
+	defer roleWriteMu.Unlock()
+	postWriteMu.Lock()
+	defer postWriteMu.Unlock()
+	deptWriteMu.Lock()
+	defer deptWriteMu.Unlock()
 
 	if user.UserID == 0 {
 		return errs.New("用户ID不能为空")
@@ -198,17 +210,19 @@ func UpdateUser(ctx context.Context, operator *model.SysUser, user *model.SysUse
 			return err
 		}
 	}
-	if err := repository.UpdateUser(ctx, user); err != nil {
-		return err
-	}
 	if user.Status == model.StatusDisable {
-		return nil
+		return repository.UpdateUser(ctx, user)
 	}
-	return RefreshOnlineUserByID(ctx, user.UserID)
+	return mutatePermissionState(ctx, []int64{user.UserID}, func() error {
+		return repository.UpdateUser(ctx, user)
+	})
 }
 
 // ChangeUserStatus 启用/停用用户。
 func ChangeUserStatus(ctx context.Context, operator *model.SysUser, userID int64, status, operatorName string) error {
+	userWriteMu.Lock()
+	defer userWriteMu.Unlock()
+
 	if err := checkUserStatus(status); err != nil {
 		return err
 	}
@@ -231,6 +245,9 @@ func ChangeUserStatus(ctx context.Context, operator *model.SysUser, userID int64
 
 // ResetUserPwd 重置密码。
 func ResetUserPwd(ctx context.Context, operator *model.SysUser, userID int64, password, operatorName string) error {
+	userWriteMu.Lock()
+	defer userWriteMu.Unlock()
+
 	if err := CheckUserAllowed(userID); err != nil {
 		return err
 	}
@@ -255,6 +272,9 @@ func ResetUserPwd(ctx context.Context, operator *model.SysUser, userID int64, pa
 
 // DeleteUsers 批量删除用户。
 func DeleteUsers(ctx context.Context, operator *model.SysUser, userIDs []int64) error {
+	userWriteMu.Lock()
+	defer userWriteMu.Unlock()
+
 	if len(userIDs) == 0 {
 		return errs.New("请选择要删除的用户")
 	}
@@ -323,6 +343,11 @@ func AuthRoleOfUser(ctx context.Context, operator *model.SysUser, userID int64) 
 
 // AssignUserRoles 保存用户的授权角色。
 func AssignUserRoles(ctx context.Context, operator *model.SysUser, userID int64, roleIDs []int64) error {
+	userWriteMu.Lock()
+	defer userWriteMu.Unlock()
+	roleWriteMu.Lock()
+	defer roleWriteMu.Unlock()
+
 	if _, err := checkUserIDs(ctx, operator, []int64{userID}); err != nil {
 		return err
 	}
@@ -334,11 +359,9 @@ func AssignUserRoles(ctx context.Context, operator *model.SysUser, userID int64,
 	if err := checkReservedAdminRole(userID, roleIDs); err != nil {
 		return err
 	}
-	if err := repository.ReplaceUserRoles(ctx, userID, roleIDs); err != nil {
-		return err
-	}
-	// 角色变了，该用户的在线会话权限要立刻刷新
-	return RefreshOnlineUserByID(ctx, userID)
+	return mutatePermissionState(ctx, []int64{userID}, func() error {
+		return repository.ReplaceUserRoles(ctx, userID, roleIDs)
+	})
 }
 
 // HashPassword 生成 bcrypt 哈希。

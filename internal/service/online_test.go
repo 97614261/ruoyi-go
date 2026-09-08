@@ -54,6 +54,32 @@ func TestPaginateOnlineUsersOutOfRange(t *testing.T) {
 	}
 }
 
+func TestCollectOnlineUsersLimitsScannedSessionsBeforeFiltering(t *testing.T) {
+	const total = 6000
+	visited := 0
+	items, truncated, err := collectOnlineUsers(
+		model.OnlineQuery{UserName: "never-matches"},
+		func(fn func(*model.LoginUser) error) (bool, error) {
+			for i := 0; i < maxOnlineScan; i++ {
+				visited++
+				if err := fn(&model.LoginUser{User: &model.SysUser{UserName: "user"}}); err != nil {
+					return false, err
+				}
+			}
+			return total > maxOnlineScan, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated || len(items) != 0 {
+		t.Fatalf("过滤无结果也必须按扫描数截断: truncated=%v items=%d", truncated, len(items))
+	}
+	if visited != maxOnlineScan {
+		t.Fatalf("最多应解码 %d 条，实际访问 %d 条", maxOnlineScan, visited)
+	}
+}
+
 func reversedOnlineUsers(users []model.UserOnline) []model.UserOnline {
 	result := slices.Clone(users)
 	slices.Reverse(result)
