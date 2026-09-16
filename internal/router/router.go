@@ -20,6 +20,10 @@ import (
 	"ruoyi-go/internal/service"
 )
 
+// generatedRouteRegistrars 由代码生成器产出的同包文件在 init 中登记。
+// 这样新增模块无需手工修改 registerAuthed，也不会引入反向依赖。
+var generatedRouteRegistrars []func(*gin.RouterGroup)
+
 // noRepeat 防重复提交，挂在**新增**路由上。
 //
 // 【为什么只挂新增，不挂修改】
@@ -141,6 +145,37 @@ func registerAuthed(r *gin.Engine, bodyLimit, multipartLimit gin.HandlerFunc) {
 	registerCommonFile(authed)
 	registerMonitor(authed)
 	registerJob(authed)
+	registerGen(authed)
+	for _, register := range generatedRouteRegistrars {
+		register(authed)
+	}
+}
+
+// registerGen 代码生成器。静态路径必须先于 /:tableId 注册。
+func registerGen(g *gin.RouterGroup) {
+	const title = "代码生成"
+	gen := g.Group("/tool/gen")
+	gen.GET("/list", middleware.HasPermission("tool:gen:list"), handler.GenList)
+	gen.GET("/db/list", middleware.HasPermission("tool:gen:list"), handler.GenDBList)
+	gen.GET("/column/:tableId", middleware.HasPermission("tool:gen:list"), handler.GenColumnList)
+	gen.POST("/importTable", noRepeat(), middleware.HasPermission("tool:gen:import"),
+		middleware.OperLog(title, model.BusinessTypeImport), handler.GenImport)
+	gen.POST("/createTable", noRepeat(), middleware.HasRole(model.AdminRoleKey),
+		middleware.OperLog("创建表", model.BusinessTypeOther), handler.GenCreateTable)
+	gen.GET("/preview/:tableId", middleware.HasPermission("tool:gen:preview"), handler.GenPreview)
+	gen.GET("/download/:tableName", middleware.HasPermission("tool:gen:code"),
+		middleware.OperLog(title, model.BusinessTypeGenCode), handler.GenDownload)
+	gen.GET("/genCode/:tableName", middleware.HasPermission("tool:gen:code"),
+		middleware.OperLog(title, model.BusinessTypeGenCode), handler.GenWriteCode)
+	gen.GET("/synchDb/:tableName", middleware.HasPermission("tool:gen:edit"),
+		middleware.OperLog(title, model.BusinessTypeUpdate), handler.GenSync)
+	gen.GET("/batchGenCode", middleware.HasPermission("tool:gen:code"),
+		middleware.OperLog(title, model.BusinessTypeGenCode), handler.GenBatchDownload)
+	gen.GET("/:tableId", middleware.HasPermission("tool:gen:query"), handler.GenGet)
+	gen.PUT("", middleware.HasPermission("tool:gen:edit"),
+		middleware.OperLog(title, model.BusinessTypeUpdate), handler.GenEdit)
+	gen.DELETE("/:tableIds", middleware.HasPermission("tool:gen:remove"),
+		middleware.OperLog(title, model.BusinessTypeDelete), handler.GenRemove)
 }
 
 // registerJob 定时任务与调度日志。

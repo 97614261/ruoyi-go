@@ -60,6 +60,16 @@ upload:
   # 对齐 Java 的 multipart 总请求上限；批量上传也不能超过该值。
   maxRequestSizeMB: 20
 
+gen:
+  author: ruoyi
+  # 仅作为生成记录的兼容字段；Go 文件仍按 internal 四层结构输出。
+  packageName: ruoyi-go
+  autoRemovePre: true
+  tablePrefixes: ["sys_"]
+  # 与 Java 默认值一致。开启后，自定义路径也只能位于 outputRoot 内。
+  allowOverwrite: false
+  outputRoot: "."
+
 log:
   # debug | info | warn | error
   level: debug

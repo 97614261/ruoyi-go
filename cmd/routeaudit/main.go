@@ -28,15 +28,18 @@ type routePair struct {
 }
 
 var (
-	goGroupPattern   = regexp.MustCompile(`(?m)(\w+)\s*:=\s*(\w+)\.Group\(\s*"([^"]*)"`)
-	goRoutePattern   = regexp.MustCompile(`(?m)(\w+)\.(GET|POST|PUT|DELETE)\(\s*"([^"]*)"`)
-	goPermPattern    = regexp.MustCompile(`HasPermission\("([^"]+)"\)`)
-	goHandlerPattern = regexp.MustCompile(`handler\.(\w+)`)
+	goGroupPattern     = regexp.MustCompile(`(?m)(\w+)\s*:=\s*(\w+)\.Group\(\s*"([^"]*)"`)
+	goRoutePattern     = regexp.MustCompile(`(?m)(\w+)\.(GET|POST|PUT|DELETE)\(\s*"([^"]*)"`)
+	goPermPattern      = regexp.MustCompile(`HasPermission\("([^"]+)"\)`)
+	goRolePattern      = regexp.MustCompile(`HasRole\("([^"]+)"\)`)
+	goAdminRolePattern = regexp.MustCompile(`HasRole\(model\.AdminRoleKey\)`)
+	goHandlerPattern   = regexp.MustCompile(`handler\.(\w+)`)
 
 	javaClassPattern   = regexp.MustCompile(`(?s)\bclass\s+\w+`)
 	javaMappingPattern = regexp.MustCompile(`(?s)@(GetMapping|PostMapping|PutMapping|DeleteMapping|RequestMapping)\s*(?:\((.*?)\))?`)
 	javaStringPattern  = regexp.MustCompile(`"([^"]*)"`)
 	javaPermPattern    = regexp.MustCompile(`hasPermi\('([^']+)'\)`)
+	javaRolePattern    = regexp.MustCompile(`hasRole\('([^']+)'\)`)
 	javaMethodPattern  = regexp.MustCompile(`(?s)\bpublic\s+[\w<>, ?\[\].]+\s+(\w+)\s*\(`)
 	pathParamPattern   = regexp.MustCompile(`\{[^/}]+\}`)
 )
@@ -45,7 +48,7 @@ func main() {
 	var goRouter, javaRoot, output string
 	flag.StringVar(&goRouter, "go-router", "internal/router/router.go", "Go router source")
 	flag.StringVar(&javaRoot, "java-root", "../RuoYi-Vue-master", "Java RuoYi source root")
-	flag.StringVar(&output, "out", "docs/API_ROUTE_COVERAGE_2026-08-25.md", "Markdown output path")
+	flag.StringVar(&output, "out", "docs/API_ROUTE_COVERAGE_CURRENT.md", "Markdown output path")
 	flag.Parse()
 
 	goRoutes, err := parseGoRouter(goRouter)
@@ -87,6 +90,10 @@ func parseGoRouter(path string) ([]route, error) {
 		permission, handler := "", ""
 		if found := goPermPattern.FindStringSubmatch(segment); len(found) > 0 {
 			permission = found[1]
+		} else if found := goRolePattern.FindStringSubmatch(segment); len(found) > 0 {
+			permission = "role:" + found[1]
+		} else if goAdminRolePattern.MatchString(segment) {
+			permission = "role:admin"
 		}
 		if found := goHandlerPattern.FindStringSubmatch(segment); len(found) > 0 {
 			handler = found[1]
@@ -120,10 +127,6 @@ func parseJavaControllers(root string) ([]route, []string, error) {
 			return nil
 		}
 		for _, item := range parseJavaController(text, filepath.ToSlash(path)) {
-			if item.Path == "/tool/gen" || strings.HasPrefix(item.Path, "/tool/gen/") {
-				excluded = append(excluded, item.Method+" "+item.Path+"（代码生成器）")
-				continue
-			}
 			if item.Path == "/test" || strings.HasPrefix(item.Path, "/test/") {
 				excluded = append(excluded, item.Method+" "+item.Path+"（Swagger 内存演示接口）")
 				continue
@@ -172,6 +175,8 @@ func parseJavaController(text, source string) []route {
 		permission := ""
 		if found := javaPermPattern.FindStringSubmatch(body[previousEnd:match[0]]); len(found) > 0 {
 			permission = found[1]
+		} else if found := javaRolePattern.FindStringSubmatch(body[previousEnd:match[0]]); len(found) > 0 {
+			permission = "role:" + found[1]
 		}
 		next := len(body)
 		if index+1 < len(matches) {
@@ -324,14 +329,14 @@ func buildReport(goRoutes, javaRoutes []route, excluded []string) string {
 		coveragePercent = float64(covered) * 100 / float64(matched)
 	}
 	var out strings.Builder
-	fmt.Fprintf(&out, "# 非代码生成器接口路由与对拍覆盖清单\n\n")
+	fmt.Fprintf(&out, "# 接口路由与对拍覆盖清单\n\n")
 	fmt.Fprintf(&out, "生成命令：`go run ./cmd/routeaudit -java-root ../RuoYi-Vue-master`\n\n")
 	fmt.Fprintf(&out, "## 汇总\n\n| 指标 | 数量 |\n|---|---:|\n")
-	fmt.Fprintf(&out, "| Go 路由 | %d |\n| Java 路由（排除代码生成器、Swagger 内存演示接口和 dev/test Profile） | %d |\n", len(goRoutes), len(javaRoutes))
+	fmt.Fprintf(&out, "| Go 路由 | %d |\n| Java 路由（排除 Swagger 内存演示接口和 dev/test Profile） | %d |\n", len(goRoutes), len(javaRoutes))
 	fmt.Fprintf(&out, "| 方法 + 结构化路径匹配 | %d |\n| 权限标识匹配 | %d |\n| 权限标识差异 | %d |\n", matched, permissionMatched, permissionDifferent)
 	fmt.Fprintf(&out, "| 已纳入自动双端探针的匹配路由 | %d/%d（%.2f%%） |\n\n", covered, matched, coveragePercent)
 	fmt.Fprintf(&out, "> “已纳入探针”只表示有自动执行入口；是否通过以对应实跑日志为准。\n")
-	fmt.Fprintf(&out, "> 部分破坏性写路由只验证未登录拒绝，不能把 130/130 解读为全部成功副作用已对拍。\n")
+	fmt.Fprintf(&out, "> 部分破坏性写路由只验证未登录拒绝；路由匹配数量不能解读为全部成功副作用已对拍。\n")
 	fmt.Fprintf(&out, "> 路径参数名会统一为 `{}` 比较，避免 `{id}` / `{userId}` 这种非契约差异。\n\n")
 	fmt.Fprintf(&out, "## 完整清单\n\n| 方法与路径 | Go | Java | 权限 | 自动双端证据 |\n|---|---|---|---|---|\n")
 	for _, pair := range pairs {

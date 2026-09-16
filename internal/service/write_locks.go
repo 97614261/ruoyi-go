@@ -15,5 +15,6 @@ var (
 	deptWriteMu         sync.Mutex
 	menuWriteMu         sync.Mutex
 	jobWriteMu          sync.Mutex
+	genWriteMu          sync.RWMutex
 	permissionRefreshMu sync.Mutex
 )

@@ -48,6 +48,35 @@ func register(g *gin.RouterGroup) {
 	}
 }
 
+func TestParseRoleRequirement(t *testing.T) {
+	java := `
+@RequestMapping("/tool/gen")
+public class GenController {
+    @PreAuthorize("@ss.hasRole('admin')")
+    @PostMapping("/createTable")
+    public AjaxResult createTableSave() { return null; }
+}`
+	routes := parseJavaController(java, "GenController.java")
+	if len(routes) != 1 || routes[0].Permission != "role:admin" {
+		t.Fatalf("java route=%#v", routes)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "router.go")
+	goSource := `package router
+func register(g *gin.RouterGroup) {
+    gen := g.Group("/tool/gen")
+    gen.POST("/createTable", middleware.HasRole(model.AdminRoleKey), handler.GenCreateTable)
+}`
+	if err := os.WriteFile(path, []byte(goSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	goRoutes, err := parseGoRouter(path)
+	if err != nil || len(goRoutes) != 1 || goRoutes[0].Permission != "role:admin" {
+		t.Fatalf("go routes=%#v err=%v", goRoutes, err)
+	}
+}
+
 func TestNormalizePathTreatsTrailingSlashAsAlias(t *testing.T) {
 	if got := normalizePath(joinPath("/system/user", "/")); got != "/system/user" {
 		t.Fatalf("got=%q", got)

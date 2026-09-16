@@ -19,7 +19,18 @@ type Config struct {
 	JWT     JWTConfig     `mapstructure:"jwt"`
 	Captcha CaptchaConfig `mapstructure:"captcha"`
 	Upload  UploadConfig  `mapstructure:"upload"`
+	Gen     GenConfig     `mapstructure:"gen"`
 	Log     LogConfig     `mapstructure:"log"`
+}
+
+// GenConfig 代码生成器配置。自定义路径写盘默认关闭；开启后也只能写入 OutputRoot。
+type GenConfig struct {
+	Author         string   `mapstructure:"author"`
+	PackageName    string   `mapstructure:"packageName"`
+	AutoRemovePre  bool     `mapstructure:"autoRemovePre"`
+	TablePrefixes  []string `mapstructure:"tablePrefixes"`
+	AllowOverwrite bool     `mapstructure:"allowOverwrite"`
+	OutputRoot     string   `mapstructure:"outputRoot"`
 }
 
 // UploadConfig 文件上传配置，对齐 Java 版的 ruoyi.profile。
@@ -154,6 +165,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("upload.maxSizeMB", 10)
 	v.SetDefault("upload.maxRequestSizeMB", 20)
 
+	v.SetDefault("gen.author", "ruoyi")
+	v.SetDefault("gen.packageName", "ruoyi-go")
+	v.SetDefault("gen.autoRemovePre", true)
+	v.SetDefault("gen.tablePrefixes", []string{"sys_"})
+	v.SetDefault("gen.allowOverwrite", false)
+	v.SetDefault("gen.outputRoot", ".")
+
 	v.SetDefault("log.level", "info")
 }
 
@@ -226,6 +244,19 @@ func (c *Config) validate() error {
 	}
 	if strings.TrimSpace(c.Upload.Path) == "" || c.Upload.URLPrefix != "/profile" {
 		return fmt.Errorf("upload.path 不能为空且 upload.urlPrefix 必须为 /profile")
+	}
+	genConfigured := c.Gen.Author != "" || c.Gen.PackageName != "" || c.Gen.OutputRoot != "" ||
+		len(c.Gen.TablePrefixes) > 0 || c.Gen.AutoRemovePre || c.Gen.AllowOverwrite
+	if genConfigured {
+		if strings.TrimSpace(c.Gen.Author) == "" || strings.TrimSpace(c.Gen.PackageName) == "" ||
+			strings.TrimSpace(c.Gen.OutputRoot) == "" {
+			return fmt.Errorf("gen.author、gen.packageName 和 gen.outputRoot 不能为空")
+		}
+		for _, prefix := range c.Gen.TablePrefixes {
+			if strings.TrimSpace(prefix) == "" {
+				return fmt.Errorf("gen.tablePrefixes 不能包含空值")
+			}
+		}
 	}
 	switch strings.ToLower(strings.TrimSpace(c.Log.Level)) {
 	case "debug", "info", "warn", "error":

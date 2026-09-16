@@ -14,6 +14,19 @@ import (
 	"syscall"
 	"time"
 
+	// 把 IANA 时区库嵌进二进制。
+	//
+	// Windows 没有系统 zoneinfo，Go 平时是回落到 $GOROOT/lib/time/zoneinfo.zip
+	// 找的；而发布构建用 -trimpath 会把编译进去的 GOROOT 一起剥掉，于是
+	// time.LoadLocation("Asia/Shanghai") 直接失败。表现是 go run 一切正常、
+	// 打包出来的 exe 一启动就报「解析 MySQL DSN 失败: unknown time zone」——
+	// DSN 里的 loc=Asia/Shanghai 由驱动回解时会走这个查找。
+	//
+	// 不要改成去掉 -trimpath（那会把构建机的绝对路径带进二进制），
+	// 也不要改成 FixedZone 绕开：嵌进来才能让二进制在任何机器上自洽，
+	// 代价是约 450KB。
+	_ "time/tzdata"
+
 	"ruoyi-go/internal/config"
 	"ruoyi-go/internal/middleware"
 	"ruoyi-go/internal/repository"
@@ -70,6 +83,9 @@ func run() error {
 	// 依赖数据库和 Redis 就绪，必须放在两者初始化之后
 	service.InitToken(cfg.JWT)
 	service.InitCaptcha(cfg.Captcha.Type)
+	if err := service.InitGenerator(cfg.Gen); err != nil {
+		return err
+	}
 
 	// 自定义校验规则必须在构建路由前注册
 	if err := validate.Register(); err != nil {

@@ -72,6 +72,32 @@ func HasPermission(perm string) gin.HandlerFunc {
 	}
 }
 
+// HasRole 校验角色标识。代码生成器的建表接口沿用 Java 的 admin 角色限制。
+func HasRole(roleKey string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		loginUser := CurrentUser(c)
+		if loginUser == nil || loginUser.User == nil {
+			unauthorized(c)
+			return
+		}
+		allowed := loginUser.User.IsAdmin()
+		if !allowed {
+			for _, role := range loginUser.User.Roles {
+				if role.RoleKey == roleKey {
+					allowed = true
+					break
+				}
+			}
+		}
+		if !allowed {
+			response.FailCode(c, response.CodeForbidden, "没有权限，请联系管理员授权")
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
 // CanReadConfigKey protects the dynamic config-key endpoint. Config managers
 // may read any key; user managers may only read the initial-password contract
 // value used by the user-management screen.
