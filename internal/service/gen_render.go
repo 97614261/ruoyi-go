@@ -202,8 +202,8 @@ func renderModelSource(table *model.GenTable) string {
 	fmt.Fprintf(&b, "// %s %s。\ntype %s struct {\n", safeComment(table.ClassName), safeComment(table.FunctionName), table.ClassName)
 	for _, column := range table.Columns {
 		field := exportedField(column.JavaField)
-		fmt.Fprintf(&b, "\t%s %s `gorm:\"column:%s\" json:\"%s\"%s%s` // %s\n",
-			field, goColumnType(column), column.ColumnName, column.JavaField, generatedBindingTag(column), generatedExcelTag(column), safeComment(column.ColumnComment))
+		fmt.Fprintf(&b, "\t%s %s `gorm:\"%s\" json:\"%s\"%s%s` // %s\n",
+			field, goColumnType(column), generatedGormTag(column), column.JavaField, generatedBindingTag(column), generatedExcelTag(column), safeComment(column.ColumnComment))
 	}
 	if table.TplCategory == "sub" && table.SubTable != nil {
 		fmt.Fprintf(&b, "\t%s []%s `gorm:\"-\" json:\"%s\"` // %s\n",
@@ -217,8 +217,8 @@ func renderModelSource(table *model.GenTable) string {
 			if strings.EqualFold(column.ColumnName, strings.TrimSpace(*table.SubTableFKName)) {
 				binding = ""
 			}
-			fmt.Fprintf(&b, "\t%s %s `gorm:\"column:%s\" json:\"%s\"%s` // %s\n",
-				exportedField(column.JavaField), goColumnType(column), column.ColumnName, column.JavaField, binding, safeComment(column.ColumnComment))
+			fmt.Fprintf(&b, "\t%s %s `gorm:\"%s\" json:\"%s\"%s` // %s\n",
+				exportedField(column.JavaField), goColumnType(column), generatedGormTag(column), column.JavaField, binding, safeComment(column.ColumnComment))
 		}
 		b.WriteString("}\n\n")
 	}
@@ -252,7 +252,11 @@ func renderRepositorySource(table *model.GenTable) string {
 	pk := table.PKColumn
 	var b strings.Builder
 	b.WriteString("package repository\n\nimport (\n\t\"context\"\n\t\"errors\"\n\t\"fmt\"\n\n\t\"gorm.io/gorm\"\n\n")
-	fmt.Fprintf(&b, "\t\"ruoyi-go/internal/model\"\n\t\"ruoyi-go/pkg/page\"\n)\n\n")
+	b.WriteString("\t\"ruoyi-go/internal/model\"\n")
+	if table.TplCategory == "tree" {
+		b.WriteString("\t\"ruoyi-go/pkg/errs\"\n")
+	}
+	b.WriteString("\t\"ruoyi-go/pkg/page\"\n)\n\n")
 	fmt.Fprintf(&b, "func %sFilter(db *gorm.DB, query model.%sQuery) *gorm.DB {\n", lowerFirst(class), class)
 	for _, column := range table.Columns {
 		if column.IsQuery != "1" {
@@ -300,7 +304,7 @@ func renderRepositorySource(table *model.GenTable) string {
 	b.WriteString("}\n\n")
 	fmt.Fprintf(&b, "func Update%s(ctx context.Context, target *model.%s) error {\n\tupdates := map[string]any{\n", class, class)
 	for _, column := range table.Columns {
-		if column.IsEdit == "1" && column.IsPK != "1" {
+		if generatedUpdateColumn(column) {
 			fmt.Fprintf(&b, "\t\t%q: target.%s,\n", column.ColumnName, exportedField(column.JavaField))
 		}
 	}
@@ -322,6 +326,16 @@ func renderRepositorySource(table *model.GenTable) string {
 		fmt.Fprintf(&b, "\treturn Transaction(ctx, func(tx *gorm.DB) error {\n\t\tif err := tx.Table(%q).Where(%q, ids).Delete(&model.%s{}).Error; err != nil { return fmt.Errorf(\"删除子表数据失败: %%w\", err) }\n",
 			table.SubTable.TableName, strings.TrimSpace(*table.SubTableFKName)+" IN ?", table.SubTable.ClassName)
 		fmt.Fprintf(&b, "\t\tif err := tx.Table(%q).Where(%q, ids).Delete(&model.%s{}).Error; err != nil { return fmt.Errorf(\"删除数据失败: %%w\", err) }\n\t\treturn nil\n\t})\n", tableName, pk.ColumnName+" IN ?", class)
+	} else if table.TplCategory == "tree" {
+		code := findColumnByName(table.Columns, table.TreeCode)
+		valueType := goColumnType(*code)
+		fmt.Fprintf(&b, "\tvar deletingCodes []%s\n", valueType)
+		fmt.Fprintf(&b, "\tif err := DB(ctx).Table(%q).Where(%q, ids).Pluck(%q, &deletingCodes).Error; err != nil { return fmt.Errorf(\"查询待删除节点失败: %%w\", err) }\n", tableName, pk.ColumnName+" IN ?", code.ColumnName)
+		b.WriteString("\tif len(deletingCodes) > 0 {\n\t\tvar childCount int64\n")
+		fmt.Fprintf(&b, "\t\tif err := DB(ctx).Table(%q).Where(%q, deletingCodes).Where(%q, deletingCodes).Count(&childCount).Error; err != nil { return fmt.Errorf(\"检查子节点失败: %%w\", err) }\n", tableName, table.TreeParentCode+" IN ?", table.TreeCode+" NOT IN ?")
+		b.WriteString("\t\tif childCount > 0 { return errs.New(\"存在子节点，不允许删除\") }\n\t}\n")
+		fmt.Fprintf(&b, "\tif err := DB(ctx).Table(%q).Where(%q, ids).Delete(&model.%s{}).Error; err != nil { return fmt.Errorf(\"删除数据失败: %%w\", err) }\n", tableName, pk.ColumnName+" IN ?", class)
+		b.WriteString("\treturn nil\n")
 	} else {
 		fmt.Fprintf(&b, "\tif err := DB(ctx).Table(%q).Where(%q, ids).Delete(&model.%s{}).Error; err != nil { return fmt.Errorf(\"删除数据失败: %%w\", err) }\n", tableName, pk.ColumnName+" IN ?", class)
 		b.WriteString("\treturn nil\n")
@@ -347,12 +361,12 @@ func renderTreeParentValidator(b *strings.Builder, table *model.GenTable) {
 	fmt.Fprintf(b, "\tvar rows []struct { CodeID %s `gorm:\"column:%s\"`; ParentID %s `gorm:\"column:%s\"` }\n", valueType, code.ColumnName, valueType, parent.ColumnName)
 	fmt.Fprintf(b, "\tif err := DB(ctx).Table(%q).Select(%q).Find(&rows).Error; err != nil { return fmt.Errorf(\"校验上级节点失败: %%w\", err) }\n", table.TableName, code.ColumnName+", "+parent.ColumnName)
 	fmt.Fprintf(b, "\tparents := make(map[%s]%s, len(rows))\n", valueType, valueType)
-	b.WriteString("\tfor _, row := range rows {\n\t\tif _, exists := parents[row.CodeID]; exists { return fmt.Errorf(\"树编码不唯一\") }\n\t\tparents[row.CodeID] = row.ParentID\n\t}\n")
+	b.WriteString("\tfor _, row := range rows {\n\t\tif _, exists := parents[row.CodeID]; exists { return errs.New(\"树编码不唯一\") }\n\t\tparents[row.CodeID] = row.ParentID\n\t}\n")
 	fmt.Fprintf(b, "\tseen := map[%s]struct{}{currentID: {}}\n\tnext := parentID\n", valueType)
 	fmt.Fprintf(b, "\tfor next != %s {\n", zero)
-	b.WriteString("\t\tif _, exists := seen[next]; exists { return fmt.Errorf(\"上级节点不能是当前节点或其子节点\") }\n")
-	b.WriteString("\t\tseen[next] = struct{}{}\n\t\tif len(seen) > 10000 { return fmt.Errorf(\"树层级超过安全上限或已经存在环\") }\n")
-	b.WriteString("\t\tparent, exists := parents[next]\n\t\tif !exists { return fmt.Errorf(\"上级节点不存在\") }\n\t\tnext = parent\n\t}\n\treturn nil\n}\n\n")
+	b.WriteString("\t\tif _, exists := seen[next]; exists { return errs.New(\"上级节点不能是当前节点或其子节点\") }\n")
+	b.WriteString("\t\tseen[next] = struct{}{}\n\t\tif len(seen) > 10000 { return errs.New(\"树层级超过安全上限或已经存在环\") }\n")
+	b.WriteString("\t\tparent, exists := parents[next]\n\t\tif !exists { return errs.New(\"上级节点不存在\") }\n\t\tnext = parent\n\t}\n\treturn nil\n}\n\n")
 }
 
 func renderSubBatchInsert(b *strings.Builder, table *model.GenTable, indent, dbName string) {
@@ -904,12 +918,33 @@ func zeroValueForColumn(column model.GenTableColumn) string {
 	}
 }
 
+func generatedGormTag(column model.GenTableColumn) string {
+	parts := []string{"column:" + column.ColumnName}
+	if column.IsPK == "1" {
+		parts = append(parts, "primaryKey")
+	}
+	if column.IsIncrement == "1" {
+		parts = append(parts, "autoIncrement")
+	}
+	return strings.Join(parts, ";")
+}
+
 func generatedBindingTag(column model.GenTableColumn) string {
-	if column.IsRequired == "1" && column.IsIncrement != "1" &&
+	// Gin/validator 的 required 会把 0 和 false 当作缺失。生成的实体同时承担请求 DTO，
+	// 无法区分“未传”与“显式传零值”，所以这里只对字符串生成 required；数值和布尔值
+	// 的必填/取值范围应由具体业务校验，避免树根 parent_id=0 等合法输入被拒绝。
+	if goColumnType(column) == "string" && column.IsRequired == "1" && column.IsIncrement != "1" &&
 		!containsFold([]string{"createBy", "createTime", "updateBy", "updateTime"}, column.JavaField) {
 		return ` binding:"required"`
 	}
 	return ""
+}
+
+func generatedUpdateColumn(column model.GenTableColumn) bool {
+	if column.IsPK == "1" {
+		return false
+	}
+	return column.IsEdit == "1" || containsFold([]string{"updateBy", "updateTime"}, column.JavaField)
 }
 
 func generatedExcelTag(column model.GenTableColumn) string {

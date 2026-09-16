@@ -66,6 +66,9 @@ func TestRenderGeneratedFilesProducesFormattedGoAndFrontend(t *testing.T) {
 	if !strings.Contains(findGeneratedContent(files, "internal/model/order.go"), `binding:"required"`) {
 		t.Fatal("generated model missed server-side required validation")
 	}
+	if !strings.Contains(findGeneratedContent(files, "internal/model/order.go"), `gorm:"column:order_id;primaryKey;autoIncrement"`) {
+		t.Fatal("generated model must mark auto-increment primary key for GORM id backfill")
+	}
 	if !strings.Contains(findGeneratedContent(files, "internal/service/order.go"), "target.OrderId = 0") {
 		t.Fatal("generated service must ignore client supplied auto-increment primary key")
 	}
@@ -107,7 +110,7 @@ func TestRenderGeneratedFilesSupportsTreeAndWebVariants(t *testing.T) {
 	table.TplCategory = "tree"
 	table.TreeCode, table.TreeParentCode, table.TreeName = "order_id", "parent_id", "order_name"
 	table.Params = map[string]any{"treeCode": "order_id", "treeParentCode": "parent_id", "treeName": "order_name"}
-	table.Columns = append(table.Columns, model.GenTableColumn{ColumnID: 3, ColumnName: "parent_id", ColumnComment: "上级", JavaType: "Long", JavaField: "parentId", IsInsert: "1", IsEdit: "1", IsList: "1", QueryType: "EQ", HTMLType: "input"})
+	table.Columns = append(table.Columns, model.GenTableColumn{ColumnID: 3, ColumnName: "parent_id", ColumnComment: "上级", JavaType: "Long", JavaField: "parentId", IsInsert: "1", IsEdit: "1", IsList: "1", IsRequired: "1", QueryType: "EQ", HTMLType: "input"})
 	for _, webType := range []string{"element-plus", "element-plus-typescript", "element-ui"} {
 		table.TplWebType = webType
 		files, err := renderGeneratedFiles(table)
@@ -124,12 +127,26 @@ func TestRenderGeneratedFilesSupportsTreeAndWebVariants(t *testing.T) {
 		}
 		repositoryCode := findGeneratedContent(files, "internal/repository/order.go")
 		serviceCode := findGeneratedContent(files, "internal/service/order.go")
+		modelCode := findGeneratedContent(files, "internal/model/order.go")
 		if !strings.Contains(repositoryCode, "func ValidateDemoOrderParent") ||
-			!strings.Contains(repositoryCode, "上级节点不能是当前节点或其子节点") ||
+			!strings.Contains(repositoryCode, `errs.New("上级节点不能是当前节点或其子节点")`) ||
 			!strings.Contains(repositoryCode, "Find(&rows)") ||
 			strings.Contains(repositoryCode, "Take(&row)") ||
 			!strings.Contains(serviceCode, "repository.ValidateDemoOrderParent") {
 			t.Fatalf("%s tree output missed server-side cycle validation", webType)
+		}
+		if strings.Contains(generatedFieldLine(modelCode, "ParentId"), `binding:"required"`) {
+			t.Fatalf("%s tree root parent id 0 must not be rejected as missing", webType)
+		}
+		updateCode := generatedFunctionSource(repositoryCode, "UpdateDemoOrder")
+		deleteCode := generatedFunctionSource(repositoryCode, "DeleteDemoOrderByIDs")
+		if !strings.Contains(updateCode, ".Updates(updates)") || strings.Contains(updateCode, "deletingCodes") {
+			t.Fatalf("%s tree update path was replaced by delete validation", webType)
+		}
+		if !strings.Contains(deleteCode, "Pluck(\"order_id\", &deletingCodes)") ||
+			!strings.Contains(deleteCode, "Count(&childCount)") ||
+			!strings.Contains(deleteCode, `errs.New("存在子节点，不允许删除")`) {
+			t.Fatalf("%s tree output missed child-safe delete guard", webType)
 		}
 		if webType == "element-ui" {
 			if !strings.Contains(vue, "<el-cascader") {
@@ -192,12 +209,37 @@ func TestRenderGeneratedFilesSupportsTransactionalSubTable(t *testing.T) {
 	vue := findGeneratedContent(files, "vue/src/views/demo/order/index.vue")
 	for label, pair := range map[string][2]string{
 		"model child list":         {modelCode, "DemoOrderItemList []DemoOrderItem"},
+		"model child primary key":  {modelCode, `gorm:"column:item_id;primaryKey;autoIncrement"`},
 		"repository transaction":   {repoCode, "return Transaction(ctx"},
 		"repository child replace": {repoCode, "清理子表数据失败"},
 		"frontend child editor":    {vue, "addSubRow"},
 	} {
 		if !strings.Contains(pair[0], pair[1]) {
 			t.Fatalf("%s missing %q", label, pair[1])
+		}
+	}
+}
+
+func TestRenderGeneratedFilesPersistsUpdateAuditColumns(t *testing.T) {
+	table := sampleRenderTable()
+	table.Columns = append(table.Columns,
+		model.GenTableColumn{ColumnID: 3, ColumnName: "update_by", JavaType: "String", JavaField: "updateBy", IsEdit: "0", QueryType: "EQ", HTMLType: "input"},
+		model.GenTableColumn{ColumnID: 4, ColumnName: "update_time", JavaType: "Date", JavaField: "updateTime", IsEdit: "0", QueryType: "EQ", HTMLType: "datetime"},
+	)
+	files, err := renderGeneratedFiles(table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoCode := findGeneratedContent(files, "internal/repository/order.go")
+	serviceCode := findGeneratedContent(files, "internal/service/order.go")
+	for label, pair := range map[string][2]string{
+		"update operator assignment":  {serviceCode, "target.UpdateBy = operator"},
+		"update time assignment":      {serviceCode, "target.UpdateTime = types.Now()"},
+		"update operator persistence": {repoCode, `"update_by":   target.UpdateBy`},
+		"update time persistence":     {repoCode, `"update_time": target.UpdateTime`},
+	} {
+		if !strings.Contains(pair[0], pair[1]) {
+			t.Fatalf("%s missing %q\n%s", label, pair[1], pair[0])
 		}
 	}
 }
@@ -226,4 +268,25 @@ func findGeneratedContent(files []generatedFile, path string) string {
 		}
 	}
 	return ""
+}
+
+func generatedFieldLine(source, field string) string {
+	for _, line := range strings.Split(source, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), field+" ") {
+			return line
+		}
+	}
+	return ""
+}
+
+func generatedFunctionSource(source, name string) string {
+	start := strings.Index(source, "func "+name+"(")
+	if start < 0 {
+		return ""
+	}
+	rest := source[start:]
+	if end := strings.Index(rest[1:], "\nfunc "); end >= 0 {
+		return rest[:end+1]
+	}
+	return rest
 }
