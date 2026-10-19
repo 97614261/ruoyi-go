@@ -10,6 +10,7 @@ const (
 
 // SysDept 部门表 sys_dept。
 type SysDept struct {
+	TenantRecord
 	DeptID   int64 `gorm:"column:dept_id;primaryKey;autoIncrement" json:"deptId"`
 	ParentID int64 `gorm:"column:parent_id" json:"parentId"`
 	// Ancestors 祖级路径，形如 "0,100,101"，由服务端计算，不接受前端提交

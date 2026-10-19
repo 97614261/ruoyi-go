@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"log/slog"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -24,6 +25,10 @@ const ctxKeyLoginUser = "ruoyi:loginUser"
 func Auth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := jwtx.StripPrefix(c.GetHeader("Authorization"))
+		// Only read-only media routes accept cookies; business APIs remain bearer-only.
+		if token == "" && c.Request.Method == "GET" && strings.HasPrefix(c.Request.URL.Path, "/profile/") {
+			token, _ = c.Cookie("ruoyi-mt-media")
+		}
 		if token == "" {
 			unauthorized(c)
 			return
@@ -42,6 +47,12 @@ func Auth() gin.HandlerFunc {
 		}
 
 		// 续期失败不影响本次请求，最坏情况是会话按原有 TTL 过期
+		ctx, err = service.ValidateSessionTenant(ctx, loginUser)
+		if err != nil {
+			unauthorized(c)
+			return
+		}
+		c.Request = c.Request.WithContext(ctx)
 		if err := service.VerifyToken(ctx, loginUser); err != nil {
 			slog.Warn("刷新会话失败", "userId", loginUser.UserID, "err", err)
 		}

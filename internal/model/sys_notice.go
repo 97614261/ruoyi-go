@@ -7,6 +7,7 @@ import "ruoyi-go/pkg/types"
 // 【注意】notice_content 在库里是 longblob。Go 侧必须建模成 string，
 // 若用 []byte，encoding/json 会把它编码成 base64，前端拿到的是乱码。
 type SysNotice struct {
+	TenantRecord
 	NoticeID    int64  `gorm:"column:notice_id;primaryKey;autoIncrement" json:"noticeId"`
 	NoticeTitle string `gorm:"column:notice_title" json:"noticeTitle" binding:"notblank,xss,max=50"`
 	// NoticeType 取值来自字典 sys_notice_type，不要写 oneof

@@ -13,6 +13,7 @@ import (
 	"ruoyi-go/pkg/errs"
 	"ruoyi-go/pkg/page"
 	"ruoyi-go/pkg/redisx"
+	"ruoyi-go/pkg/tenantctx"
 	"ruoyi-go/pkg/types"
 )
 
@@ -24,7 +25,10 @@ const configCacheTTL = 30 * time.Minute
 // 缓存故障一律降级到数据库，不让缓存影响功能。
 // 缓存使用有限 TTL；修改参数时推进代数并主动清理，旧数据库快照不能越过代数写回。
 func GetConfigValueByKey(ctx context.Context, configKey string) (string, error) {
-	cacheKey := redisx.SysConfigKey(configKey)
+	if _, err := tenantctx.Require(ctx); err != nil {
+		return "", err
+	}
+	cacheKey := redisx.TenantConfigKey(ctx, configKey)
 
 	value, err := redisx.GetConfigCache(ctx, cacheKey, configCacheTTL)
 	if err == nil {
@@ -67,7 +71,7 @@ func ClearConfigCache(ctx context.Context, configKey string) error {
 	if err := redisx.InvalidateConfigCache(ctx); err != nil {
 		return err
 	}
-	return redisx.ScanKeys(ctx, redisx.KeySysConfig, 100, func(key string) error {
+	return redisx.ScanKeys(ctx, redisx.TenantKey(ctx, redisx.KeySysConfig, ""), 100, func(key string) error {
 		if redisx.IsConfigCacheMetadataKey(key) {
 			return nil
 		}
@@ -79,7 +83,7 @@ func clearConfigCacheKeys(ctx context.Context, configKeys ...string) error {
 	keys := make([]string, 0, len(configKeys))
 	for _, configKey := range configKeys {
 		if configKey != "" {
-			keys = append(keys, redisx.SysConfigKey(configKey))
+			keys = append(keys, redisx.TenantConfigKey(ctx, configKey))
 		}
 	}
 	return redisx.InvalidateConfigCache(ctx, keys...)

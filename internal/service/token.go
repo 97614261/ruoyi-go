@@ -322,6 +322,10 @@ func GetLoginUser(ctx context.Context, tokenStr string) (*model.LoginUser, error
 	if err != nil || loginUser == nil {
 		return loginUser, err
 	}
+	ctx, err = ValidateSessionTenant(ctx, loginUser)
+	if err != nil {
+		return nil, err
+	}
 	if permissionRevocations.isPending(loginUser.UserID) {
 		return nil, nil
 	}
@@ -383,6 +387,11 @@ func GetLoginUserByKey(ctx context.Context, loginUserKey string) (*model.LoginUs
 	var loginUser model.LoginUser
 	if err := json.Unmarshal(raw, &loginUser); err != nil {
 		return nil, fmt.Errorf("反序列化会话失败: %w", err)
+	}
+	// TenantID is deliberately absent from public user DTOs. Redis session owns
+	// the verified tenant binding; restore it before using the embedded user.
+	if loginUser.User != nil {
+		loginUser.User.TenantID = loginUser.TenantID
 	}
 	generation, err := SessionGeneration(ctx, loginUser.UserID)
 	if err != nil {

@@ -72,7 +72,7 @@ func GenerateCaptcha(ctx context.Context) (string, string, error) {
 	}
 
 	id := uuid.NewString()
-	key := redisx.CaptchaKey(id)
+	key := redisx.TenantKey(ctx, redisx.KeyCaptchaCode, id)
 	if err := redisx.C().Set(ctx, key, answer, captchaTTL).Err(); err != nil {
 		return "", "", fmt.Errorf("写入验证码失败: %w", err)
 	}
@@ -86,7 +86,7 @@ func VerifyCaptcha(ctx context.Context, id, code string) error {
 	if id == "" || code == "" {
 		return errs.New("验证码错误")
 	}
-	key := redisx.CaptchaKey(id)
+	key := redisx.TenantKey(ctx, redisx.KeyCaptchaCode, id)
 
 	answer, err := consumeCaptchaScript.Run(ctx, redisx.C(), []string{key}).Text()
 

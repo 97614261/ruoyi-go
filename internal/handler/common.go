@@ -12,6 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ruoyi-go/internal/service"
+	"ruoyi-go/pkg/errs"
 	"ruoyi-go/pkg/response"
 	"ruoyi-go/pkg/types"
 	"ruoyi-go/pkg/upload"
@@ -19,6 +21,8 @@ import (
 
 // maxUploadFiles 单次批量上传的文件数上限。
 const maxUploadFiles = 20
+
+var forgetUploadedFile = service.ForgetFile
 
 // CommonUpload POST /common/upload
 //
@@ -32,7 +36,7 @@ func CommonUpload(c *gin.Context) {
 		return
 	}
 
-	relURL, err := saveUpload(fileHeader)
+	relURL, err := saveScopedUpload(c, fileHeader, "upload")
 	if err != nil {
 		response.Fail(c, uploadFailureMessage(c, err))
 		return
@@ -69,7 +73,7 @@ func CommonUploads(c *gin.Context) {
 	var urls, fileNames, newFileNames, originalFilenames []string
 	saved := make([]string, 0, len(files))
 	for _, fileHeader := range files {
-		relURL, err := saveUpload(fileHeader)
+		relURL, err := saveScopedUpload(c, fileHeader, "upload")
 		if err != nil {
 			rollbackUploads(c, saved)
 			response.Fail(c, uploadFailureMessage(c, err))
@@ -91,6 +95,9 @@ func CommonUploads(c *gin.Context) {
 }
 
 func uploadFailureMessage(c *gin.Context, err error) string {
+	if biz := errs.As(err); biz != nil {
+		return biz.Msg
+	}
 	if message, ok := upload.ClientMessage(err); ok {
 		return message
 	}
@@ -100,7 +107,8 @@ func uploadFailureMessage(c *gin.Context, err error) string {
 
 func rollbackUploads(c *gin.Context, resources []string) {
 	for _, resource := range resources {
-		removed, err := upload.RemoveManagedFile(uploadCfg.Path, uploadCfg.URLPrefix, "upload", resource)
+		removed, err := upload.RemoveManagedFile(uploadCfg.Path, uploadCfg.URLPrefix, tenantFileDir(c, "upload"), resource)
+		_ = forgetUploadedFile(c.Request.Context(), resource)
 		if err != nil {
 			slog.WarnContext(c.Request.Context(), "回滚批量上传文件失败", "resource", resource, "err", err)
 			continue
@@ -117,12 +125,16 @@ func rollbackUploads(c *gin.Context, resources []string) {
 // 前端封装在 plugins/download.js 的 download.name()。
 func CommonDownload(c *gin.Context) {
 	fileName := c.Query("fileName")
+	if _, err := service.AccessibleFile(c.Request.Context(), uploadCfg.URLPrefix+"/"+fileName); err != nil {
+		response.FailDownload(c, response.CodeForbidden, "文件不存在或无权访问")
+		return
+	}
 	if !upload.CheckAllowDownload(fileName) {
 		response.FailDownload(c, response.CodeError, "文件名称("+fileName+")非法，不允许下载。")
 		return
 	}
 
-	absPath, err := upload.SafeJoinExisting(filepath.Join(uploadCfg.Path, upload.DownloadSubDir), fileName)
+	absPath, err := upload.SafeJoinExisting(uploadCfg.Path, fileName)
 	if err != nil {
 		response.FailDownload(c, response.CodeError, "文件名称("+fileName+")非法，不允许下载。")
 		return
@@ -141,6 +153,10 @@ func CommonDownload(c *gin.Context) {
 // 前端封装在 plugins/download.js 的 download.resource()。
 func CommonDownloadResource(c *gin.Context) {
 	resource := c.Query("resource")
+	if _, err := service.AccessibleFile(c.Request.Context(), resource); err != nil {
+		response.FailDownload(c, response.CodeForbidden, "文件不存在或无权访问")
+		return
+	}
 	if !upload.CheckAllowDownload(resource) {
 		response.FailDownload(c, response.CodeError, "资源文件("+resource+")非法，不允许下载。")
 		return
@@ -206,6 +222,8 @@ func nameAfterUnderscore(name string) string {
 	return name
 }
 
+// Legacy low-level test helper. HTTP handlers must use saveScopedUpload so
+// tenant paths and file ownership records are both present.
 func saveUpload(fileHeader *multipart.FileHeader) (string, error) {
 	return upload.Save(fileHeader, upload.Options{
 		BaseDir:    uploadCfg.Path,
@@ -217,16 +235,8 @@ func saveUpload(fileHeader *multipart.FileHeader) (string, error) {
 	})
 }
 
-// absoluteURL 拼出带协议和域名的完整地址。
-//
-// Java 版用 ServerConfig.getUrl() 拼，富文本编辑器的 <img src> 需要完整地址。
-// 走反代时优先信 X-Forwarded-Proto，否则按 TLS 状态判断。
+// absoluteURL 在多租户前端返回同源相对URL，图片请求经代理并携带媒体会话。
+// 不再相信任意 X-Forwarded-Proto 拼出另一个来源的公开文件地址。
 func absoluteURL(c *gin.Context, relURL string) string {
-	scheme := "http"
-	if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
-		scheme = proto
-	} else if c.Request.TLS != nil {
-		scheme = "https"
-	}
-	return scheme + "://" + c.Request.Host + relURL
+	return relURL
 }

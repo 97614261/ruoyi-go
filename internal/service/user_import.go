@@ -179,7 +179,7 @@ func importOneUser(ctx context.Context, operator *model.SysUser, user *model.Sys
 	if err := validate.Struct(user); err != nil {
 		return 0, "", errs.New(firstValidationMessage(err))
 	}
-	if err := CheckUserAllowed(existing.UserID); err != nil {
+	if err := CheckUserAllowed(ctx, existing.UserID); err != nil {
 		return 0, "", err
 	}
 	user.UserID = existing.UserID

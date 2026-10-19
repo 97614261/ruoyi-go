@@ -18,6 +18,7 @@ import (
 	"ruoyi-go/internal/model"
 	"ruoyi-go/internal/service"
 	"ruoyi-go/pkg/asyncx"
+	"ruoyi-go/pkg/tenantctx"
 	"ruoyi-go/pkg/types"
 )
 
@@ -35,7 +36,7 @@ const (
 
 // sensitiveParamNames 集中维护不可进入请求日志和操作日志的字段名。
 // 匹配不区分大小写，与 encoding/json 的字段绑定规则一致。
-var sensitiveParamNames = []string{"password", "oldPassword", "newPassword", "confirmPassword"}
+var sensitiveParamNames = []string{"password", "oldPassword", "newPassword", "confirmPassword", "operatorPassword"}
 
 var operLogPool = asyncx.NewPool(4, 256)
 
@@ -69,8 +70,10 @@ func OperLog(title string, businessType int) gin.HandlerFunc {
 
 		// 异步写库：日志不该拖慢请求，也不该因为写失败影响业务结果。
 		// 必须用新的 context —— 请求的 ctx 在 handler 返回后就被取消了。
+		identity := tenantctx.Get(c.Request.Context())
 		writeLog := func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx = tenantctx.With(ctx, identity.ID, identity.Platform)
 			defer cancel()
 			if err := service.RecordOperLog(ctx, record); err != nil {
 				slog.Warn("记录操作日志失败", "title", title, "err", err)

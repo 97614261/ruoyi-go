@@ -90,9 +90,16 @@ func GetUser(ctx context.Context, operator *model.SysUser, userID int64) (*model
 }
 
 // CheckUserAllowed 超级管理员不允许被修改、停用或删除。
-func CheckUserAllowed(userID int64) error {
-	if userID == model.AdminUserID {
-		return errs.New("不允许操作超级管理员用户")
+func CheckUserAllowed(ctx context.Context, userID int64) error {
+	u, err := repository.SelectUserByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if u == nil {
+		return errs.New("用户不存在或无权访问")
+	}
+	if u.IsAdmin() {
+		return errs.New("管理员账号请通过个人中心或租户交接流程维护")
 	}
 	return nil
 }
@@ -126,6 +133,7 @@ func CreateUser(ctx context.Context, operator *model.SysUser, user *model.SysUse
 	// The client must never influence the auto-increment identity. It also must
 	// not smuggle the reserved role through a forged userId=1 on a create request.
 	user.UserID = 0
+	user.UserType = "00"
 	if err := checkUserRelatedScope(ctx, operator, user); err != nil {
 		return err
 	}
@@ -179,7 +187,7 @@ func UpdateUser(ctx context.Context, operator *model.SysUser, user *model.SysUse
 	if user.UserID == 0 {
 		return errs.New("用户ID不能为空")
 	}
-	if err := CheckUserAllowed(user.UserID); err != nil {
+	if err := CheckUserAllowed(ctx, user.UserID); err != nil {
 		return err
 	}
 	if err := CheckUserDataScope(ctx, operator, user.UserID); err != nil {
@@ -226,7 +234,7 @@ func ChangeUserStatus(ctx context.Context, operator *model.SysUser, userID int64
 	if err := checkUserStatus(status); err != nil {
 		return err
 	}
-	if err := CheckUserAllowed(userID); err != nil {
+	if err := CheckUserAllowed(ctx, userID); err != nil {
 		return err
 	}
 	if err := CheckUserDataScope(ctx, operator, userID); err != nil {
@@ -248,7 +256,7 @@ func ResetUserPwd(ctx context.Context, operator *model.SysUser, userID int64, pa
 	userWriteMu.Lock()
 	defer userWriteMu.Unlock()
 
-	if err := CheckUserAllowed(userID); err != nil {
+	if err := CheckUserAllowed(ctx, userID); err != nil {
 		return err
 	}
 	if err := CheckUserDataScope(ctx, operator, userID); err != nil {
@@ -283,12 +291,16 @@ func DeleteUsers(ctx context.Context, operator *model.SysUser, userIDs []int64) 
 	if err != nil {
 		return err
 	}
+	protected, err := repository.HasProtectedUsers(ctx, userIDs)
+	if err != nil {
+		return err
+	}
+	if protected {
+		return errs.New("不能删除企业所有者或平台管理员")
+	}
 	for _, userID := range userIDs {
 		if operator != nil && userID == operator.UserID {
 			return errs.New("当前用户不能删除")
-		}
-		if err := CheckUserAllowed(userID); err != nil {
-			return err
 		}
 	}
 	if err := RevokeUserSessions(ctx, userIDs...); err != nil {
@@ -332,7 +344,7 @@ func AuthRoleOfUser(ctx context.Context, operator *model.SysUser, userID int64) 
 
 	result := make([]model.SysRole, 0, len(roles))
 	for _, role := range roles {
-		if role.IsAdmin() && userID != model.AdminUserID {
+		if role.IsAdmin() && !user.IsAdmin() {
 			continue
 		}
 		role.Flag = assigned[role.RoleID]
@@ -356,7 +368,7 @@ func AssignUserRoles(ctx context.Context, operator *model.SysUser, userID int64,
 	if err != nil {
 		return err
 	}
-	if err := checkReservedAdminRole(userID, roleIDs); err != nil {
+	if err := checkReservedTenantAdminRole(ctx, userID, roleIDs); err != nil {
 		return err
 	}
 	return mutatePermissionState(ctx, []int64{userID}, func() error {
@@ -384,7 +396,7 @@ func checkUserRelatedScope(ctx context.Context, operator *model.SysUser, user *m
 	if err != nil {
 		return err
 	}
-	if err := checkReservedAdminRole(user.UserID, roleIDs); err != nil {
+	if err := checkReservedTenantAdminRole(ctx, user.UserID, roleIDs); err != nil {
 		return err
 	}
 	postIDs, err := checkPostIDs(ctx, user.PostIDs)
@@ -393,18 +405,6 @@ func checkUserRelatedScope(ctx context.Context, operator *model.SysUser, user *m
 	}
 	user.RoleIDs = roleIDs
 	user.PostIDs = postIDs
-	return nil
-}
-
-func checkReservedAdminRole(userID int64, roleIDs []int64) error {
-	if userID == model.AdminUserID {
-		return nil
-	}
-	for _, roleID := range roleIDs {
-		if roleID == model.AdminRoleID {
-			return errs.New("不允许给普通用户分配超级管理员角色")
-		}
-	}
 	return nil
 }
 

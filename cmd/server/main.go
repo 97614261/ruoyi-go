@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -65,6 +67,12 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	probeCtx, probeCancel := context.WithTimeout(ctx, 5*time.Second)
+	schemaErr := repository.VerifyTenantSchema(probeCtx)
+	probeCancel()
+	if schemaErr != nil {
+		return schemaErr
+	}
 
 	if err := redisx.Init(ctx, redisx.Options{
 		Addr:     cfg.Redis.Addr,
@@ -99,7 +107,7 @@ func run() error {
 	}
 
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
+		Addr:         net.JoinHostPort(cfg.Server.Host, strconv.Itoa(cfg.Server.Port)),
 		Handler:      router.New(cfg),
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,

@@ -57,6 +57,12 @@ return current
 // 每个失败分支都要写登录日志 —— 登录日志页面靠它，
 // 而且"某账号连续失败 N 次"是排查撞库的主要线索。
 func Login(ctx context.Context, body model.LoginBody, ip, userAgent string) (string, error) {
+	var tenant *model.SysTenant
+	var tenantErr error
+	ctx, tenant, tenantErr = LoginTenant(ctx, body.TenantCode)
+	if tenantErr != nil {
+		return "", tenantErr
+	}
 	browser, os := parseUserAgent(userAgent)
 	// fail 统一记录失败日志并返回错误
 	fail := func(err error) (string, error) {
@@ -92,7 +98,7 @@ func Login(ctx context.Context, body model.LoginBody, ip, userAgent string) (str
 	if user != nil {
 		retryUserName = user.UserName
 	}
-	retryKey := redisx.PwdErrCntKey(retryUserName)
+	retryKey := redisx.TenantPasswordKey(ctx, retryUserName)
 	count, err := currentRetryCount(ctx, retryKey)
 	if err != nil {
 		return "", err
@@ -157,6 +163,8 @@ func Login(ctx context.Context, body model.LoginBody, ip, userAgent string) (str
 			return "", err
 		}
 		loginUser := &model.LoginUser{
+			TenantID:          tenant.TenantID,
+			TenantVersion:     tenant.Version,
 			UserID:            user.UserID,
 			DeptID:            user.DeptID,
 			IPAddr:            ip,

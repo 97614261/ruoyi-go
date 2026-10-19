@@ -107,10 +107,10 @@ func DeleteJobLogByIDs(ctx context.Context, ids []int64) error {
 
 // CleanJobLog 清空调度日志。
 //
-// 用 TRUNCATE 而不是 DELETE：日志表可能几十万行，DELETE 会写满 binlog
-// 和 undo，还会把自增 ID 留在原地。与 Java 版 cleanJobLog 的语义一致。
+// 租户守卫自动附加归属条件。禁止 TRUNCATE，否则会清理其他企业日志。
+// 全局自增 ID 不重置；大租户日志的分批保留策略需要单独设计和压测。
 func CleanJobLog(ctx context.Context) error {
-	if err := DB(ctx).Exec("TRUNCATE TABLE sys_job_log").Error; err != nil {
+	if err := DB(ctx).Where("1 = 1").Delete(&model.SysJobLog{}).Error; err != nil {
 		return fmt.Errorf("清空调度日志失败: %w", err)
 	}
 	return nil

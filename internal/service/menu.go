@@ -82,7 +82,14 @@ func SelectMenuTreeByUserID(ctx context.Context, userID int64) ([]*model.SysMenu
 		menus []model.SysMenu
 		err   error
 	)
-	if userID == model.AdminUserID {
+	user, loadErr := repository.SelectUserByID(ctx, userID)
+	if loadErr != nil {
+		return nil, loadErr
+	}
+	if user == nil {
+		return nil, errs.New("用户不存在")
+	}
+	if user.IsAdmin() {
 		menus, err = repository.SelectMenuTreeAll(ctx)
 	} else {
 		menus, err = repository.SelectMenuTreeByUserID(ctx, userID)

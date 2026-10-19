@@ -19,6 +19,10 @@ configs/application.local.yml
 configs/*.local.yml
 /logs/
 /uploadPath/
+/uploadPath-mt/
+/web/node_modules/
+/web/dist/
+/web/.vite/
 .env
 
 # IDE

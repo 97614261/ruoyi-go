@@ -2,6 +2,7 @@ package handler
 
 import (
 	"log/slog"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 
@@ -18,6 +19,11 @@ import (
 // 关闭验证码时只返回 captchaEnabled，不返回 uuid 和 img。
 func Captcha(c *gin.Context) {
 	ctx := c.Request.Context()
+	ctx, _, err := service.LoginTenant(ctx, c.Query("tenantCode"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
 
 	enabled, err := service.CaptchaEnabled(ctx)
 	if err != nil {
@@ -56,6 +62,10 @@ func Login(c *gin.Context) {
 		fail(c, err)
 		return
 	}
+	c.SetSameSite(http.SameSiteStrictMode)
+	// Browser-session cookie; actual validity is always controlled by Redis TTL
+	// and tenant version, so media does not expire while bearer sessions renew.
+	c.SetCookie("ruoyi-mt-media", token, 0, "/", "", c.Request.TLS != nil, true)
 	response.New(response.CodeSuccess, response.MsgSuccess).Put("token", token).JSON(c)
 }
 
@@ -63,18 +73,7 @@ func Login(c *gin.Context) {
 //
 // 是否开放注册由 sys_config 的 sys.account.registerUser 控制，默认关闭。
 func Register(c *gin.Context) {
-	var body model.RegisterBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		response.Fail(c, "注册信息不完整")
-		return
-	}
-
-	err := service.Register(c.Request.Context(), body, c.ClientIP(), c.GetHeader("User-Agent"))
-	if err != nil {
-		fail(c, err)
-		return
-	}
-	response.Ok(c)
+	response.Fail(c, "当前版本由平台开通企业，不开放自助注册")
 }
 
 // Logout POST /logout
@@ -82,6 +81,7 @@ func Register(c *gin.Context) {
 // 无论令牌是否有效都返回成功 —— 前端点退出时会话可能已经过期，
 // 这时候报错只会让用户卡在登录页。
 func Logout(c *gin.Context) {
+	c.SetCookie("ruoyi-mt-media", "", -1, "/", "", c.Request.TLS != nil, true)
 	token := jwtx.StripPrefix(c.GetHeader("Authorization"))
 	if token != "" {
 		if claims, err := service.ParseToken(token); err == nil {
@@ -96,7 +96,7 @@ func Logout(c *gin.Context) {
 // GetInfo GET /getInfo
 //
 // 平铺字段：user、roles、permissions、pwdChrtype、
-// isDefaultModifyPwd、isPasswordExpired（全部不在 data 里）。
+// isDefaultModifyPwd、isPasswordExpired，以及多租户分支的 identity（全部不在 data 里）。
 func GetInfo(c *gin.Context) {
 	ctx := c.Request.Context()
 	loginUser := middleware.CurrentUser(c)
@@ -120,6 +120,11 @@ func GetInfo(c *gin.Context) {
 		}
 	}
 
+	identity, err := service.CurrentIdentity(ctx, user)
+	if err != nil {
+		fail(c, err)
+		return
+	}
 	chrtype, err := service.PasswordChrtype(ctx)
 	if err != nil {
 		fail(c, err)
@@ -138,6 +143,7 @@ func GetInfo(c *gin.Context) {
 
 	response.New(response.CodeSuccess, response.MsgSuccess).
 		Put("user", contractLoginUser(*user)).
+		Put("identity", identity).
 		Put("roles", roles).
 		Put("permissions", permissions).
 		Put("pwdChrtype", chrtype).

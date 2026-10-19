@@ -4,6 +4,7 @@ package model
 
 // SysRoleMenu 角色和菜单关联表 sys_role_menu。
 type SysRoleMenu struct {
+	TenantRecord
 	RoleID int64 `gorm:"column:role_id;primaryKey" json:"roleId"`
 	MenuID int64 `gorm:"column:menu_id;primaryKey" json:"menuId"`
 }
@@ -12,6 +13,7 @@ func (SysRoleMenu) TableName() string { return "sys_role_menu" }
 
 // SysRoleDept 角色和部门关联表 sys_role_dept（数据权限用）。
 type SysRoleDept struct {
+	TenantRecord
 	RoleID int64 `gorm:"column:role_id;primaryKey" json:"roleId"`
 	DeptID int64 `gorm:"column:dept_id;primaryKey" json:"deptId"`
 }
@@ -20,6 +22,7 @@ func (SysRoleDept) TableName() string { return "sys_role_dept" }
 
 // SysUserRole 用户和角色关联表 sys_user_role。
 type SysUserRole struct {
+	TenantRecord
 	UserID int64 `gorm:"column:user_id;primaryKey" json:"userId"`
 	RoleID int64 `gorm:"column:role_id;primaryKey" json:"roleId"`
 }
@@ -28,6 +31,7 @@ func (SysUserRole) TableName() string { return "sys_user_role" }
 
 // SysUserPost 用户和岗位关联表 sys_user_post。
 type SysUserPost struct {
+	TenantRecord
 	UserID int64 `gorm:"column:user_id;primaryKey" json:"userId"`
 	PostID int64 `gorm:"column:post_id;primaryKey" json:"postId"`
 }

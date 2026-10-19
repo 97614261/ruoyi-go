@@ -2,6 +2,7 @@ package redisx
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -45,7 +46,7 @@ func GetConfigCache(ctx context.Context, key string, ttl time.Duration) (string,
 
 // ConfigCacheRevision 返回当前参数缓存代数。不存在表示尚未发生过失效，按 0 处理。
 func ConfigCacheRevision(ctx context.Context) (int64, error) {
-	revision, err := client.Get(ctx, configCacheRevisionKey).Int64()
+	revision, err := client.Get(ctx, TenantConfigKey(ctx, "__ruoyi_go_revision__")).Int64()
 	if IsNil(err) {
 		return 0, nil
 	}
@@ -60,7 +61,7 @@ func StoreConfigCacheIfRevision(
 	revision int64,
 	ttl time.Duration,
 ) (bool, error) {
-	result, err := configCacheStoreScript.Run(ctx, client, []string{key, configCacheRevisionKey},
+	result, err := configCacheStoreScript.Run(ctx, client, []string{key, TenantConfigKey(ctx, "__ruoyi_go_revision__")},
 		value, revision, durationMilliseconds(ttl)).Int64()
 	return result == 1, err
 }
@@ -69,7 +70,7 @@ func StoreConfigCacheIfRevision(
 // 即使并发读已经拿到旧数据库值，也无法在失效完成后把旧值重新写回。
 func InvalidateConfigCache(ctx context.Context, keys ...string) error {
 	scriptKeys := make([]string, 1, len(keys)+1)
-	scriptKeys[0] = configCacheRevisionKey
+	scriptKeys[0] = TenantConfigKey(ctx, "__ruoyi_go_revision__")
 	for _, key := range keys {
 		if key != "" && !IsConfigCacheMetadataKey(key) {
 			scriptKeys = append(scriptKeys, key)
@@ -79,7 +80,9 @@ func InvalidateConfigCache(ctx context.Context, keys ...string) error {
 }
 
 // IsConfigCacheMetadataKey 判断 key 是否是 Go 内部的参数缓存一致性元数据。
-func IsConfigCacheMetadataKey(key string) bool { return key == configCacheRevisionKey }
+func IsConfigCacheMetadataKey(key string) bool {
+	return strings.HasPrefix(key, KeySysConfig) && strings.HasSuffix(key, "__ruoyi_go_revision__")
+}
 
 func durationMilliseconds(value time.Duration) int64 {
 	milliseconds := value.Milliseconds()

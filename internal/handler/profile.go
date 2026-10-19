@@ -2,8 +2,8 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -12,7 +12,7 @@ import (
 	"ruoyi-go/internal/model"
 	"ruoyi-go/internal/service"
 	"ruoyi-go/pkg/response"
-	"ruoyi-go/pkg/types"
+	"ruoyi-go/pkg/tenantctx"
 	"ruoyi-go/pkg/upload"
 )
 
@@ -108,14 +108,7 @@ func ProfileAvatar(c *gin.Context) {
 	}
 	loginUser := middleware.CurrentUser(c)
 
-	url, err := upload.Save(fileHeader, upload.Options{
-		BaseDir:    uploadCfg.Path,
-		SubDir:     "avatar",
-		URLPrefix:  uploadCfg.URLPrefix,
-		MaxSize:    uploadCfg.MaxSizeMB * 1024 * 1024,
-		AllowedExt: upload.ImageExtensions,
-		DatePath:   time.Now().In(types.Location).Format("2006/01/02"),
-	})
+	url, err := saveScopedUpload(c, fileHeader, "avatar")
 	if err != nil {
 		response.Fail(c, uploadFailureMessage(c, err))
 		return
@@ -144,7 +137,10 @@ func reconcileAvatarFiles(ctx context.Context, newAvatar string, update service.
 		return
 	}
 
-	if _, err := upload.RemoveManagedFile(uploadCfg.Path, uploadCfg.URLPrefix, "avatar", target); err != nil {
+	dir := fmt.Sprintf("tenants/%d/avatar", tenantctx.ID(ctx))
+	if _, err := upload.RemoveManagedFile(uploadCfg.Path, uploadCfg.URLPrefix, dir, target); err != nil {
 		slog.WarnContext(ctx, action+"失败", "resource", target, "err", err)
+	} else {
+		_ = forgetUploadedFile(ctx, target)
 	}
 }

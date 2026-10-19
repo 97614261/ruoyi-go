@@ -49,10 +49,11 @@ func TestResponseCaptureNeverBuffersPastLimit(t *testing.T) {
 }
 
 func TestDesensitizeJSON(t *testing.T) {
-	secretValues := []string{"upper-secret", "old-secret", "quoted-secret", "nested-secret", "array-secret"}
+	secretValues := []string{"upper-secret", "old-secret", "quoted-secret", "nested-secret", "array-secret", "operator-secret"}
 	raw := `{
 		"Password":"upper-secret",
 		"oldPassword":"old-secret",
+		"OPERATORPASSWORD":"operator-secret",
 		"newPassword":123456,
 		"confirmPassword":{"raw":"quoted-secret"},
 		"profile":{"PASSWORD":"nested-secret"},
@@ -75,7 +76,7 @@ func TestDesensitizeJSON(t *testing.T) {
 		t.Fatalf("脱敏结果应保持合法 JSON：%v，实际=%s", err, got)
 	}
 	if decoded["Password"] != redactedValue || decoded["oldPassword"] != redactedValue ||
-		decoded["newPassword"] != redactedValue || decoded["confirmPassword"] != redactedValue {
+		decoded["newPassword"] != redactedValue || decoded["confirmPassword"] != redactedValue || decoded["OPERATORPASSWORD"] != redactedValue {
 		t.Errorf("顶层敏感字段应统一替换，实际=%v", decoded)
 	}
 	profile := decoded["profile"].(map[string]any)

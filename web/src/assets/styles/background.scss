@@ -1,0 +1,267 @@
+/* 背景图主题
+ *
+ * 全部限定在 html.has-bg:not(.dark) 作用域 —— 没开启、或处于暗黑模式时，
+ * 一条规则都不生效。变量由 utils/background.js 写在 <html> 行内。
+ *
+ * ============================================================
+ * 改这个文件前先读完下面四条，都是踩过的坑
+ * ============================================================
+ *
+ * 【1】只改 Element Plus 的表面变量，尽量不写组件级选择器
+ *
+ * 变量定义在 html 上、由所有组件继承，**不和任何 scoped 样式抢特异性**。
+ * 一旦开始写 `.el-xxx { background: ... }`，就得和业务页面的 scoped 样式
+ * 逐个比特异性，最后满篇 !important。上一版就是这么变成 676 行的。
+ * 只有 backdrop-filter 和侧栏没有变量可走，才落到具体选择器上。
+ *
+ * 【2】α 复合是乘性的，每条视觉路径只允许一层有底
+ *
+ * 两层各 78% 叠起来是 1-(1-.78)² = 95%，三层 99% —— 背景就全没了。
+ * 所以：
+ *   面板 / 弹层 / 输入框表面  → 玻璃（--bg-alpha）
+ *   表格行 / 页面底 / 各种填充 → 必须 transparent
+ * 新增规则前先问：它上面已经有一层玻璃了吗？
+ *
+ * 【3】顶栏零成本，侧栏是硬仗 —— 这两句都是数出来的
+ *
+ * 顶栏三层全是现成的 CSS 变量：.navbar 用 var(--navbar-bg)、
+ * .tags-view-container 用 var(--tags-bg)、tags 单项用 var(--tags-item-bg)，
+ * 而 .fixed-header 自己没有底色。**重定义变量即可，零特异性战斗。**
+ *
+ * 侧栏相反，必须带 #app 且要数够 class。sidebar.scss 第 3 行是 `#app {`，
+ * 整个文件都嵌在里面，所以它每一条内层规则都自带一个 ID：
+ *
+ *   sidebar.scss:16   #app .sidebar-container                (1,1,0)
+ *   sidebar.scss:106  #app .sidebar-container .theme-dark
+ *                     .el-sub-menu .el-menu-item            (1,4,0)
+ *   Sidebar/index.vue scoped .sidebar-container
+ *                     .scrollbar-wrapper[data-v]            (0,3,0)
+ *
+ * **ID 压过任意数量的 class**，所以 `html.has-bg-chrome .sidebar-container X`
+ * 这种 (0,3,1) 的写法一条都赢不了 —— 本文件第一版就是这么写的，
+ * 表现是侧栏完全没变化，看着像"样式没加载"，其实是全部被压掉了。
+ * 本节统一带 #app 起手，最低 (1,4,1)，全节零 !important。
+ *
+ * 【3b】只接管"平铺底色"，状态色一律不碰
+ *
+ * 第二版矫枉过正：把 .el-menu-item / hover / is-active / ::before 全抹成
+ * transparent !important 再填自己的颜色，等于把 RuoYi 整套侧栏配色端掉，
+ * 用户第一眼就是"颜色都不对"。
+ *
+ * 判断标准很简单 —— **这个 background 是在重复铺同一个颜色，还是在表达状态？**
+ *   .scrollbar-wrapper / .el-scrollbar / .el-menu / logo 容器
+ *       都是 .sidebar-container 那个色又铺了一遍 → 抹掉不损失信息
+ *   hover / is-active / .is-active::before 高亮
+ *       是状态语义 → 不许碰
+ *   子菜单项 #141824
+ *       是层级语义，但也确实挡住了背景 → 唯一的折中，见下方注释
+ *
+ * 顺带记一个结构陷阱：深色主题的选中高亮不是 item 的 background，
+ * 是 .el-menu-item.is-active::before 这个 inset:0 / z-index:1 的覆盖层
+ * （sidebar.scss:123）。要动它得改 ::before，不是改 background-color。
+ *
+ * 【4】暗黑模式用 :not(.dark) 排除，不要"先应用再撤回"
+ *
+ * 撤回需要把变量写成 initial，而自定义属性的 initial 是"guaranteed-invalid"，
+ * 会把 Element Plus 自己那套暗色值一起干掉（本文件的 html.dark.has-bg 比
+ * EP 的 :root 更 specific）。选择器里直接 :not(.dark) 才是干净的让位。
+ */
+
+html.has-bg:not(.dark) {
+  /* --- 派生不透明度：在 CSS 里算，不让 JS 多写两个变量 ----------
+   * 让 JS 写派生值踩过坑：只要 JS 和 CSS 有一处不同步，
+   * rgba(x, var(--没写进来的)) 就是无效值，整条声明被丢弃 ——
+   * 表现是"顶栏变全透明、侧栏退回实心"，看着像特异性问题，其实不是。
+   * 所以 JS 只写 --bg-alpha 一个源头，派生值全在这里算。
+   *
+   * 弹层要更实：teleport 到 body，背后直接是背景图，太透看不清。
+   * 侧栏顶栏反过来要更透：它们本来就是实色块，不比面板透一档
+   * 根本看不出是玻璃。两者需求相反，不能共用一个值。
+   */
+  --bg-alpha-strong: calc(var(--bg-alpha, 0.6) + 0.1);
+  --bg-alpha-chrome: max(calc(var(--bg-alpha, 0.6) - 0.18), 0.28);
+
+  /* --- 表面：唯一允许有底的一层 ------------------------------- */
+  --el-bg-color: rgba(255, 255, 255, var(--bg-alpha));
+  --el-fill-color-blank: rgba(255, 255, 255, var(--bg-alpha));
+  /* 弹层 teleport 到 body，背后直接是背景图，比页面里的面板实一档 */
+  --el-bg-color-overlay: rgba(255, 255, 255, var(--bg-alpha-strong));
+
+  /* --- 填充：一律透明，否则和上面那层叠成不透明 ---------------- */
+  --el-bg-color-page: transparent;
+  --el-fill-color: transparent;
+  --el-fill-color-light: transparent;
+  --el-fill-color-lighter: transparent;
+  --el-fill-color-extra-light: transparent;
+
+  /* 表格：整体一层玻璃，行和表头不再叠 */
+  --el-table-bg-color: rgba(255, 255, 255, var(--bg-alpha));
+  --el-table-tr-bg-color: transparent;
+  --el-table-header-bg-color: transparent;
+  --el-table-row-hover-bg-color: rgba(255, 255, 255, 0.42);
+
+  /* 半透明底上实线边框会显得脏，换成低对比 */
+  --el-border-color-light: rgba(0, 0, 0, 0.08);
+  --el-border-color-lighter: rgba(0, 0, 0, 0.06);
+  --el-border-color-extra-light: rgba(0, 0, 0, 0.04);
+
+  /* 遮罩不能是纯黑，否则弹窗一开背景就没了 */
+  --el-mask-color: rgba(255, 255, 255, 0.4);
+  --el-mask-color-extra-light: rgba(255, 255, 255, 0.25);
+}
+
+/* --- 顶栏：三层全是现成变量，重定义就完事 ----------------------
+ * navbar 和 tags-view-container 是兄弟（上下排列，不嵌套），
+ * 各自有一层玻璃不构成叠加；tags 单项嵌在 container 里面，必须透明。
+ */
+html.has-bg-chrome:not(.dark) {
+  --navbar-bg: rgba(255, 255, 255, var(--bg-alpha-chrome, 0.42));
+  --tags-bg: rgba(255, 255, 255, var(--bg-alpha-chrome, 0.42));
+  --tags-item-bg: transparent;
+}
+
+/* --- 侧栏 -----------------------------------------------------
+ * 底色用 --bg-side-tint（由 JS 按 sideTheme 写入），保持侧栏原本的深浅，
+ * 只是变半透明 —— 换成白玻璃的话，深色主题的浅灰菜单字就没法看了。
+ * 选择器为什么长成这样，见文件头【3】。
+ */
+
+/* ⚠️ 只动"整块平铺的底色"，不碰任何状态色。
+ *
+ * 上一版把 .el-menu-item / .el-sub-menu__title / hover / is-active 一起
+ * 抹成 transparent !important，再拿自己的颜色填回去 —— 结果是把 RuoYi
+ * 整套侧栏配色端掉了，用户第一眼就是"颜色都不对"。
+ *
+ * 正确的切分：
+ *   平铺底色（下面这几个）  = 和 .sidebar-container 同一个颜色，只是重复铺了
+ *                             好几层，抹掉不损失任何信息 → 透明
+ *   hover / is-active / ::before 高亮 = RuoYi 的状态语义 → 一律不碰
+ *
+ * 这几条都不需要 !important：本选择器 (1,4,1)，
+ * 对手最高是 scoped 的 .sidebar-container .scrollbar-wrapper[data-v] (0,3,0)。
+ */
+html.has-bg-chrome:not(.dark) #app .sidebar-container :is(
+  .scrollbar-wrapper,
+  .el-scrollbar,
+  .el-scrollbar__view,
+  .el-menu,
+  .el-menu--vertical,
+  .sidebar-logo-container
+) {
+  background-color: transparent;
+}
+
+/* 整个侧栏只有这一层有底，其余全透明 —— α 复合规则。
+ * box-shadow 保持 sidebar.scss 原样，不动。 */
+html.has-bg-chrome:not(.dark) #app .sidebar-container {
+  background-color: rgba(var(--bg-side-tint, 26, 31, 46), var(--bg-alpha-chrome, 0.42));
+  backdrop-filter: blur(var(--bg-blur, 14px));
+  -webkit-backdrop-filter: blur(var(--bg-blur, 14px));
+}
+
+/* 唯一的例外：子菜单项 sidebar.scss:106 写死 #141824，比侧栏底 #1a1f2e
+ * 深一档，用来表示层级。整块抹透明会丢掉这个提示，所以不换颜色、
+ * 只换成同样"压深一档"的半透明叠加，让背景图能透上来。
+ * 对手 (1,4,0)，本条 (1,6,1)，不需要 !important。 */
+html.has-bg-chrome:not(.dark) #app .sidebar-container .theme-dark .el-sub-menu .el-menu-item,
+html.has-bg-chrome:not(.dark) #app .sidebar-container .theme-dark .nest-menu .el-sub-menu > .el-sub-menu__title {
+  background-color: rgba(0, 0, 0, 0.16);
+}
+
+/* --- 顶栏容器 -------------------------------------------------
+ * .fixed-header 自己没有底色，只做定位；模糊挂在有底色的两层上。
+ */
+html.has-bg-chrome:not(.dark) .navbar,
+html.has-bg-chrome:not(.dark) .tags-view-container {
+  backdrop-filter: blur(var(--bg-blur, 14px));
+  -webkit-backdrop-filter: blur(var(--bg-blur, 14px));
+}
+
+/* --- 背景层 ---------------------------------------------------
+ * 挂在 body 的伪元素上、position:fixed、负 z-index。
+ * body / html / #app / .app-main / .app-container 本身都没有 background，
+ * 所以这两层能一路透上来；侧栏和顶栏各自有底色，自然盖住。
+ */
+html.has-bg:not(.dark) body::before,
+html.has-bg:not(.dark) body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+html.has-bg:not(.dark) body::before {
+  z-index: -2;
+  background: var(--bg-image);
+}
+
+/* 压在背景图上的白纱，专门兜文字可读性 */
+html.has-bg:not(.dark) body::after {
+  z-index: -1;
+  background: rgba(255, 255, 255, var(--bg-veil, 0.2));
+}
+
+/* --- 模糊 -----------------------------------------------------
+ * backdrop-filter 没有对应的 EP 变量，只能落到选择器上。
+ * 只给大块表面加：模糊是 GPU 开销，挂到输入框那种小而多的元素上不划算，
+ * 视觉收益也几乎为零。
+ */
+html.has-bg:not(.dark) :is(
+  .el-card,
+  .el-table,
+  .el-dialog,
+  .el-drawer,
+  .el-message-box,
+  .el-message,
+  .el-popper,
+  .el-dropdown-menu,
+  .el-picker-panel
+) {
+  backdrop-filter: blur(var(--bg-blur, 14px));
+  -webkit-backdrop-filter: blur(var(--bg-blur, 14px));
+}
+
+/* --- 让位 -----------------------------------------------------
+ * 暗黑模式已经由上面每条选择器的 :not(.dark) 排除，这里不需要再撤回。
+ * 打印和"减少透明效果"这两项仍要单独处理。
+ *
+ * 【注意】下面不能写 --bg-alpha: 1 —— 那个变量是 JS 写在 <html> 行内的，
+ * 行内优先级高于任何样式表规则，媒体查询压不过它。
+ * 只能直接把最终的表面变量改成不透明。
+ */
+@media (prefers-reduced-transparency: reduce) {
+  html.has-bg:not(.dark) {
+    --el-bg-color: #ffffff;
+    --el-bg-color-overlay: #ffffff;
+    --el-fill-color-blank: #ffffff;
+    --el-table-bg-color: #ffffff;
+  }
+
+  html.has-bg-chrome:not(.dark) {
+    --navbar-bg: #ffffff;
+    --tags-bg: #ffffff;
+  }
+
+  html.has-bg-chrome:not(.dark) #app .sidebar-container {
+    background-color: rgb(var(--bg-side-tint, 26, 31, 46));
+  }
+
+  html.has-bg:not(.dark) body::before,
+  html.has-bg:not(.dark) body::after {
+    display: none;
+  }
+
+  html.has-bg:not(.dark) :is(.el-card, .el-table, .el-dialog, .el-drawer, .el-message-box, .el-message, .el-popper),
+  html.has-bg-chrome:not(.dark) :is(.navbar, .tags-view-container),
+  html.has-bg-chrome:not(.dark) #app .sidebar-container {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media print {
+  html.has-bg body::before,
+  html.has-bg body::after {
+    display: none;
+  }
+}

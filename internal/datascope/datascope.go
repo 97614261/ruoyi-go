@@ -35,7 +35,8 @@ type Params struct {
 
 // Scope 返回可直接用于 db.Scopes(...) 的数据权限过滤器。
 //
-// 超级管理员不过滤。所有角色都不匹配时返回"查不到任何数据"的条件，
+// 管理员只免除本层的部门过滤，不免除 repository 的租户过滤。
+// 所有角色都不匹配时返回"查不到任何数据"的条件，
 // 而不是不加条件 —— 这一点必须与 Java 一致，否则会把全部数据暴露出去。
 func Scope(p Params) func(*gorm.DB) *gorm.DB {
 	condition, args := build(p)

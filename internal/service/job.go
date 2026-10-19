@@ -11,6 +11,7 @@ import (
 	"ruoyi-go/pkg/cronx"
 	"ruoyi-go/pkg/errs"
 	"ruoyi-go/pkg/page"
+	"ruoyi-go/pkg/tenantctx"
 	"ruoyi-go/pkg/types"
 )
 
@@ -89,6 +90,7 @@ func GetJob(ctx context.Context, jobID int64) (*model.SysJob, error) {
 
 // CreateJob 新增任务。
 func CreateJob(ctx context.Context, target *model.SysJob, operator string) error {
+	target.TenantID = tenantctx.ID(ctx)
 	return createJobWithOps(ctx, target, operator, productionJobMutationOps())
 }
 
@@ -117,6 +119,7 @@ func createJobWithOps(ctx context.Context, target *model.SysJob, operator string
 
 // UpdateJob 修改任务。
 func UpdateJob(ctx context.Context, target *model.SysJob, operator string) error {
+	target.TenantID = tenantctx.ID(ctx)
 	return updateJobWithOps(ctx, target, operator, productionJobMutationOps())
 }
 
@@ -131,6 +134,7 @@ func updateJobWithOps(ctx context.Context, target *model.SysJob, operator string
 	if existing == nil {
 		return errs.New("定时任务不存在")
 	}
+	target.TenantID = existing.TenantID
 	applyJobDefaults(target)
 	if err := validateJob(target); err != nil {
 		return err

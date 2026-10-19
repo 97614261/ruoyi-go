@@ -16,6 +16,7 @@ import (
 	"ruoyi-go/internal/repository"
 	"ruoyi-go/pkg/cronx"
 	"ruoyi-go/pkg/logx"
+	"ruoyi-go/pkg/tenantctx"
 	"ruoyi-go/pkg/types"
 )
 
@@ -72,7 +73,7 @@ var scheduler = &jobScheduler{
 //
 // 必须在 repository 初始化之后调用。
 func StartScheduler(ctx context.Context) error {
-	jobs, err := repository.SelectJobAll(ctx)
+	jobs, err := repository.SelectJobAll(tenantctx.System(ctx))
 	if err != nil {
 		return err
 	}
@@ -235,6 +236,15 @@ func execute(target *model.SysJob) {
 	ctx, cancel := context.WithTimeout(
 		logx.WithTraceID(context.Background(), logx.NewTraceID()), JobExecuteTimeout)
 	defer cancel()
+	ctx = tenantctx.With(ctx, target.TenantID, false)
+	tenant, err := repository.TenantByID(ctx, target.TenantID)
+	if err != nil {
+		slog.WarnContext(ctx, "检查任务租户状态失败，跳过本次触发", "jobId", target.JobID)
+		return
+	}
+	if ValidateTenantState(tenant) != nil {
+		return
+	}
 
 	if !scheduler.beginRun(target) {
 		slog.WarnContext(ctx, "上一次尚未执行完毕且配置为禁止并发，本次跳过",
@@ -251,7 +261,7 @@ func execute(target *model.SysJob) {
 		StartTime:    types.Time(start),
 	}
 
-	err := scheduler.runStartedTask(ctx, target)
+	err = scheduler.runStartedTask(ctx, target)
 
 	end := time.Now().In(types.Location)
 	record.EndTime = types.Time(end)
@@ -273,6 +283,7 @@ func execute(target *model.SysJob) {
 	// 写日志用独立的短超时 ctx：任务本身可能已经把 ctx 耗到超时了，
 	// 用同一个 ctx 会导致失败记录写不进去 —— 恰恰是最需要留痕的那次
 	logCtx, logCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	logCtx = tenantctx.With(logCtx, target.TenantID, false)
 	defer logCancel()
 	if err := repository.InsertJobLog(logCtx, &record); err != nil {
 		slog.ErrorContext(ctx, "写入调度日志失败", "jobId", target.JobID, "err", err)

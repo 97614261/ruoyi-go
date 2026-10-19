@@ -59,6 +59,10 @@ var contractMenuPermissions = stringSet(
 	"tool:gen:remove", "tool:gen:import", "tool:gen:preview", "tool:gen:code", "tool:swagger:list",
 )
 
+// Separate branch contracts from the frozen Java single-tenant baseline. Both
+// sets protect referenced menu identifiers against accidental rename/removal.
+var platformMenuPermissions = stringSet("platform:tenant:list", "platform:tenant:add", "platform:tenant:edit", "platform:tenant:grant", "platform:tenant:resetPwd", "platform:tenant:query", "platform:tenant:quota", "platform:tenant:lifecycle")
+
 func stringSet(values ...string) map[string]struct{} {
 	set := make(map[string]struct{}, len(values))
 	for _, value := range values {
@@ -80,6 +84,9 @@ func isContractDictType(dictType string) bool {
 func containsContractMenuPermission(raw string) bool {
 	for _, permission := range strings.Split(raw, ",") {
 		if _, ok := contractMenuPermissions[strings.TrimSpace(permission)]; ok {
+			return true
+		}
+		if _, ok := platformMenuPermissions[strings.TrimSpace(permission)]; ok {
 			return true
 		}
 	}

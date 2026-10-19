@@ -10,6 +10,7 @@ const (
 
 // SysConfig 参数配置表 sys_config。
 type SysConfig struct {
+	TenantRecord
 	ConfigID    int64  `gorm:"column:config_id;primaryKey;autoIncrement" json:"configId" excel:"name:参数主键;cell:numeric"`
 	ConfigName  string `gorm:"column:config_name" json:"configName" binding:"notblank,max=100" excel:"name:参数名称"`
 	ConfigKey   string `gorm:"column:config_key" json:"configKey" binding:"notblank,max=100" excel:"name:参数键名"`

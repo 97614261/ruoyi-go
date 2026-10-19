@@ -1,32 +1,36 @@
 package redisx
 
-import "strconv"
+import (
+	"context"
+	"ruoyi-go/pkg/tenantctx"
+	"strconv"
+)
 
-// Redis key 前缀，必须与 Java 版 CacheConstants.java 完全一致，
-// 否则两套后端不能共用同一个 Redis（迁移期需要并行验证）。
+// 多租户分支使用独立 ruoyi_mt: 命名空间，不与 Java / main 共用会话和缓存。
+// 用户索引按全局唯一 userId 定位；配置、字典、验证码等额外包含 tenantId。
 //
 // 禁止在业务代码里裸写这些字符串。
 const (
 	// KeyLoginToken 登录会话，后接 uuid。value 是序列化的 LoginUser。
-	KeyLoginToken = "login_tokens:"
+	KeyLoginToken = "ruoyi_mt:login_tokens:"
 	// KeyLoginUserSessions 按用户维护其全部登录 uuid，供停用、删除和改密时立即撤销。
-	KeyLoginUserSessions = "login_user_sessions:"
+	KeyLoginUserSessions = "ruoyi_mt:login_user_sessions:"
 	// KeyLoginUserGeneration 防止撤销会话时，并发登录把旧认证结果重新写回。
-	KeyLoginUserGeneration = "login_user_generation:"
+	KeyLoginUserGeneration = "ruoyi_mt:login_user_generation:"
 	// KeyLoginUserPermissionVersion 标记用户权限版本，跨进程重启识别旧权限快照。
-	KeyLoginUserPermissionVersion = "login_user_permission_version:"
+	KeyLoginUserPermissionVersion = "ruoyi_mt:login_user_permission_version:"
 	// KeyCaptchaCode 验证码，后接 uuid，TTL 2 分钟。
-	KeyCaptchaCode = "captcha_codes:"
+	KeyCaptchaCode = "ruoyi_mt:captcha_codes:"
 	// KeySysConfig 参数缓存，后接 configKey。
-	KeySysConfig = "sys_config:"
+	KeySysConfig = "ruoyi_mt:sys_config:"
 	// KeySysDict 字典缓存，后接 dictType。
-	KeySysDict = "sys_dict:"
+	KeySysDict = "ruoyi_mt:sys_dict:"
 	// KeyRepeatSubmit 防重复提交。
-	KeyRepeatSubmit = "repeat_submit:"
+	KeyRepeatSubmit = "ruoyi_mt:repeat_submit:"
 	// KeyRateLimit 限流。
-	KeyRateLimit = "rate_limit:"
+	KeyRateLimit = "ruoyi_mt:rate_limit:"
 	// KeyPwdErrCnt 密码错误次数，后接 username，5 次锁 10 分钟。
-	KeyPwdErrCnt = "pwd_err_cnt:"
+	KeyPwdErrCnt = "ruoyi_mt:pwd_err_cnt:"
 )
 
 // LoginTokenKey 拼接登录会话 key。
@@ -58,6 +62,17 @@ func SysDictKey(dictType string) string { return KeySysDict + dictType }
 
 // PwdErrCntKey 拼接密码错误次数 key。
 func PwdErrCntKey(username string) string { return KeyPwdErrCnt + username }
+
+func TenantKey(ctx context.Context, prefix, suffix string) string {
+	return prefix + strconv.FormatInt(tenantctx.ID(ctx), 10) + ":" + suffix
+}
+func TenantConfigKey(ctx context.Context, key string) string {
+	return TenantKey(ctx, KeySysConfig, key)
+}
+func TenantDictKey(ctx context.Context, key string) string { return TenantKey(ctx, KeySysDict, key) }
+func TenantPasswordKey(ctx context.Context, name string) string {
+	return TenantKey(ctx, KeyPwdErrCnt, name)
+}
 
 // RateLimitKey 拼接限流 key。
 func RateLimitKey(suffix string) string { return KeyRateLimit + suffix }

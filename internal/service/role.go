@@ -67,9 +67,16 @@ func GetRole(ctx context.Context, user *model.SysUser, roleID int64) (*model.Sys
 }
 
 // CheckRoleAllowed 超级管理员角色不允许被修改或删除。
-func CheckRoleAllowed(roleID int64) error {
-	if roleID == model.AdminRoleID {
-		return errs.New("不允许操作超级管理员角色")
+func CheckRoleAllowed(ctx context.Context, roleID int64) error {
+	r, err := repository.SelectRoleByID(ctx, roleID)
+	if err != nil {
+		return err
+	}
+	if r == nil {
+		return errs.New("角色不存在或无权访问")
+	}
+	if r.IsAdmin() {
+		return errs.New("不允许修改系统管理员角色")
 	}
 	return nil
 }
@@ -91,6 +98,9 @@ func CheckRoleDataScope(ctx context.Context, user *model.SysUser, roleID int64) 
 
 // CreateRole 新增角色。
 func CreateRole(ctx context.Context, user *model.SysUser, role *model.SysRole, operator string) error {
+	if role.RoleKey == "admin" || role.RoleKey == "tenant_admin" || role.RoleKey == "platform_admin" {
+		return errs.New("不能创建系统保留角色")
+	}
 	roleWriteMu.Lock()
 	defer roleWriteMu.Unlock()
 	menuWriteMu.Lock()
@@ -124,7 +134,7 @@ func UpdateRole(ctx context.Context, user *model.SysUser, role *model.SysRole, o
 	if role.RoleID == 0 {
 		return errs.New("角色ID不能为空")
 	}
-	if err := CheckRoleAllowed(role.RoleID); err != nil {
+	if err := CheckRoleAllowed(ctx, role.RoleID); err != nil {
 		return err
 	}
 	if err := CheckRoleDataScope(ctx, user, role.RoleID); err != nil {
@@ -146,6 +156,9 @@ func UpdateRole(ctx context.Context, user *model.SysUser, role *model.SysRole, o
 	if existing == nil {
 		return errs.New("角色不存在")
 	}
+	if existing.IsAdmin() || role.RoleKey == "admin" || role.RoleKey == "tenant_admin" || role.RoleKey == "platform_admin" {
+		return errs.New("系统管理员角色不可修改")
+	}
 	role.UpdateBy = operator
 	role.UpdateTime = types.Now()
 	return mutateRolePermissionState(ctx, role.RoleID, func() error {
@@ -158,7 +171,7 @@ func ChangeRoleStatus(ctx context.Context, user *model.SysUser, roleID int64, st
 	roleWriteMu.Lock()
 	defer roleWriteMu.Unlock()
 
-	if err := CheckRoleAllowed(roleID); err != nil {
+	if err := CheckRoleAllowed(ctx, roleID); err != nil {
 		return err
 	}
 	if err := CheckRoleDataScope(ctx, user, roleID); err != nil {
@@ -179,7 +192,7 @@ func AuthDataScope(ctx context.Context, user *model.SysUser, body model.RoleData
 	deptWriteMu.Lock()
 	defer deptWriteMu.Unlock()
 
-	if err := CheckRoleAllowed(body.RoleID); err != nil {
+	if err := CheckRoleAllowed(ctx, body.RoleID); err != nil {
 		return err
 	}
 	if err := CheckRoleDataScope(ctx, user, body.RoleID); err != nil {
@@ -236,16 +249,14 @@ func DeleteRoles(ctx context.Context, user *model.SysUser, roleIDs []int64) erro
 	if err != nil {
 		return err
 	}
-	for _, roleID := range roleIDs {
-		if err := CheckRoleAllowed(roleID); err != nil {
-			return err
-		}
-	}
 	roles, counts, err := repository.SelectRolesForDelete(ctx, roleIDs)
 	if err != nil {
 		return err
 	}
 	for _, role := range roles {
+		if role.IsAdmin() {
+			return errs.New("系统管理员角色不可删除")
+		}
 		if counts[role.RoleID] > 0 {
 			return errs.Newf("%s已分配,不能删除", role.RoleName)
 		}
@@ -269,7 +280,7 @@ func CancelAuthUser(ctx context.Context, operator *model.SysUser, roleID int64, 
 	roleWriteMu.Lock()
 	defer roleWriteMu.Unlock()
 
-	if err := CheckRoleAllowed(roleID); err != nil {
+	if err := CheckRoleAllowed(ctx, roleID); err != nil {
 		return err
 	}
 	if err := CheckRoleDataScope(ctx, operator, roleID); err != nil {
@@ -295,7 +306,7 @@ func GrantAuthUser(ctx context.Context, operator *model.SysUser, roleID int64, u
 	roleWriteMu.Lock()
 	defer roleWriteMu.Unlock()
 
-	if err := CheckRoleAllowed(roleID); err != nil {
+	if err := CheckRoleAllowed(ctx, roleID); err != nil {
 		return err
 	}
 	if err := CheckRoleDataScope(ctx, operator, roleID); err != nil {

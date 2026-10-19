@@ -14,6 +14,7 @@ import (
 	"ruoyi-go/pkg/errs"
 	"ruoyi-go/pkg/page"
 	"ruoyi-go/pkg/redisx"
+	"ruoyi-go/pkg/tenantctx"
 	"ruoyi-go/pkg/types"
 )
 
@@ -28,7 +29,10 @@ const dictCacheTTL = 30 * time.Minute
 //
 // 缓存读写失败一律降级到数据库，不让缓存故障影响功能。
 func GetDictDataByType(ctx context.Context, dictType string) ([]model.SysDictData, error) {
-	key := redisx.SysDictKey(dictType)
+	if _, err := tenantctx.Require(ctx); err != nil {
+		return nil, err
+	}
+	key := redisx.TenantDictKey(ctx, dictType)
 
 	raw, cacheErr := redisx.C().Get(ctx, key).Bytes()
 	cacheAvailable := errors.Is(cacheErr, redis.Nil)
@@ -79,12 +83,12 @@ func GetDictDataByType(ctx context.Context, dictType string) ([]model.SysDictDat
 // ClearDictCache 清除指定类型的字典缓存，dictType 为空时清除全部。
 func ClearDictCache(ctx context.Context, dictType string) error {
 	if dictType != "" {
-		return redisx.InvalidateDictCache(ctx, redisx.SysDictKey(dictType))
+		return redisx.InvalidateDictCache(ctx, redisx.TenantDictKey(ctx, dictType))
 	}
 	if err := redisx.InvalidateDictCache(ctx); err != nil {
 		return err
 	}
-	return redisx.ScanKeys(ctx, redisx.KeySysDict, 100, func(key string) error {
+	return redisx.ScanKeys(ctx, redisx.TenantKey(ctx, redisx.KeySysDict, ""), 100, func(key string) error {
 		if redisx.IsDictCacheMetadataKey(key) {
 			return nil
 		}

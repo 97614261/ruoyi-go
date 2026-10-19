@@ -47,11 +47,20 @@ func TestUserStatusIsStrict(t *testing.T) {
 }
 
 func TestReservedAdminRoleCannotBeAssignedToOrdinaryUser(t *testing.T) {
-	if err := checkReservedAdminRole(2, []int64{model.AdminRoleID}); err == nil {
-		t.Fatal("ordinary user accepted reserved admin role")
+	if (model.SysUser{UserID: 1, UserType: "00"}).IsAdmin() {
+		t.Fatal("fixed ID must not grant admin")
 	}
-	if err := checkReservedAdminRole(model.AdminUserID, []int64{model.AdminRoleID}); err != nil {
-		t.Fatalf("admin user should retain its reserved role: %v", err)
+	if !(model.SysUser{UserID: 567, UserType: "01"}).IsAdmin() {
+		t.Fatal("tenant owner kind must be recognized")
+	}
+	if (model.SysUser{UserID: 567, UserType: "01"}).IsPlatform() {
+		t.Fatal("tenant owner is not platform admin")
+	}
+	if !(model.SysUser{UserID: 789, UserType: "02"}).IsPlatform() {
+		t.Fatal("platform kind must be explicit")
+	}
+	if (model.SysRole{RoleID: 1, RoleKey: "custom"}).IsAdmin() {
+		t.Fatal("fixed role ID must not grant admin")
 	}
 }
 

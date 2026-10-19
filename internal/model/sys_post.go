@@ -6,6 +6,7 @@ import "ruoyi-go/pkg/types"
 //
 // excel tag 与 Java 版 @Excel 一一对应，导出列顺序 = 字段声明顺序（同 Java）。
 type SysPost struct {
+	TenantRecord
 	PostID int64 `gorm:"column:post_id;primaryKey;autoIncrement" json:"postId" excel:"name:岗位序号;cell:numeric"`
 	// notblank 而非 required：对齐 Java 的 @NotBlank，纯空白串也要拒
 	PostCode string `gorm:"column:post_code" json:"postCode" binding:"notblank,max=64" excel:"name:岗位编码"`

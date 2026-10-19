@@ -67,14 +67,10 @@ func New(cfg *config.Config) *gin.Engine {
 	// 健康检查，不鉴权。真去 ping MySQL 和 Redis，依赖挂了返回 503
 	r.GET("/health", handler.Health)
 
-	// 上传文件的静态访问。前缀写死 /profile —— 前端拼头像地址时就是这个前缀。
-	// 与 Java 版的 ResourcesConfig 一致，不鉴权。
-	//
-	// 【用 StaticFS + gin.Dir(.., false) 而不是 Static】
-	// Static 底层是 http.FileServer，目录下没有 index.html 时会输出文件列表，
-	// 访问 /profile/upload/2026/08/21/ 就能看到当天所有上传文件并逐个下载。
+	// 仅保留 /profile URL 前缀，不再公开挂载整个上传目录。
+	// 每次媒体访问都验证会话、租户状态和文件归属；目录不能枚举。
 	handler.InitUpload(cfg.Upload)
-	r.StaticFS(cfg.Upload.URLPrefix, gin.Dir(cfg.Upload.Path, false))
+	r.GET(cfg.Upload.URLPrefix+"/*resource", middleware.Auth(), handler.TenantMedia)
 
 	registerAnonymous(r, bodyLimit, multipartLimit)
 	registerAuthed(r, bodyLimit, multipartLimit)
@@ -126,7 +122,21 @@ func registerAnonymous(r *gin.Engine, bodyLimit, multipartLimit gin.HandlerFunc)
 
 // registerAuthed 需要登录的路由。
 func registerAuthed(r *gin.Engine, bodyLimit, multipartLimit gin.HandlerFunc) {
-	authed := r.Group("", middleware.Auth(), bodyLimit, multipartLimit)
+	authed := r.Group("", middleware.Auth(), middleware.PlatformBoundary(), bodyLimit, multipartLimit)
+	authed.GET("/platform/tenant/list", middleware.PlatformOnly(), middleware.HasPermission("platform:tenant:list"), handler.TenantList)
+	authed.POST("/platform/tenant", middleware.PlatformOnly(), middleware.HasPermission("platform:tenant:add"), middleware.OperLog("租户管理", model.BusinessTypeInsert), handler.TenantSave)
+	authed.PUT("/platform/tenant", middleware.PlatformOnly(), middleware.HasPermission("platform:tenant:edit"), middleware.OperLog("租户管理", model.BusinessTypeUpdate), handler.TenantSave)
+	authed.GET("/platform/tenant/:tenantId", middleware.PlatformOnly(), middleware.HasPermission("platform:tenant:query"), handler.TenantDetail)
+	authed.GET("/platform/tenant/:tenantId/quota", middleware.PlatformOnly(), middleware.HasPermission("platform:tenant:quota"), handler.TenantQuota)
+	authed.PUT("/platform/tenant/:tenantId/quota", middleware.PlatformOnly(), middleware.HasPermission("platform:tenant:quota"), middleware.OperLog("企业配额请求", model.BusinessTypeUpdate), handler.TenantQuotaSave)
+	authed.PUT("/platform/tenant/:tenantId/lifecycle", middleware.PlatformOnly(), middleware.HasPermission("platform:tenant:lifecycle"), middleware.OperLog("企业生命周期请求", model.BusinessTypeUpdate), handler.TenantLifecycle)
+	authed.GET("/tenant/workspace", handler.OwnWorkspace)
+	authed.POST("/tenant/cancellation", middleware.TenantOwnerOnly(), middleware.OperLog("企业注销申请请求", model.BusinessTypeUpdate), handler.TenantCancellation)
+	authed.GET("/platform/tenant/:tenantId/menus", middleware.PlatformOnly(), middleware.HasPermission("platform:tenant:grant"), handler.TenantMenus)
+	authed.PUT("/platform/tenant/:tenantId/menus", middleware.PlatformOnly(), middleware.HasPermission("platform:tenant:grant"), middleware.OperLog("企业授权请求", model.BusinessTypeGrant), handler.TenantMenusSave)
+	authed.PUT("/platform/tenant/:tenantId/resetOwnerPwd", middleware.PlatformOnly(), middleware.HasPermission("platform:tenant:resetPwd"),
+		middleware.RateLimit(middleware.RateLimitOptions{Key: "tenant-owner-reset", Count: 20, Window: time.Minute, ByIP: true}),
+		middleware.OperLog("企业管理员重置请求", model.BusinessTypeUpdate), handler.TenantOwnerPasswordReset)
 
 	authed.GET("/getInfo", handler.GetInfo)
 	authed.GET("/getRouters", handler.GetRouters)

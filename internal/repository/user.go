@@ -461,6 +461,9 @@ func countUser(ctx context.Context, cond string, value any, excludeID int64) (in
 // InsertUser 新增用户并写入角色、岗位关联。
 func InsertUser(ctx context.Context, user *model.SysUser) error {
 	return Transaction(ctx, func(tx *gorm.DB) error {
+		if err := checkAccountQuota(tx); err != nil {
+			return err
+		}
 		if err := tx.Create(user).Error; err != nil {
 			return fmt.Errorf("新增用户失败: %w", err)
 		}

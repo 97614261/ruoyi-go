@@ -4,6 +4,7 @@ import "ruoyi-go/pkg/types"
 
 // SysDictType 字典类型表 sys_dict_type。
 type SysDictType struct {
+	TenantRecord
 	DictID   int64  `gorm:"column:dict_id;primaryKey;autoIncrement" json:"dictId" excel:"name:字典主键;cell:numeric"`
 	DictName string `gorm:"column:dict_name" json:"dictName" binding:"notblank,max=100" excel:"name:字典名称"`
 	// dicttype 规则对应 Java 的 @Pattern(regexp = "^[a-z][a-z0-9_]*$")
@@ -20,6 +21,7 @@ func (SysDictType) TableName() string { return "sys_dict_type" }
 
 // SysDictData 字典数据表 sys_dict_data。
 type SysDictData struct {
+	TenantRecord
 	DictCode int64 `gorm:"column:dict_code;primaryKey;autoIncrement" json:"dictCode" excel:"name:字典编码;cell:numeric"`
 	// 指针 + required，理由详见 SysPost.PostSort 的注释。
 	// 【注意 Java 这里没有 @NotNull】SysDictData.dictSort 是裸 Integer，

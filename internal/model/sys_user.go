@@ -6,7 +6,7 @@ import (
 	"ruoyi-go/pkg/types"
 )
 
-// AdminUserID 超级管理员用户 ID。
+// AdminUserID Java 单租户历史 ID，仅用于基线契约样例，不参与多租户鉴权。
 const AdminUserID int64 = 1
 
 // 通用状态值。注意是字符串不是数字，与 RuoYi 保持一致。
@@ -20,6 +20,7 @@ const (
 
 // SysUser 用户表 sys_user。
 type SysUser struct {
+	TenantRecord
 	UserID   int64  `gorm:"column:user_id;primaryKey;autoIncrement" json:"userId" excel:"name:用户序号;cell:numeric;type:export"`
 	DeptID   *int64 `gorm:"column:dept_id" json:"deptId" excel:"name:部门编号;type:import"`
 	UserName string `gorm:"column:user_name" json:"userName" binding:"notblank,xss,max=30" excel:"name:登录名称"`
@@ -62,7 +63,9 @@ type SysUser struct {
 func (SysUser) TableName() string { return "sys_user" }
 
 // IsAdmin 是否超级管理员。
-func (u SysUser) IsAdmin() bool { return u.UserID == AdminUserID }
+func (u SysUser) IsAdmin() bool { return u.UserType == "01" || u.UserType == "02" }
+
+func (u SysUser) IsPlatform() bool { return u.UserType == "02" }
 
 // MarshalJSON 补出 admin 字段，并确保密码永不出现在响应里。
 func (u SysUser) MarshalJSON() ([]byte, error) {

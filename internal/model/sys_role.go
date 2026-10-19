@@ -15,11 +15,12 @@ const (
 	DataScopeSelf         = "5" // 仅本人数据权限
 )
 
-// AdminRoleID 超级管理员角色 ID。
+// AdminRoleID Java 单租户历史 ID，仅用于基线契约样例，不参与多租户鉴权。
 const AdminRoleID int64 = 1
 
 // SysRole 角色表 sys_role。
 type SysRole struct {
+	TenantRecord
 	RoleID   int64  `gorm:"column:role_id;primaryKey;autoIncrement" json:"roleId" excel:"name:角色序号;cell:numeric"`
 	RoleName string `gorm:"column:role_name" json:"roleName" binding:"notblank,max=30" excel:"name:角色名称"`
 	RoleKey  string `gorm:"column:role_key" json:"roleKey" binding:"notblank,max=100" excel:"name:角色权限"`
@@ -51,7 +52,7 @@ type SysRole struct {
 func (SysRole) TableName() string { return "sys_role" }
 
 // IsAdmin 是否超级管理员角色。
-func (r SysRole) IsAdmin() bool { return r.RoleID == AdminRoleID }
+func (r SysRole) IsAdmin() bool { return r.RoleKey == "tenant_admin" || r.RoleKey == "platform_admin" }
 
 // MarshalJSON 补出 admin 字段。
 //

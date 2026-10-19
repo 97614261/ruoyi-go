@@ -139,6 +139,9 @@ func WriteGenCode(ctx context.Context, tableName string) error {
 }
 
 func prepareGenerationTable(ctx context.Context, table *model.GenTable) error {
+	if err := requireTenantColumn(table); err != nil {
+		return err
+	}
 	decodeGenOptions(table)
 	if err := validateGenTable(table); err != nil {
 		return err
@@ -153,6 +156,9 @@ func prepareGenerationTable(ctx context.Context, table *model.GenTable) error {
 		}
 		decodeGenOptions(sub)
 		table.SubTable = sub
+		if err := requireTenantColumn(sub); err != nil {
+			return err
+		}
 	}
 	setGenPKColumn(table)
 	return validateGenTableForRender(table)
@@ -160,7 +166,7 @@ func prepareGenerationTable(ctx context.Context, table *model.GenTable) error {
 
 func renderGeneratedFiles(table *model.GenTable) ([]generatedFile, error) {
 	modelSource := renderModelSource(table)
-	repositorySource := renderRepositorySource(table)
+	repositorySource := tenantAwareRepositorySource(renderRepositorySource(table))
 	serviceSource := renderServiceSource(table)
 	handlerSource := renderHandlerSource(table)
 	routerSource := renderRouterSource(table)
@@ -200,7 +206,11 @@ func renderModelSource(table *model.GenTable) string {
 		b.WriteString("import \"ruoyi-go/pkg/types\"\n\n")
 	}
 	fmt.Fprintf(&b, "// %s %s。\ntype %s struct {\n", safeComment(table.ClassName), safeComment(table.FunctionName), table.ClassName)
+	b.WriteString("\tTenantID int64 `gorm:\"column:tenant_id\" json:\"-\"`\n")
 	for _, column := range table.Columns {
+		if strings.EqualFold(column.ColumnName, "tenant_id") {
+			continue
+		}
 		field := exportedField(column.JavaField)
 		fmt.Fprintf(&b, "\t%s %s `gorm:\"%s\" json:\"%s\"%s%s` // %s\n",
 			field, goColumnType(column), generatedGormTag(column), column.JavaField, generatedBindingTag(column), generatedExcelTag(column), safeComment(column.ColumnComment))
@@ -212,7 +222,11 @@ func renderModelSource(table *model.GenTable) string {
 	b.WriteString("}\n\n")
 	if table.TplCategory == "sub" && table.SubTable != nil {
 		fmt.Fprintf(&b, "// %s %s。\ntype %s struct {\n", safeComment(table.SubTable.ClassName), safeComment(table.SubTable.FunctionName), table.SubTable.ClassName)
+		b.WriteString("\tTenantID int64 `gorm:\"column:tenant_id\" json:\"-\"`\n")
 		for _, column := range table.SubTable.Columns {
+			if strings.EqualFold(column.ColumnName, "tenant_id") {
+				continue
+			}
 			binding := generatedBindingTag(column)
 			if strings.EqualFold(column.ColumnName, strings.TrimSpace(*table.SubTableFKName)) {
 				binding = ""

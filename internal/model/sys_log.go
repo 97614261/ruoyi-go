@@ -12,6 +12,7 @@ const (
 //
 // 字段顺序即导出列顺序，与 Java 版 SysLogininfor 的声明顺序一致。
 type SysLogininfor struct {
+	TenantRecord
 	InfoID        int64      `gorm:"column:info_id;primaryKey;autoIncrement" json:"infoId" excel:"name:序号;cell:numeric"`
 	UserName      string     `gorm:"column:user_name" json:"userName" excel:"name:用户账号"`
 	IPAddr        string     `gorm:"column:ipaddr" json:"ipaddr" excel:"name:登录地址"`
@@ -47,6 +48,7 @@ const (
 
 // SysOperLog 操作日志记录表 sys_oper_log。
 type SysOperLog struct {
+	TenantRecord
 	OperID        int64      `gorm:"column:oper_id;primaryKey;autoIncrement" json:"operId" excel:"name:操作序号;cell:numeric"`
 	Title         string     `gorm:"column:title" json:"title" excel:"name:操作模块"`
 	BusinessType  int        `gorm:"column:business_type" json:"businessType" excel:"name:业务类型;converter:0=其它,1=新增,2=修改,3=删除,4=授权,5=导出,6=导入,7=强退,8=生成代码,9=清空数据"`

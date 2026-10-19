@@ -15,10 +15,11 @@ import (
 )
 
 type contractIdentifierManifest struct {
-	SourceRevision  string   `json:"sourceRevision"`
-	ConfigKeys      []string `json:"configKeys"`
-	DictTypes       []string `json:"dictTypes"`
-	MenuPermissions []string `json:"menuPermissions"`
+	SourceRevision          string   `json:"sourceRevision"`
+	ConfigKeys              []string `json:"configKeys"`
+	DictTypes               []string `json:"dictTypes"`
+	MenuPermissions         []string `json:"menuPermissions"`
+	PlatformMenuPermissions []string `json:"platformMenuPermissions"`
 }
 
 func loadContractIdentifierManifest(t *testing.T) contractIdentifierManifest {
@@ -43,6 +44,7 @@ func TestContractManifestMatchesGoSets(t *testing.T) {
 	assertSameStringSet(t, "manifest 配置键", stringSet(manifest.ConfigKeys...), contractConfigKeys)
 	assertSameStringSet(t, "manifest 字典类型", stringSet(manifest.DictTypes...), contractDictTypes)
 	assertSameStringSet(t, "manifest 菜单权限", stringSet(manifest.MenuPermissions...), contractMenuPermissions)
+	assertSameStringSet(t, "manifest 平台菜单权限", stringSet(manifest.PlatformMenuPermissions...), platformMenuPermissions)
 }
 
 func TestContractConfigIdentifiersCannotMoveOrLoseBuiltinFlag(t *testing.T) {
@@ -88,7 +90,7 @@ func TestContractPermissionsCoverAllGoRoutes(t *testing.T) {
 		t.Fatal("未从路由提取到任何权限标识")
 	}
 	for _, match := range matches {
-		if _, exists := contractMenuPermissions[match[1]]; !exists {
+		if !containsContractMenuPermission(match[1]) {
 			t.Errorf("路由权限 %q 未登记到契约集合", match[1])
 		}
 	}

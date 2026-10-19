@@ -55,6 +55,7 @@ type CaptchaConfig struct {
 }
 
 type ServerConfig struct {
+	Host            string        `mapstructure:"host"`
 	Port            int           `mapstructure:"port"`
 	Mode            string        `mapstructure:"mode"`
 	ReadTimeout     time.Duration `mapstructure:"readTimeout"`
@@ -134,6 +135,7 @@ func Load(path string) (*Config, error) {
 }
 
 func setDefaults(v *viper.Viper) {
+	v.SetDefault("server.host", "127.0.0.1")
 	v.SetDefault("server.port", 8080)
 	v.SetDefault("server.mode", "debug")
 	v.SetDefault("server.readTimeout", "30s")
@@ -176,6 +178,9 @@ func setDefaults(v *viper.Viper) {
 }
 
 func (c *Config) validate() error {
+	if c.Server.Host != "" && net.ParseIP(c.Server.Host) == nil {
+		return fmt.Errorf("server.host 必须是明确的IP地址")
+	}
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port 必须在 1 到 65535 之间")
 	}

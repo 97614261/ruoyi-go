@@ -42,6 +42,7 @@ const (
 // 但只有 job_id 是 auto_increment，业务上所有操作也都按 job_id 走，
 // 所以这里只把 job_id 标成主键。
 type SysJob struct {
+	TenantRecord
 	JobID    int64  `gorm:"column:job_id;primaryKey;autoIncrement" json:"jobId" excel:"name:任务序号;cell:numeric"`
 	JobName  string `gorm:"column:job_name" json:"jobName" binding:"notblank,max=64" excel:"name:任务名称"`
 	JobGroup string `gorm:"column:job_group" json:"jobGroup" binding:"omitempty,max=64" excel:"name:任务组名"`
@@ -86,6 +87,7 @@ func (j SysJob) MarshalJSON() ([]byte, error) {
 
 // SysJobLog 定时任务调度日志表 sys_job_log。
 type SysJobLog struct {
+	TenantRecord
 	JobLogID     int64  `gorm:"column:job_log_id;primaryKey;autoIncrement" json:"jobLogId" excel:"name:日志序号;cell:numeric"`
 	JobName      string `gorm:"column:job_name" json:"jobName" excel:"name:任务名称"`
 	JobGroup     string `gorm:"column:job_group" json:"jobGroup" excel:"name:任务组名"`

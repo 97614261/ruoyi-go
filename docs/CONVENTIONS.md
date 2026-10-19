@@ -1,5 +1,21 @@
 # 接口与代码规范
 
+> 多租户分支先遵循 [MULTITENANCY.md](./MULTITENANCY.md) 的新契约。
+> 原库、原参考前端不改；企业编码用于登录选择，会话绑定 tenantId；数据库查询必须携带服务端租户上下文。
+> 平台接口另行检查，不能由角色名称或历史固定 ID 获得平台身份。Redis 使用 ruoyi_mt: 命名空间。
+> 新业务实体必须具有只由服务端赋值的 TenantID，标量查询/更新使用 repository.TenantTable。
+> JOIN 仅支持已登记的简单表关联，复杂 SQL 必须显式审查；不能把隔离守卫当成任意 SQL 的安全解析器。
+> 多租户 `/getInfo` 增加顶层 `identity`，用于显示当前企业、用户名、角色中文名及平台身份。
+> 展示数据不是授权凭据；平台租户管理同时校验服务端平台身份和 `platform:tenant:list/add/edit/grant/resetPwd` 权限。
+> 平台菜单只授予平台空间，不得为展示“超级管理员”而提升客户账号或取消租户过滤。
+> 企业功能授权和管理员密码重置必须校验目标企业编码、持久版本并原子记录成功审计；密码重置还须再次校验当前平台管理员密码。
+> 撤回功能必须先清理角色关联，再清理企业开通项；重新开通不能恢复普通角色已撤回权限。
+> `operatorPassword` 与 password/newPassword/confirmPassword 同样脱敏；含密码的前端请求不得进入 sessionStorage 防重缓存。
+> 普通企业编辑/交接同样必须提交 version。配额、归档、恢复使用独立平台权限，客户注销申请仅限当前所有者。
+> 账号额度计入未逻辑删除的全部账号；附件额度计入登记元数据。检查与登记同事务，锁顺序必须是企业行 → 配额行。
+> 单文件有效上限是企业上限和服务器上限的较小值；0表示企业不额外限制，不得绕过服务器限制。
+> 待注销/归档不能走普通编辑启用；恢复/驳回只变成停用，另行启用且必须重新登录。
+
 只写**稳定的规则**。带日期的历史决议放 [DECISIONS.md](./DECISIONS.md)。
 
 所有契约均已对照 `../RuoYi-Vue-master` 源码核实，行为存疑时以 Java 代码为准。
@@ -34,7 +50,7 @@ RuoYi 的 `AjaxResult` 继承自 `HashMap`，所以**额外字段是平铺在顶
 | 接口 | `data` | 平铺字段 |
 |---|---|---|
 | `POST /login` | 无 | `token` |
-| `GET /getInfo` | 无 | `user`、`roles`、`permissions`、`pwdChrtype`、`isDefaultModifyPwd`、`isPasswordExpired` |
+| `GET /getInfo` | 无 | `user`、`roles`、`permissions`、`pwdChrtype`、`isDefaultModifyPwd`、`isPasswordExpired`，多租户分支另有 `identity` |
 | `GET /getRouters` | 路由树 | — |
 | `GET /captchaImage` | 无 | `captchaEnabled`、`uuid`、`img` |
 | `GET /system/role/deptTree/{roleId}` | 无 | `checkedKeys`、`depts` |

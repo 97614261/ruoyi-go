@@ -77,7 +77,7 @@ func UnlockAccount(ctx context.Context, userName string) error {
 	if user != nil {
 		userName = user.UserName
 	}
-	if err := redisx.C().Del(ctx, redisx.PwdErrCntKey(userName)).Err(); err != nil {
+	if err := redisx.C().Del(ctx, redisx.TenantPasswordKey(ctx, userName)).Err(); err != nil {
 		return errs.Wrap(err, "解锁账号失败")
 	}
 	return nil

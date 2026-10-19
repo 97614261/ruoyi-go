@@ -34,7 +34,15 @@ func GetRolePermission(user *model.SysUser) []string {
 // 会修改 user.Roles 里的元素，所以传指针。
 func GetMenuPermission(ctx context.Context, user *model.SysUser) ([]string, error) {
 	if user.IsAdmin() {
-		return []string{model.AllPermission}, nil
+		if user.IsPlatform() {
+			return []string{model.AllPermission}, nil
+		}
+		perms, err := repository.TenantMenuPermissions(ctx)
+		set := make(map[string]struct{})
+		for _, p := range perms {
+			addSplit(set, p)
+		}
+		return sortedKeys(set), err
 	}
 
 	set := make(map[string]struct{})

@@ -2,8 +2,9 @@ package model
 
 // LoginBody /login 的请求体。
 type LoginBody struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	TenantCode string `json:"tenantCode"`
+	Username   string `json:"username" binding:"required"`
+	Password   string `json:"password" binding:"required"`
 	// Code 验证码，验证码开关关闭时可为空
 	Code string `json:"code"`
 	// UUID 验证码标识，对应 Redis 的 captcha_codes:<uuid>
@@ -21,7 +22,7 @@ type RegisterBody struct {
 	UUID     string `json:"uuid"`
 }
 
-// LoginUser 存放在 Redis login_tokens:<uuid> 里的会话对象。
+// LoginUser 存放在 Redis ruoyi_mt:login_tokens:<uuid> 里的会话对象。
 //
 // 【注意】这份数据是权限判断的依据，不是缓存优化。
 // token 里只有 uuid，用户是谁、有什么权限全靠这里。
@@ -30,6 +31,8 @@ type RegisterBody struct {
 // 反序列化回来的 User.Password 是空串 —— 这是预期行为，
 // 需要校验密码的场景（如修改密码）应重新查库。
 type LoginUser struct {
+	TenantID      int64 `json:"tenantId"`
+	TenantVersion int64 `json:"tenantVersion"`
 	// Token 即 login_user_key，随机 uuid
 	Token  string `json:"token"`
 	UserID int64  `json:"userId"`

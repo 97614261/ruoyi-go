@@ -16,6 +16,7 @@ import (
 	"gorm.io/gorm/logger"
 
 	"ruoyi-go/internal/config"
+	"ruoyi-go/internal/model"
 	"ruoyi-go/pkg/types"
 )
 
@@ -27,6 +28,7 @@ func Init(cfg config.MySQLConfig) error {
 		SlowThreshold:             cfg.SlowThreshold,
 		LogLevel:                  logger.Warn,
 		IgnoreRecordNotFoundError: true,
+		ParameterizedQueries:      true,
 		Colorful:                  false,
 	})
 
@@ -67,6 +69,12 @@ func Init(cfg config.MySQLConfig) error {
 		return fmt.Errorf("MySQL ping 失败: %w", err)
 	}
 
+	if !gdb.Migrator().HasTable(&model.SysTenant{}) {
+		return fmt.Errorf("当前数据库不是多租户库，请先运行 tenantinit，禁止对原库启动此分支")
+	}
+	if err := registerTenantGuard(gdb); err != nil {
+		return err
+	}
 	db = gdb
 	return nil
 }

@@ -132,7 +132,7 @@ func UserGet(c *gin.Context) {
 	if raw == "" || raw == "/" {
 		// 新增场景：没有 data，也没有 postIds / roleIds
 		result.
-			Put("roles", contractRoles(filterAssignableRoles(roles, 0))).
+			Put("roles", contractRoles(filterAssignableRoles(roles, false))).
 			Put("posts", contractPosts(posts)).
 			JSON(c)
 		return
@@ -158,7 +158,7 @@ func UserGet(c *gin.Context) {
 		Put("data", contractUser(*user, true)).
 		Put("postIds", postIDs).
 		Put("roleIds", roleIDs).
-		Put("roles", contractRoles(filterAssignableRoles(roles, userID))).
+		Put("roles", contractRoles(filterAssignableRoles(roles, user.IsAdmin()))).
 		Put("posts", contractPosts(posts)).
 		JSON(c)
 }
@@ -167,8 +167,8 @@ func UserGet(c *gin.Context) {
 //
 // 只有 admin 用户自己能看到 admin 角色，否则任何有用户编辑权的人
 // 都能把别人提成超级管理员。
-func filterAssignableRoles(roles []model.SysRole, userID int64) []model.SysRole {
-	if userID == model.AdminUserID {
+func filterAssignableRoles(roles []model.SysRole, isAdmin bool) []model.SysRole {
+	if isAdmin {
 		return roles
 	}
 	result := make([]model.SysRole, 0, len(roles))

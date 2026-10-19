@@ -101,5 +101,15 @@
     "tool:gen:query",
     "tool:gen:remove",
     "tool:swagger:list"
+  ],
+  "platformMenuPermissions": [
+    "platform:tenant:list",
+    "platform:tenant:add",
+    "platform:tenant:edit",
+    "platform:tenant:grant",
+    "platform:tenant:resetPwd",
+    "platform:tenant:query",
+    "platform:tenant:quota",
+    "platform:tenant:lifecycle"
   ]
 }

@@ -8,29 +8,33 @@ import (
 
 	"ruoyi-go/internal/config"
 	"ruoyi-go/internal/service"
+	"ruoyi-go/pkg/tenantctx"
 )
 
 func TestReconcileAvatarFiles(t *testing.T) {
 	previousConfig := uploadCfg
+	oldForget := forgetUploadedFile
+	forgetUploadedFile = func(context.Context, string) error { return nil }
+	t.Cleanup(func() { forgetUploadedFile = oldForget })
 	uploadCfg = config.UploadConfig{Path: t.TempDir(), URLPrefix: "/profile"}
 	t.Cleanup(func() { uploadCfg = previousConfig })
 
 	t.Run("数据库未提交时回收新头像", func(t *testing.T) {
-		newAvatar := "/profile/avatar/new.png"
+		newAvatar := "/profile/tenants/10000/avatar/new.png"
 		newPath := writeHandlerAvatar(t, "new.png")
-		reconcileAvatarFiles(context.Background(), newAvatar, service.AvatarUpdateResult{})
+		reconcileAvatarFiles(tenantctx.With(context.Background(), 10000, false), newAvatar, service.AvatarUpdateResult{})
 		if _, err := os.Stat(newPath); !os.IsNotExist(err) {
 			t.Fatalf("未入库的新头像应被回收：%v", err)
 		}
 	})
 
 	t.Run("数据库已提交时删除旧头像并保留新头像", func(t *testing.T) {
-		oldAvatar := "/profile/avatar/old.png"
-		newAvatar := "/profile/avatar/current.png"
+		oldAvatar := "/profile/tenants/10000/avatar/old.png"
+		newAvatar := "/profile/tenants/10000/avatar/current.png"
 		oldPath := writeHandlerAvatar(t, "old.png")
 		newPath := writeHandlerAvatar(t, "current.png")
 
-		reconcileAvatarFiles(context.Background(), newAvatar, service.AvatarUpdateResult{
+		reconcileAvatarFiles(tenantctx.With(context.Background(), 10000, false), newAvatar, service.AvatarUpdateResult{
 			OldAvatar: oldAvatar,
 			Persisted: true,
 		})
@@ -43,9 +47,9 @@ func TestReconcileAvatarFiles(t *testing.T) {
 	})
 
 	t.Run("新旧地址相同时不删除当前头像", func(t *testing.T) {
-		avatar := "/profile/avatar/same.png"
+		avatar := "/profile/tenants/10000/avatar/same.png"
 		avatarPath := writeHandlerAvatar(t, "same.png")
-		reconcileAvatarFiles(context.Background(), avatar, service.AvatarUpdateResult{
+		reconcileAvatarFiles(tenantctx.With(context.Background(), 10000, false), avatar, service.AvatarUpdateResult{
 			OldAvatar: avatar,
 			Persisted: true,
 		})
@@ -57,7 +61,7 @@ func TestReconcileAvatarFiles(t *testing.T) {
 
 func writeHandlerAvatar(t *testing.T, name string) string {
 	t.Helper()
-	target := filepath.Join(uploadCfg.Path, "avatar", name)
+	target := filepath.Join(uploadCfg.Path, "tenants", "10000", "avatar", name)
 	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
 		t.Fatalf("创建头像目录失败：%v", err)
 	}
