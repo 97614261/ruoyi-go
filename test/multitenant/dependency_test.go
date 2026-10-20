@@ -51,17 +51,7 @@ func TestDependencyFailuresDenyAuthenticatedRequests(t *testing.T) {
 	}
 	defer redisx.Close()
 	service.InitToken(cfg.JWT)
-	data, err := os.ReadFile(filepath.Join(root, "logs/multitenant-accounts.local.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var accounts struct {
-		Passwords map[string]string `json:"passwords"`
-	}
-	if err = json.Unmarshal(data, &accounts); err != nil {
-		t.Fatal(err)
-	}
-	s := &suite{t: t, base: "http://127.0.0.1:8081", root: root, client: &http.Client{Timeout: 15 * time.Second}, passwords: accounts.Passwords, redis: redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB})}
+	s := &suite{t: t, base: "http://127.0.0.1:8081", root: root, client: &http.Client{Timeout: 15 * time.Second}, passwords: loadTestAccounts(t, root), redis: redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB})}
 	defer s.redis.Close()
 	token := s.login("platform")
 	defer s.req("POST", "/logout", token, nil)

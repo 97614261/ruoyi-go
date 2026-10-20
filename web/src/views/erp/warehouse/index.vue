@@ -6,6 +6,7 @@
       <el-form-item><el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button><el-button icon="Refresh" @click="resetQuery">重置</el-button></el-form-item>
     </el-form>
     <el-row :gutter="10" class="mb8"><el-col :span="1.5"><el-button type="primary" plain icon="Plus" @click="handleAdd()" v-hasPermi="['erp:warehouse:add']">新增</el-button></el-col><el-col :span="1.5"><el-button type="danger" plain icon="Delete" :disabled="multiple" @click="handleDelete()" v-hasPermi="['erp:warehouse:remove']">删除</el-button></el-col><el-col :span="1.5"><el-button type="warning" plain icon="Download" @click="handleExport" v-hasPermi="['erp:warehouse:export']">导出</el-button></el-col></el-row>
+    <WarehouseAccess class="mb8"/>
     <el-table v-loading="loading" :data="rows" @selection-change="handleSelectionChange"><el-table-column type="selection" width="55" align="center" />
       <el-table-column label="仓库编号" prop="warehouseId" align="center" :show-overflow-tooltip="true" />
       <el-table-column label="仓库编码" prop="warehouseCode" align="center" :show-overflow-tooltip="true" />
@@ -25,6 +26,7 @@
 
 <script setup name="ErpWarehouse">
 import { listErpWarehouse, getErpWarehouse, addErpWarehouse, updateErpWarehouse, delErpWarehouse } from '@/api/erp/warehouse'
+import WarehouseAccess from '../components/WarehouseAccess.vue'
 const { proxy } = getCurrentInstance()
 const formRef = ref()
 const loading = ref(false)

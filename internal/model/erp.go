@@ -14,29 +14,35 @@ type ERPRecord struct {
 }
 type ERPDocument struct {
 	ERPRecord
-	DocumentID    int64             `gorm:"column:document_id;primaryKey;autoIncrement" json:"documentId"`
-	DocumentNo    string            `gorm:"column:document_no" json:"documentNo"`
-	Kind          string            `gorm:"column:kind" json:"kind"`
-	WarehouseID   int64             `gorm:"column:warehouse_id" json:"warehouseId"`
-	WarehouseName string            `gorm:"column:warehouse_name" json:"warehouseName"`
-	Status        string            `gorm:"column:status" json:"status"`
-	RequestKey    string            `gorm:"column:request_key" json:"-"`
-	RequestHash   string            `gorm:"column:request_hash" json:"-"`
-	Lines         []ERPDocumentLine `gorm:"-" json:"lines,omitempty"`
+	DocumentID       int64             `gorm:"column:document_id;primaryKey;autoIncrement" json:"documentId"`
+	DocumentNo       string            `gorm:"column:document_no" json:"documentNo"`
+	Kind             string            `gorm:"column:kind" json:"kind"`
+	WarehouseID      int64             `gorm:"column:warehouse_id" json:"warehouseId"`
+	WarehouseName    string            `gorm:"column:warehouse_name" json:"warehouseName"`
+	Status           string            `gorm:"column:status" json:"status"`
+	RequestKey       string            `gorm:"column:request_key" json:"-"`
+	RequestHash      string            `gorm:"column:request_hash" json:"-"`
+	Version          int64             `gorm:"column:version" json:"version"`
+	SourceDocumentID *int64            `gorm:"column:source_document_id" json:"sourceDocumentId"`
+	Reversal         bool              `gorm:"column:reversal" json:"reversal"`
+	Lines            []ERPDocumentLine `gorm:"-" json:"lines,omitempty"`
 }
 
 func (ERPDocument) TableName() string { return "erp_document" }
 
 type ERPDocumentLine struct {
 	ERPRecord
-	LineID        int64  `gorm:"column:line_id;primaryKey;autoIncrement" json:"lineId"`
-	DocumentID    int64  `gorm:"column:document_id" json:"documentId"`
-	SkuID         int64  `gorm:"column:sku_id" json:"skuId"`
-	SkuCode       string `gorm:"column:sku_code" json:"skuCode"`
-	ProductName   string `gorm:"column:product_name" json:"productName"`
-	Specification string `gorm:"column:specification" json:"specification"`
-	Unit          string `gorm:"column:unit" json:"unit"`
-	Quantity      int64  `gorm:"column:quantity" json:"quantity"`
+	LineID           int64  `gorm:"column:line_id;primaryKey;autoIncrement" json:"lineId"`
+	DocumentID       int64  `gorm:"column:document_id" json:"documentId"`
+	SkuID            int64  `gorm:"column:sku_id" json:"skuId"`
+	SkuCode          string `gorm:"column:sku_code" json:"skuCode"`
+	ProductName      string `gorm:"column:product_name" json:"productName"`
+	Specification    string `gorm:"column:specification" json:"specification"`
+	Unit             string `gorm:"column:unit" json:"unit"`
+	Quantity         int64  `gorm:"column:quantity" json:"quantity"`
+	ExpectedOnHand   int64  `gorm:"column:expected_on_hand" json:"expectedOnHand"`
+	ExpectedReserved int64  `gorm:"column:expected_reserved" json:"expectedReserved"`
+	ExpectedVersion  int64  `gorm:"column:expected_version" json:"expectedVersion"`
 }
 
 func (ERPDocumentLine) TableName() string { return "erp_document_line" }
@@ -48,6 +54,7 @@ type ERPStock struct {
 	SkuID       int64 `gorm:"column:sku_id" json:"skuId"`
 	OnHand      int64 `gorm:"column:on_hand" json:"onHand"`
 	Reserved    int64 `gorm:"column:reserved" json:"reserved"`
+	Version     int64 `gorm:"column:version" json:"version"`
 }
 
 func (ERPStock) TableName() string { return "erp_stock" }
@@ -77,14 +84,56 @@ type ERPLedger struct {
 func (ERPLedger) TableName() string { return "erp_stock_ledger" }
 
 type ERPLineInput struct {
-	SkuID    int64 `json:"skuId" binding:"required,min=1"`
-	Quantity int64 `json:"quantity" binding:"required,min=1,max=1000000000"`
+	SkuID           int64  `json:"skuId" binding:"required,min=1"`
+	Quantity        int64  `json:"quantity" binding:"min=0,max=1000000000"`
+	CountedQuantity *int64 `json:"countedQuantity,omitempty" binding:"omitempty,min=0,max=1000000000"`
 }
 type ERPDocumentInput struct {
-	WarehouseID int64          `json:"warehouseId" binding:"required,min=1"`
-	RequestKey  string         `json:"requestKey" binding:"notblank,max=64"`
-	Remark      string         `json:"remark" binding:"max=500"`
-	Lines       []ERPLineInput `json:"lines" binding:"required,min=1,max=100,dive"`
+	WarehouseID      int64          `json:"warehouseId" binding:"required,min=1"`
+	RequestKey       string         `json:"requestKey" binding:"max=64"`
+	Remark           string         `json:"remark" binding:"max=500"`
+	Lines            []ERPLineInput `json:"lines" binding:"required,min=1,max=100,dive"`
+	SourceDocumentID *int64         `json:"sourceDocumentId" binding:"omitempty,min=1"`
+	Reversal         bool           `json:"reversal"`
+}
+
+type ERPDocumentEdit struct {
+	ERPDocumentInput
+	Version int64 `json:"version" binding:"min=1"`
+}
+
+// Every employee defaults to no warehouses. Only the current tenant owner can
+// replace the explicit set; missing/empty is never interpreted as all.
+type ERPWarehouseAccess struct {
+	ERPRecord
+	AccessID    int64 `gorm:"column:access_id;primaryKey;autoIncrement" json:"accessId"`
+	UserID      int64 `gorm:"column:user_id" json:"userId"`
+	WarehouseID int64 `gorm:"column:warehouse_id" json:"warehouseId"`
+}
+
+func (ERPWarehouseAccess) TableName() string { return "erp_warehouse_access" }
+
+type ERPAccessInput struct {
+	WarehouseIDs []int64 `json:"warehouseIds" binding:"max=200,dive,min=1"`
+	Version      int64   `json:"version" binding:"min=1"`
+}
+type ERPAccessRequest struct {
+	WarehouseIDs *[]int64 `json:"warehouseIds" binding:"required,max=200,dive,min=1"`
+	Version      int64    `json:"version" binding:"min=1"`
+}
+type ERPAccessPolicy struct {
+	ERPRecord
+	PolicyID int64 `gorm:"column:policy_id;primaryKey;autoIncrement" json:"policyId"`
+	UserID   int64 `gorm:"column:user_id" json:"userId"`
+	Version  int64 `gorm:"column:version" json:"version"`
+}
+
+func (ERPAccessPolicy) TableName() string { return "erp_warehouse_policy" }
+
+type ERPAccessView struct {
+	UserID       int64   `json:"userId"`
+	WarehouseIDs []int64 `json:"warehouseIds"`
+	Version      int64   `json:"version"`
 }
 type ERPQuery struct {
 	Status      string `form:"status" binding:"max=16"`

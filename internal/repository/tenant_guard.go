@@ -20,6 +20,8 @@ var tenantTables = map[string]bool{
 	"sys_tenant_policy": true,
 	"erp_sku":           true, "erp_warehouse": true, "erp_document": true,
 	"erp_document_line": true, "erp_stock": true, "erp_stock_ledger": true,
+	"erp_warehouse_access": true,
+	"erp_warehouse_policy": true,
 }
 var tenantJoinPattern = regexp.MustCompile(`(?i)((?:(?:LEFT|RIGHT|INNER|CROSS)(?:\s+OUTER)?\s+)?JOIN\s+)([a-z_]+)(?:\s+(?:AS\s+)?([a-z_]+))?(\s+ON\s+)`)
 var tenantBusinessNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)

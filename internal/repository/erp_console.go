@@ -125,7 +125,7 @@ func erpMenus() []model.SysMenu {
 		id        int64
 		key, name string
 		actions   []string
-	}{{6100, "sku", "商品SKU", []string{"query", "add", "edit", "remove", "export"}}, {6200, "warehouse", "仓库", []string{"query", "add", "edit", "remove", "export"}}, {6300, "receipt", "采购入库", []string{"query", "add", "confirm", "cancel"}}, {6400, "sales", "销售出库", []string{"query", "add", "confirm", "cancel", "ship"}}, {6500, "stock", "库存余额", nil}, {6600, "ledger", "库存流水", nil}}
+	}{{6100, "sku", "商品SKU", []string{"query", "add", "edit", "remove", "export"}}, {6200, "warehouse", "仓库", []string{"query", "add", "edit", "remove", "export", "grant"}}, {6300, "receipt", "采购入库", []string{"query", "add", "confirm", "cancel", "edit"}}, {6400, "sales", "销售出库", []string{"query", "add", "confirm", "cancel", "ship", "edit"}}, {6500, "stock", "库存余额", nil}, {6600, "ledger", "库存流水", nil}, {6700, "salesReturn", "销售退货/冲销", []string{"query", "add", "confirm", "cancel", "edit"}}, {6800, "purchaseReturn", "采购退货/冲销", []string{"query", "add", "confirm", "cancel", "edit"}}, {6900, "count", "库存盘点", []string{"query", "add", "confirm", "cancel", "edit"}}}
 	for _, s := range specs {
 		m := base
 		m.MenuID = s.id

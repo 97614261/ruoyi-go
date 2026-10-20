@@ -48,6 +48,13 @@ func run() error {
 	if err = repository.InstallERPSchema(ctx, string(script)); err != nil {
 		return err
 	}
+	controls, err := os.ReadFile("sql/erp/002_controls.sql")
+	if err != nil {
+		return err
+	}
+	if err = repository.InstallERPControls(ctx, string(controls)); err != nil {
+		return err
+	}
 	if err = repository.InstallERPConsole(ctx, *grantDemo); err != nil {
 		return err
 	}

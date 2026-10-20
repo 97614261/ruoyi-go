@@ -2,7 +2,6 @@ package multitenant_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/go-sql-driver/mysql"
@@ -17,6 +16,7 @@ import (
 	"ruoyi-go/internal/config"
 	"ruoyi-go/internal/model"
 	"ruoyi-go/internal/repository"
+	"ruoyi-go/pkg/erpctx"
 	"ruoyi-go/pkg/tenantctx"
 	"testing"
 	"time"
@@ -43,19 +43,10 @@ func TestERPClosedLoop(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repository.Close()
-	raw, err := os.ReadFile(filepath.Join(root, "logs/multitenant-accounts.local.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var accounts struct {
-		Passwords map[string]string `json:"passwords"`
-	}
-	if err = json.Unmarshal(raw, &accounts); err != nil {
-		t.Fatal(err)
-	}
+	passwords := loadTestAccounts(t, root)
 	cache := redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB})
 	defer cache.Close()
-	s := &suite{t: t, base: "http://127.0.0.1:8081", root: root, client: &http.Client{Timeout: 20 * time.Second}, redis: cache, passwords: accounts.Passwords}
+	s := &suite{t: t, base: "http://127.0.0.1:8081", root: root, client: &http.Client{Timeout: 20 * time.Second}, redis: cache, passwords: passwords}
 	platform := s.login("platform")
 	t.Cleanup(func() { s.req("POST", "/logout", platform, nil) })
 	a := newOperationsFixture(t, s, platform)
@@ -200,6 +191,7 @@ func TestERPClosedLoop(t *testing.T) {
 		s.ok(r)
 		id := int64(r["data"].(map[string]any)["documentId"].(float64))
 		ctx := tenantctx.With(context.Background(), a.tenant.TenantID, false)
+		ctx = erpctx.WithUser(ctx, *a.tenant.OwnerUserID)
 		var count int64
 		if err := repository.DB(ctx).Model(&model.ERPDocument{}).Where("request_key=?", body["requestKey"]).Count(&count).Error; err != nil || count != 1 {
 			t.Fatal("idempotency key created multiple documents")
@@ -384,6 +376,7 @@ func TestERPClosedLoop(t *testing.T) {
 		doc := createDoc("receipt", input(wa, model.ERPLineInput{SkuID: x, Quantity: 5}))
 		ctx := tenantctx.With(context.Background(), a.tenant.TenantID, false)
 		callback := repository.DB(ctx).Callback().Create()
+		ctx = erpctx.WithUser(ctx, *a.tenant.OwnerUserID)
 		failure := errors.New("injected inventory ledger failure")
 		if err := callback.Before("gorm:create").Register("erp-test:ledger-failure", func(tx *gorm.DB) {
 			if tx.Statement.Table == "erp_stock_ledger" {
@@ -393,7 +386,7 @@ func TestERPClosedLoop(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer callback.Remove("erp-test:ledger-failure")
-		if err := repository.TransitionERPDocument(ctx, "IN", doc, "confirm", "rollback-test"); err == nil {
+		if err := repository.TransitionERPDocument(ctx, "IN", doc, "confirm", "rollback-test"); !errors.Is(err, failure) {
 			t.Fatal("injected failure ignored")
 		}
 		assertBalance(x, 97, 0, 97)

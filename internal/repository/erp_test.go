@@ -18,6 +18,31 @@ func TestERPStateTransitions(t *testing.T) {
 		}
 	}
 }
+func TestERPCountAndCorrectionArithmetic(t *testing.T) {
+	for _, kind := range []string{"SR", "PR", "COUNT"} {
+		n, event, err := erpNextState(kind, "DRAFT", "confirm")
+		if err != nil || n != "POSTED" || event != kind {
+			t.Fatal("new posting state")
+		}
+		if _, _, err = erpNextState(kind, "POSTED", "cancel"); err == nil {
+			t.Fatal("posted correction cancellable")
+		}
+	}
+	if h, r, err := erpApplyCount(10, 2, 2); err != nil || h != 2 || r != 2 {
+		t.Fatal("count reservation")
+	}
+	for _, target := range []int64{-1, 1, 1000000001} {
+		if _, _, err := erpApplyCount(10, 2, target); err == nil {
+			t.Fatal("unsafe count accepted")
+		}
+	}
+	if h, r, err := erpApplyBalance(5, 2, 3, "PR"); err != nil || h != 2 || r != 2 {
+		t.Fatal("available-only purchase return")
+	}
+	if _, _, err := erpApplyBalance(5, 2, 4, "PR"); err == nil {
+		t.Fatal("returned reserved stock")
+	}
+}
 func TestERPStockArithmetic(t *testing.T) {
 	h, r, e := erpApplyBalance(0, 0, 100, "IN")
 	if e != nil || h != 100 || r != 0 {

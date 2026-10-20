@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	drivermysql "github.com/go-sql-driver/mysql"
@@ -67,12 +68,36 @@ func erpReferenceError(err error) error {
 }
 
 func InsertERPDocument(ctx context.Context, doc *model.ERPDocument, items []model.ERPLineInput) error {
-	err := Transaction(ctx, func(tx *gorm.DB) error {
+	err := erpTransaction(ctx, func(tx *gorm.DB) error {
+		if err := lockERPActor(tx); err != nil {
+			return err
+		}
+		// Check create idempotency before current master data: an old request
+		// still refers to the same document after its draft has been edited.
+		var replay model.ERPDocument
+		if err := tx.Where("request_key=?", doc.RequestKey).Take(&replay).Error; err == nil {
+			if err = requireERPWarehouse(tx, replay.WarehouseID); err != nil {
+				return err
+			}
+			if replay.RequestHash != doc.RequestHash {
+				return errs.New("同一请求标识不能用于不同单据内容")
+			}
+			*doc = replay
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err := requireERPWarehouse(tx, doc.WarehouseID); err != nil {
+			return err
+		}
+		if err := validateERPSource(tx, doc, items); err != nil {
+			return err
+		}
 		ids := make([]int64, len(items))
 		for i, item := range items {
 			ids[i] = item.SkuID
 		}
-		warehouse, skus, err := lockERPReferences(tx, doc.WarehouseID, ids, true)
+		warehouse, skus, err := lockERPReferences(tx, doc.WarehouseID, ids, doc.SourceDocumentID == nil)
 		if err != nil {
 			return err
 		}
@@ -92,10 +117,9 @@ func InsertERPDocument(ctx context.Context, doc *model.ERPDocument, items []mode
 		if err = tx.Omit("Lines").Create(doc).Error; err != nil {
 			return err
 		}
-		lines := make([]model.ERPDocumentLine, 0, len(items))
-		for _, item := range items {
-			sku := skus[item.SkuID]
-			lines = append(lines, model.ERPDocumentLine{ERPRecord: doc.ERPRecord, DocumentID: doc.DocumentID, SkuID: item.SkuID, SkuCode: sku.SkuCode, ProductName: sku.ProductName, Specification: sku.Specification, Unit: sku.Unit, Quantity: item.Quantity})
+		lines, err := buildERPLines(tx, doc, items, skus)
+		if err != nil {
+			return err
 		}
 		if err = tx.Create(&lines).Error; err != nil {
 			return err
@@ -109,6 +133,9 @@ func InsertERPDocument(ctx context.Context, doc *model.ERPDocument, items []mode
 	if errors.As(err, &my) && my.Number == 1062 {
 		var existing model.ERPDocument
 		if readErr := DB(ctx).Where("request_key=?", doc.RequestKey).Take(&existing).Error; readErr == nil {
+			if e := requireERPWarehouse(DB(ctx), existing.WarehouseID); e != nil {
+				return e
+			}
 			if existing.RequestHash != doc.RequestHash {
 				return errs.New("同一请求标识不能用于不同单据内容")
 			}
@@ -121,16 +148,19 @@ func InsertERPDocument(ctx context.Context, doc *model.ERPDocument, items []mode
 
 func SelectERPDocument(ctx context.Context, kind string, id int64) (*model.ERPDocument, error) {
 	var doc model.ERPDocument
-	if err := DB(ctx).Where("document_id=? AND kind=?", id, kind).Take(&doc).Error; err != nil {
-		return nil, erpReferenceError(err)
-	}
-	if err := DB(ctx).Where("document_id=?", id).Order("sku_id").Find(&doc.Lines).Error; err != nil {
+	err := DB(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := erpWarehouseScope(tx.Model(&model.ERPDocument{}), "erp_document.warehouse_id").Where("document_id=? AND kind=?", id, kind).Take(&doc).Error; err != nil {
+			return erpReferenceError(err)
+		}
+		return tx.Where("document_id=?", id).Order("sku_id").Find(&doc.Lines).Error
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
 		return nil, err
 	}
 	return &doc, nil
 }
 func SelectERPDocuments(ctx context.Context, kind string, filter model.ERPQuery, pg page.Query) ([]model.ERPDocument, int64, error) {
-	q := DB(ctx).Model(&model.ERPDocument{}).Where("kind=?", kind)
+	q := erpWarehouseScope(DB(ctx).Model(&model.ERPDocument{}), "erp_document.warehouse_id").Where("kind=?", kind)
 	if filter.Status != "" {
 		q = q.Where("status=?", filter.Status)
 	}
@@ -152,12 +182,33 @@ func SelectERPDocuments(ctx context.Context, kind string, filter model.ERPQuery,
 // TransitionERPDocument locks the document and all balances, then writes the
 // balances, immutable inventory ledger, and state in ONE database transaction.
 func TransitionERPDocument(ctx context.Context, kind string, id int64, action, operator string) error {
-	return erpError(Transaction(ctx, func(tx *gorm.DB) error {
+	return erpError(erpTransaction(ctx, func(tx *gorm.DB) error {
+		if err := lockERPActor(tx); err != nil {
+			return err
+		}
+		var hint model.ERPDocument
+		if err := tx.Where("document_id=? AND kind=?", id, kind).Take(&hint).Error; err != nil {
+			return erpReferenceError(err)
+		}
+		if err := requireERPWarehouse(tx, hint.WarehouseID); err != nil {
+			return err
+		}
+		// Corrections serialize against their immutable original BEFORE taking
+		// the child lock. Two returns cannot both consume the same remainder.
+		if hint.SourceDocumentID != nil {
+			var source model.ERPDocument
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("document_id=?", *hint.SourceDocumentID).Take(&source).Error; err != nil {
+				return erpReferenceError(err)
+			}
+		}
 		var doc model.ERPDocument
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("document_id=? AND kind=?", id, kind).Take(&doc).Error; err != nil {
 			return erpReferenceError(err)
 		}
 		next, event, err := erpNextState(kind, doc.Status, action)
+		if err := requireERPWarehouse(tx, doc.WarehouseID); err != nil {
+			return err
+		}
 		if err != nil {
 			return err
 		}
@@ -175,7 +226,16 @@ func TransitionERPDocument(ctx context.Context, kind string, id int64, action, o
 			for i, line := range doc.Lines {
 				ids[i] = line.SkuID
 			}
-			if _, _, err = lockERPReferences(tx, doc.WarehouseID, ids, action != "cancel"); err != nil {
+			if doc.SourceDocumentID != nil {
+				items := make([]model.ERPLineInput, len(doc.Lines))
+				for i, l := range doc.Lines {
+					items[i] = model.ERPLineInput{SkuID: l.SkuID, Quantity: l.Quantity}
+				}
+				if err = validateERPSource(tx, &doc, items); err != nil {
+					return err
+				}
+			}
+			if _, _, err = lockERPReferences(tx, doc.WarehouseID, ids, action != "cancel" && doc.SourceDocumentID == nil); err != nil {
 				return err
 			}
 			balances := make([]model.ERPStock, len(ids))
@@ -195,14 +255,22 @@ func TransitionERPDocument(ctx context.Context, kind string, id int64, action, o
 			ledger := make([]model.ERPLedger, 0, len(balances))
 			for i, balance := range balances {
 				line := doc.Lines[i]
-				if line.SkuID != balance.SkuID || line.Quantity < 1 || line.Quantity > 1000000000 {
+				if line.SkuID != balance.SkuID || line.Quantity < 0 || (kind != "COUNT" && line.Quantity == 0) || line.Quantity > 1000000000 {
 					return errs.New("单据数量异常")
 				}
-				hand, reserved, err := erpApplyBalance(balance.OnHand, balance.Reserved, line.Quantity, event)
+				var hand, reserved int64
+				if kind == "COUNT" {
+					if line.ExpectedVersion != balance.Version || line.ExpectedOnHand != balance.OnHand || line.ExpectedReserved != balance.Reserved {
+						return errs.New("盘点期间库存已变化，请编辑草稿重新核对实盘数量")
+					}
+					hand, reserved, err = erpApplyCount(balance.OnHand, balance.Reserved, line.Quantity)
+				} else {
+					hand, reserved, err = erpApplyBalance(balance.OnHand, balance.Reserved, line.Quantity, event)
+				}
 				if err != nil {
 					return err
 				}
-				if err = tx.Model(&model.ERPStock{}).Where("stock_id=?", balance.StockID).Updates(map[string]any{"on_hand": hand, "reserved": reserved, "update_by": operator, "update_time": types.Now()}).Error; err != nil {
+				if err = tx.Model(&model.ERPStock{}).Where("stock_id=?", balance.StockID).Updates(map[string]any{"on_hand": hand, "reserved": reserved, "version": gorm.Expr("version+1"), "update_by": operator, "update_time": types.Now()}).Error; err != nil {
 					return err
 				}
 				ledger = append(ledger, model.ERPLedger{ERPRecord: model.ERPRecord{CreateBy: operator, CreateTime: types.Now()}, DocumentID: id, DocumentNo: doc.DocumentNo, WarehouseID: doc.WarehouseID, SkuID: line.SkuID, Event: event, OnHandDelta: hand - balance.OnHand, ReservedDelta: reserved - balance.Reserved, OnHandAfter: hand, ReservedAfter: reserved})
@@ -211,12 +279,20 @@ func TransitionERPDocument(ctx context.Context, kind string, id int64, action, o
 				return err
 			}
 		}
-		return tx.Model(&model.ERPDocument{}).Where("document_id=?", id).Updates(map[string]any{"status": next, "update_by": operator, "update_time": types.Now()}).Error
+		return tx.Model(&model.ERPDocument{}).Where("document_id=?", id).Updates(map[string]any{"status": next, "version": gorm.Expr("version+1"), "update_by": operator, "update_time": types.Now()}).Error
 	}))
 }
 func erpNextState(kind, status, action string) (string, string, error) {
 	switch action {
 	case "confirm":
+		if kind == "SR" || kind == "PR" || kind == "COUNT" {
+			if status == "POSTED" {
+				return status, "", nil
+			}
+			if status == "DRAFT" {
+				return "POSTED", kind, nil
+			}
+		}
 		if kind == "IN" {
 			if status == "POSTED" {
 				return status, "", nil
@@ -260,7 +336,7 @@ func erpApplyBalance(hand, reserved, qty int64, event string) (int64, int64, err
 		return 0, 0, errs.New("库存或单据数量异常")
 	}
 	switch event {
-	case "IN":
+	case "IN", "SR":
 		if hand > model.ERPMaxStock-qty {
 			return 0, 0, errs.New("库存超过安全上限")
 		}
@@ -275,6 +351,11 @@ func erpApplyBalance(hand, reserved, qty int64, event string) (int64, int64, err
 			return 0, 0, errs.New("预占库存异常")
 		}
 		reserved -= qty
+	case "PR":
+		if hand-reserved < qty {
+			return 0, 0, errs.New("可用库存不足，不能退货或冲销已预占库存")
+		}
+		hand -= qty
 	case "OUT":
 		if reserved < qty || hand < qty {
 			return 0, 0, errs.New("预占库存或实物库存不足")
@@ -288,7 +369,7 @@ func erpApplyBalance(hand, reserved, qty int64, event string) (int64, int64, err
 }
 
 func SelectERPStocks(ctx context.Context, filter model.ERPQuery, pg page.Query) ([]model.ERPStockView, int64, error) {
-	q := TenantTable(DB(ctx), "erp_stock")
+	q := erpWarehouseScope(TenantTable(DB(ctx), "erp_stock"), "erp_stock.warehouse_id")
 	if filter.WarehouseID > 0 {
 		q = q.Where("erp_stock.warehouse_id=?", filter.WarehouseID)
 	}
@@ -304,7 +385,7 @@ func SelectERPStocks(ctx context.Context, filter model.ERPQuery, pg page.Query) 
 	return rows, count, err
 }
 func SelectERPLedger(ctx context.Context, filter model.ERPQuery, pg page.Query) ([]model.ERPLedger, int64, error) {
-	q := DB(ctx).Model(&model.ERPLedger{})
+	q := erpWarehouseScope(DB(ctx).Model(&model.ERPLedger{}), "erp_stock_ledger.warehouse_id")
 	if filter.WarehouseID > 0 {
 		q = q.Where("warehouse_id=?", filter.WarehouseID)
 	}

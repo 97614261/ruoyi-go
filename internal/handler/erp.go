@@ -67,6 +67,55 @@ func ERPDocumentAction(kind, action string) gin.HandlerFunc {
 		response.Ok(c)
 	}
 }
+func ERPDocumentEdit(kind string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := parseID(c.Param("documentId"))
+		if err != nil {
+			fail(c, err)
+			return
+		}
+		var input model.ERPDocumentEdit
+		if err = c.ShouldBindJSON(&input); err != nil {
+			response.Fail(c, bindMessage(err))
+			return
+		}
+		if err = service.EditERPDocument(c.Request.Context(), kind, id, input, currentUsername(c)); err != nil {
+			fail(c, err)
+			return
+		}
+		response.Ok(c)
+	}
+}
+func ERPWarehouseAccessGet(c *gin.Context) {
+	id, err := parseID(c.Param("userId"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	v, err := service.GetERPWarehouseAccess(c.Request.Context(), id)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	response.OkData(c, v)
+}
+func ERPWarehouseAccessSet(c *gin.Context) {
+	id, err := parseID(c.Param("userId"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	var input model.ERPAccessRequest
+	if err = c.ShouldBindJSON(&input); err != nil {
+		response.Fail(c, bindMessage(err))
+		return
+	}
+	if err = service.SetERPWarehouseAccess(c.Request.Context(), id, model.ERPAccessInput{Version: input.Version, WarehouseIDs: *input.WarehouseIDs}, currentUsername(c)); err != nil {
+		fail(c, err)
+		return
+	}
+	response.Ok(c)
+}
 func ERPStockList(c *gin.Context) {
 	var q model.ERPQuery
 	if err := c.ShouldBindQuery(&q); err != nil {

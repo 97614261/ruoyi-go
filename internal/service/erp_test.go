@@ -34,3 +34,31 @@ func TestERPDocumentValidationAndCanonicalIdempotency(t *testing.T) {
 		t.Fatal("invalid key accepted")
 	}
 }
+func TestERPCorrectionAndCountInput(t *testing.T) {
+	zero := int64(0)
+	original := int64(8)
+	in := model.ERPDocumentInput{WarehouseID: 1, RequestKey: "request-12345", Remark: "盘点原因", Lines: []model.ERPLineInput{{SkuID: 1, CountedQuantity: &zero}}}
+	doc, lines, err := prepareERPDocument("COUNT", in, "tester")
+	if err != nil || doc.Version != 1 || lines[0].Quantity != 0 {
+		t.Fatal("explicit zero count must be accepted")
+	}
+	in.Lines[0].CountedQuantity = nil
+	if _, _, err = prepareERPDocument("COUNT", in, "tester"); err == nil {
+		t.Fatal("missing actual count accepted")
+	}
+	in.Lines[0].Quantity = 1
+	if _, _, err = prepareERPDocument("SR", in, "tester"); err == nil {
+		t.Fatal("return without source accepted")
+	}
+	in.SourceDocumentID = &original
+	if _, _, err = prepareERPDocument("SR", in, "tester"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = prepareERPDocument("IN", in, "tester"); err == nil {
+		t.Fatal("source injected into receipt")
+	}
+	in.Remark = " "
+	if _, _, err = prepareERPDocument("PR", in, "tester"); err == nil {
+		t.Fatal("correction without reason accepted")
+	}
+}

@@ -29,6 +29,7 @@ type suite struct {
 	redis     *redis.Client
 	passwords map[string]string
 	root      string
+	customers [2]operationsFixture
 }
 
 func (s *suite) req(method, path, token string, body any) map[string]any {
@@ -99,6 +100,7 @@ func (s *suite) loginAs(code, username, password string) string {
 }
 func (s *suite) loginResponse(code, username, password string) map[string]any {
 	s.t.Helper()
+	s.waitForLoginBudget()
 	c := s.req("GET", "/captchaImage?tenantCode="+code, "", nil)
 	s.ok(c)
 	body := map[string]any{"tenantCode": code, "username": username, "password": password}
@@ -120,6 +122,47 @@ func (s *suite) loginResponse(code, username, password string) map[string]any {
 	}
 	return s.req("POST", "/login", "", body)
 }
+
+// Functional acceptance is not a login flood. Observe the real loopback-IP
+// limiter and wait for its TTL; never flush/disable a security counter or retry
+// arbitrary business failures to make a test pass. Leave headroom for negative
+// login cases that intentionally send raw requests.
+func (s *suite) waitForLoginBudget() {
+	s.t.Helper()
+	key := redisx.RateLimitKey("login") + ":127.0.0.1"
+	deadline := time.Now().Add(70 * time.Second)
+	logged := false
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		count, err := s.redis.Get(ctx, key).Int64()
+		if err == redis.Nil {
+			cancel()
+			return
+		}
+		if err != nil {
+			cancel()
+			s.t.Fatal("cannot inspect local login test budget")
+		}
+		if count < 45 {
+			cancel()
+			return
+		}
+		ttl, err := s.redis.PTTL(ctx, key).Result()
+		cancel()
+		if err != nil || ttl <= 0 || time.Now().After(deadline) {
+			s.t.Fatal("local login budget did not expire normally")
+		}
+		if !logged {
+			s.t.Log("waiting for the existing login rate-limit window; no counters changed")
+			logged = true
+		}
+		pause := ttl + 50*time.Millisecond
+		if pause > time.Second {
+			pause = time.Second
+		}
+		time.Sleep(pause)
+	}
+}
 func TestTenantIsolation(t *testing.T) {
 	root := os.Getenv("MT_TEST_ROOT")
 	if root == "" {
@@ -137,20 +180,17 @@ func TestTenantIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repository.Close()
-	b, err := os.ReadFile(filepath.Join(root, "logs/multitenant-accounts.local.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var accounts struct {
-		Passwords map[string]string `json:"passwords"`
-	}
-	if err = json.Unmarshal(b, &accounts); err != nil {
-		t.Fatal(err)
-	}
-	s := &suite{t: t, base: "http://127.0.0.1:8081", client: &http.Client{Timeout: 15 * time.Second}, passwords: accounts.Passwords, root: root,
+	s := &suite{t: t, base: "http://127.0.0.1:8081", client: &http.Client{Timeout: 15 * time.Second}, passwords: loadTestAccounts(t, root), root: root,
 		redis: redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB})}
 	defer s.redis.Close()
-	a, bToken, p := s.login("demo"), s.login("demo-b"), s.login("platform")
+	p := s.login("platform")
+	t.Cleanup(func() { s.req("POST", "/logout", p, nil) })
+	// Mutating isolation/lifecycle checks must never operate on demo customers.
+	for i := range s.customers {
+		s.customers[i] = newNamedOperationsFixture(t, s, p, "admin")
+		s.passwords[s.customers[i].code] = operationsPassword
+	}
+	a, bToken := s.customers[0].owner, s.customers[1].owner
 	ai, bi := s.req("GET", "/getInfo", a, nil), s.req("GET", "/getInfo", bToken, nil)
 	s.ok(ai)
 	s.ok(bi)
@@ -189,10 +229,10 @@ func TestTenantIsolation(t *testing.T) {
 		}
 	})
 	t.Run("job_log_clean_is_scoped", func(t *testing.T) {
-		ctx, cancel := context.WithTimeout(tenantctx.With(context.Background(), 10001, false), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		// Resolve the actual generated tenant ID rather than relying on seed sequence.
-		tb, e := repository.ResolveTenant(ctx, "demo-b")
+		tb, e := repository.ResolveTenant(ctx, s.customers[1].code)
 		if e != nil {
 			t.Fatal(e)
 		}

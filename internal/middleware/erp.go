@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"github.com/gin-gonic/gin"
+	"ruoyi-go/pkg/erpctx"
 	"ruoyi-go/pkg/response"
 	"ruoyi-go/pkg/tenantctx"
 )
@@ -14,6 +15,12 @@ func CustomerWorkspaceOnly() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		user := CurrentUser(c)
+		if user == nil || user.UserID < 1 {
+			unauthorized(c)
+			return
+		}
+		c.Request = c.Request.WithContext(erpctx.WithUser(c.Request.Context(), user.UserID))
 		c.Next()
 	}
 }

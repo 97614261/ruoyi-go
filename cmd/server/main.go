@@ -69,6 +69,9 @@ func run() error {
 	defer stop()
 	probeCtx, probeCancel := context.WithTimeout(ctx, 5*time.Second)
 	schemaErr := repository.VerifyTenantSchema(probeCtx)
+	if schemaErr == nil {
+		schemaErr = repository.VerifyERPControls(probeCtx)
+	}
 	probeCancel()
 	if schemaErr != nil {
 		return schemaErr

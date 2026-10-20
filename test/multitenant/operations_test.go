@@ -31,9 +31,13 @@ type operationsFixture struct {
 const operationsPassword = "Operations_782!"
 
 func newOperationsFixture(t *testing.T, s *suite, p string) operationsFixture {
+	return newNamedOperationsFixture(t, s, p, "owner")
+}
+
+func newNamedOperationsFixture(t *testing.T, s *suite, p, ownerName string) operationsFixture {
 	t.Helper()
 	code := fmt.Sprintf("ops-%d", time.Now().UnixNano()%1000000000000)
-	s.ok(s.req("POST", "/platform/tenant", p, map[string]any{"tenantCode": code, "tenantName": "生命周期与配额验收", "userName": "owner", "password": operationsPassword, "status": "0"}))
+	s.ok(s.req("POST", "/platform/tenant", p, map[string]any{"tenantCode": code, "tenantName": "生命周期与配额验收", "userName": ownerName, "password": operationsPassword, "status": "0"}))
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	tenant, err := repository.ResolveTenant(ctx, code)
@@ -53,7 +57,7 @@ func newOperationsFixture(t *testing.T, s *suite, p string) operationsFixture {
 		}
 		s.ok(s.updateTenant(p, map[string]any{"tenantId": tenant.TenantID, "tenantCode": code, "tenantName": tenant.TenantName, "status": "1"}))
 	})
-	return operationsFixture{code: code, tenant: tenant, owner: s.loginAs(code, "owner", operationsPassword)}
+	return operationsFixture{code: code, tenant: tenant, owner: s.loginAs(code, ownerName, operationsPassword)}
 }
 
 type concurrentResult struct {

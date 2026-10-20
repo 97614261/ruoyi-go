@@ -31,9 +31,9 @@ func runAdvanced(t *testing.T, parent *suite, a, b, p string, aid, bid int64) {
 			v := s.req("GET", fmt.Sprintf("/system/user/%d", id), token, nil)
 			s.ok(v)
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			tenant, e := repository.ResolveTenant(ctx, "demo")
+			tenant, e := repository.ResolveTenant(ctx, s.customers[0].code)
 			if token == b {
-				tenant, e = repository.ResolveTenant(ctx, "demo-b")
+				tenant, e = repository.ResolveTenant(ctx, s.customers[1].code)
 			}
 			if e != nil {
 				t.Fatal(e)
@@ -83,7 +83,7 @@ func runAdvanced(t *testing.T, parent *suite, a, b, p string, aid, bid int64) {
 				t.Fatal("foreign association accepted")
 			}
 		}
-		ctx, cancel := context.WithTimeout(tenantctx.With(context.Background(), 10000, false), 5*time.Second)
+		ctx, cancel := context.WithTimeout(tenantctx.With(context.Background(), s.customers[0].tenant.TenantID, false), 5*time.Second)
 		defer cancel()
 		if err := repository.InsertUserRole(ctx, int64(roleID.(float64)), []int64{aid}); err == nil {
 			t.Fatal("database allowed foreign-role relationship")
@@ -109,16 +109,12 @@ func runAdvanced(t *testing.T, parent *suite, a, b, p string, aid, bid int64) {
 		}
 	})
 	run("foreign_owner_transfer_rejected", func(t *testing.T, s *suite) {
-		v := s.req("GET", "/platform/tenant/list", p, nil)
+		v := s.req("GET", fmt.Sprintf("/platform/tenant/%d", s.customers[1].tenant.TenantID), p, nil)
 		s.ok(v)
-		for _, raw := range v["rows"].([]any) {
-			row := raw.(map[string]any)
-			if row["tenantCode"] == "demo-b" {
-				row["ownerUserId"] = aid
-				if s.req("PUT", "/platform/tenant", p, row)["code"] == float64(200) {
-					t.Fatal("cross-tenant owner transfer accepted")
-				}
-			}
+		row := v["data"].(map[string]any)
+		row["ownerUserId"] = aid
+		if s.req("PUT", "/platform/tenant", p, row)["code"] == float64(200) {
+			t.Fatal("cross-tenant owner transfer accepted")
 		}
 		s.ok(s.req("GET", "/getInfo", b, nil))
 	})
@@ -126,22 +122,13 @@ func runAdvanced(t *testing.T, parent *suite, a, b, p string, aid, bid int64) {
 		name := fmt.Sprintf("owner_%d", time.Now().UnixNano()%1000000000000)
 		s.ok(s.req("POST", "/system/user", a, map[string]any{"userName": name, "password": "CheckOnly_782!", "status": "0"}))
 		newOwner := findUser(s, a, name)
-		v := s.req("GET", "/platform/tenant/list", p, nil)
+		v := s.req("GET", fmt.Sprintf("/platform/tenant/%d", s.customers[0].tenant.TenantID), p, nil)
 		s.ok(v)
-		var target map[string]any
-		for _, raw := range v["rows"].([]any) {
-			row := raw.(map[string]any)
-			if row["tenantCode"] == "demo" {
-				target = row
-			}
-		}
-		if target == nil {
-			t.Fatal("demo missing")
-		}
+		target := v["data"].(map[string]any)
 		defer func() {
 			target["ownerUserId"] = aid
 			s.ok(s.updateTenant(p, target))
-			fresh := s.login("demo")
+			fresh := s.login(s.customers[0].code)
 			s.ok(s.req("DELETE", fmt.Sprintf("/system/user/%d", newOwner), fresh, nil))
 		}()
 		target["ownerUserId"] = newOwner
@@ -149,7 +136,7 @@ func runAdvanced(t *testing.T, parent *suite, a, b, p string, aid, bid int64) {
 		if s.req("GET", "/getInfo", a, nil)["code"] == float64(200) {
 			t.Fatal("old owner session still active")
 		}
-		ownerToken := s.loginAs("demo", name, "CheckOnly_782!")
+		ownerToken := s.loginAs(s.customers[0].code, name, "CheckOnly_782!")
 		info := s.req("GET", "/getInfo", ownerToken, nil)
 		s.ok(info)
 		if info["user"].(map[string]any)["admin"] != true {
@@ -177,29 +164,20 @@ func runAdvanced(t *testing.T, parent *suite, a, b, p string, aid, bid int64) {
 		}
 	})
 	run("tenant_suspend_and_old_session_invalidation", func(t *testing.T, s *suite) {
-		v := s.req("GET", "/platform/tenant/list", p, nil)
+		v := s.req("GET", fmt.Sprintf("/platform/tenant/%d", s.customers[1].tenant.TenantID), p, nil)
 		s.ok(v)
-		var target map[string]any
-		for _, raw := range v["rows"].([]any) {
-			row := raw.(map[string]any)
-			if row["tenantCode"] == "demo-b" {
-				target = row
-			}
-		}
-		if target == nil {
-			t.Fatal("demo-b missing")
-		}
+		target := v["data"].(map[string]any)
 		defer func() {
 			target["status"] = "0"
 			s.ok(s.updateTenant(p, target))
-			_ = s.login("demo-b")
+			_ = s.login(s.customers[1].code)
 		}()
 		target["status"] = "1"
 		s.ok(s.updateTenant(p, target))
 		if s.req("GET", "/getInfo", b, nil)["code"] == float64(200) {
 			t.Fatal("suspended tenant session accepted")
 		}
-		if s.req("POST", "/login", "", map[string]any{"tenantCode": "demo-b", "username": "admin", "password": s.passwords["demo-b"]})["code"] == float64(200) {
+		if s.req("POST", "/login", "", map[string]any{"tenantCode": s.customers[1].code, "username": "admin", "password": s.passwords[s.customers[1].code]})["code"] == float64(200) {
 			t.Fatal("suspended tenant login accepted")
 		}
 		target["status"] = "0"

@@ -17,8 +17,8 @@ func runIdentityChecks(t *testing.T, parent *suite, a, b, p string) {
 			platform                bool
 		}{
 			{p, "platform", "平台管理", "平台超级管理员", true},
-			{a, "demo", "示例企业 A", "企业管理员", false},
-			{b, "demo-b", "示例企业 B", "企业管理员", false},
+			{a, s.customers[0].code, s.customers[0].tenant.TenantName, "企业管理员", false},
+			{b, s.customers[1].code, s.customers[1].tenant.TenantName, "企业管理员", false},
 		} {
 			info := s.req("GET", "/getInfo", tc.token, nil)
 			s.ok(info)
