@@ -89,6 +89,9 @@ func containsContractMenuPermission(raw string) bool {
 		if _, ok := platformMenuPermissions[strings.TrimSpace(permission)]; ok {
 			return true
 		}
+		if _, ok := erpMenuPermissions[strings.TrimSpace(permission)]; ok {
+			return true
+		}
 	}
 	return false
 }

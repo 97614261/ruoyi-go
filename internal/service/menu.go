@@ -97,7 +97,7 @@ func SelectMenuTreeByUserID(ctx context.Context, userID int64) ([]*model.SysMenu
 	if err != nil {
 		return nil, err
 	}
-	return buildMenuTree(menus, MenuRootID), nil
+	return buildMenuTree(hideERPForPlatform(ctx, menus), MenuRootID), nil
 }
 
 // buildMenuTree 按 parent_id 组装树。

@@ -20,6 +20,7 @@ type contractIdentifierManifest struct {
 	DictTypes               []string `json:"dictTypes"`
 	MenuPermissions         []string `json:"menuPermissions"`
 	PlatformMenuPermissions []string `json:"platformMenuPermissions"`
+	ERPMenuPermissions      []string `json:"erpMenuPermissions"`
 }
 
 func loadContractIdentifierManifest(t *testing.T) contractIdentifierManifest {
@@ -45,6 +46,7 @@ func TestContractManifestMatchesGoSets(t *testing.T) {
 	assertSameStringSet(t, "manifest 字典类型", stringSet(manifest.DictTypes...), contractDictTypes)
 	assertSameStringSet(t, "manifest 菜单权限", stringSet(manifest.MenuPermissions...), contractMenuPermissions)
 	assertSameStringSet(t, "manifest 平台菜单权限", stringSet(manifest.PlatformMenuPermissions...), platformMenuPermissions)
+	assertSameStringSet(t, "manifest ERP菜单权限", stringSet(manifest.ERPMenuPermissions...), erpMenuPermissions)
 }
 
 func TestContractConfigIdentifiersCannotMoveOrLoseBuiltinFlag(t *testing.T) {
