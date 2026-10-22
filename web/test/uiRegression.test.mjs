@@ -24,7 +24,8 @@ test('both document dialogs declare viewport-limited width and independent scrol
   assert.equal(dialogs.length, 2)
   for (const dialog of dialogs) {
     assert.match(dialog, /width="min\((850|900)px, calc\(100vw - 32px\)\)"/)
-    assert.match(dialog, /class="erp-document-dialog"/)
+    const classes = (dialog.match(/\bclass="([^"]*)"/)?.[1] || '').split(/\s+/)
+    assert.ok(classes.includes('erp-document-dialog'), 'Document-specific scrolling namespace must remain')
     assert.match(dialog, /\balign-center\b/)
   }
   const style = descriptor.styles.find(item => !item.scoped).content

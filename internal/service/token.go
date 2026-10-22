@@ -288,8 +288,7 @@ func advancePermissionVersions(ctx context.Context, userIDs []int64) (map[int64]
 			for _, userID := range batch {
 				commands = append(commands, command{
 					userID: userID,
-					cmd: advancePermissionVersionScript.Run(ctx, pipe,
-						[]string{redisx.LoginUserPermissionVersionKey(userID)}),
+					cmd:    queuePermissionVersionAdvance(ctx, pipe, redisx.LoginUserPermissionVersionKey(userID)),
 				})
 			}
 			return nil
@@ -307,6 +306,13 @@ func advancePermissionVersions(ctx context.Context, userIDs []int64) (map[int64]
 		return nil
 	})
 	return versions, err
+}
+
+// Script.Run cannot perform its NOSCRIPT fallback inside a pipeline: the
+// command error is only known at Exec, after Run has returned. EVAL is one
+// atomic call and works both on cold Redis and after script-cache eviction.
+func queuePermissionVersionAdvance(ctx context.Context, pipe redis.Pipeliner, key string) *redis.Cmd {
+	return advancePermissionVersionScript.Eval(ctx, pipe, []string{key})
 }
 
 // GetLoginUser 用 token 换会话。

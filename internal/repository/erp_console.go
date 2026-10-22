@@ -147,5 +147,38 @@ func erpMenus() []model.SysMenu {
 			menus = append(menus, button)
 		}
 	}
+	// Definitions only. InstallERPConsole(false) never grants existing customers.
+	for _, spec := range []struct {
+		id        int64
+		key, name string
+		actions   []string
+	}{
+		{7000, "channel", "渠道目录", nil},
+		{7100, "shop", "店铺管理", []string{"query", "add", "edit", "grant"}},
+		{7200, "shopItem", "店铺商品配对", []string{"query", "add", "edit", "map"}},
+		{7300, "order", "订单录入", []string{"query", "add", "edit", "import", "export", "review", "cancel"}},
+		{7400, "importJob", "订单导入任务", []string{"query"}},
+		{7500, "package", "包裹发货", []string{"query", "edit", "ship"}},
+	} {
+		m := base
+		m.MenuID = spec.id
+		m.ParentID = 6000
+		m.MenuName = spec.name
+		m.Path = spec.key
+		m.MenuType = "C"
+		m.Component = ptr("erp/" + spec.key + "/index")
+		m.Perms = ptr("erp:" + spec.key + ":list")
+		m.Icon = "list"
+		menus = append(menus, m)
+		for i, action := range spec.actions {
+			b := base
+			b.MenuID = spec.id + int64(i) + 1
+			b.ParentID = spec.id
+			b.MenuName = spec.name + "-" + action
+			b.MenuType = "F"
+			b.Perms = ptr("erp:" + spec.key + ":" + action)
+			menus = append(menus, b)
+		}
+	}
 	return menus
 }

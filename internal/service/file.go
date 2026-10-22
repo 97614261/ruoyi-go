@@ -6,12 +6,16 @@ import (
 	"ruoyi-go/internal/repository"
 	"ruoyi-go/pkg/errs"
 	"ruoyi-go/pkg/types"
+	"strings"
 )
 
 func RecordFile(ctx context.Context, key, name, contentType string, size, userID int64, operator string) error {
 	return repository.InsertFile(ctx, &model.SysFile{StorageKey: key, OriginalName: name, ContentType: contentType, SizeBytes: size, UploaderUserID: userID, CreateBy: operator, CreateTime: types.Now()})
 }
 func AccessibleFile(ctx context.Context, key string) (*model.SysFile, error) {
+	if strings.HasPrefix(key, model.ERPImportFilePrefix) {
+		return nil, errs.New("文件不存在或无权访问")
+	}
 	f, err := repository.FindFile(ctx, key)
 	if err != nil {
 		return nil, err

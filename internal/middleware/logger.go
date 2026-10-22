@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -34,6 +35,11 @@ func Logger() gin.HandlerFunc {
 		start := time.Now()
 		path := c.Request.URL.Path
 		query := c.Request.URL.RawQuery
+		// Order filters may include business identifiers; unknown query fields can
+		// also carry recipient PII. These private domains log metadata only.
+		if strings.HasPrefix(path, "/erp/order") || strings.HasPrefix(path, "/erp/importJob") || strings.HasPrefix(path, "/erp/package") {
+			query = ""
+		}
 
 		c.Next()
 

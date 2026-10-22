@@ -18,7 +18,7 @@
       <el-table-column label="操作" align="center" width="200"><template #default="scope"><el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['erp:sku:edit']">修改</el-button><el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['erp:sku:remove']">删除</el-button></template></el-table-column>
     </el-table>
     <pagination v-show="total > 0" :total="total" v-model:page="queryParams.pageNum" v-model:limit="queryParams.pageSize" @pagination="getList" />
-    <el-dialog :title="title" v-model="open" width="600px" append-to-body><el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
+    <el-dialog :title="title" v-model="open" class="erp-dialog" width="min(600px, calc(100vw - 24px))" append-to-body><el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
       <el-form-item label="SKU编码" prop="skuCode"><el-input v-model="form.skuCode" /></el-form-item>
       <el-form-item label="商品名称" prop="productName"><el-input v-model="form.productName" /></el-form-item>
       <el-form-item label="规格" prop="specification"><el-input v-model="form.specification" /></el-form-item>

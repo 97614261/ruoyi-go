@@ -1,7 +1,8 @@
 <template>
   <div class="app-container home">
     <h1>Go 多租户开发底座</h1>
-    <p class="home-intro">以 Go 为后端、Vue 3 为前端，提供企业隔离、账号权限和基础管理能力。当前 ERP 是库存业务底座，不代表完整电商 ERP。</p>
+    <p class="home-intro">以 Go 为后端、Vue 3 为前端，提供企业隔离、账号权限、库存、商品配对、订单导入与手工履约工作台。当前不代表完整电商 ERP。</p>
+    <el-button v-if="!summary.platformAdmin" type="primary" @click="$router.push('/erp/order')" v-hasPermi="['erp:order:list']">进入订单履约工作台</el-button>
 
     <el-card shadow="never" class="home-panel">
       <template #header>当前工作空间</template>
@@ -11,7 +12,7 @@
         <div><dt>角色</dt><dd>{{ summary.roleLabel }}</dd></div>
       </dl>
       <el-alert v-if="summary.platformAdmin" title="平台账号管理企业生命周期与开通范围，不进入客户的 ERP 业务数据。" type="info" :closable="false" />
-      <el-alert v-else title="菜单由企业开通范围与账号权限共同决定；库存操作还需要仓库权限。看不到入口时，请联系企业管理员。" type="info" :closable="false" />
+      <el-alert v-else title="菜单由企业开通范围与账号权限共同决定；库存还检查仓库范围，订单和商品还检查店铺范围。看不到入口时，请联系企业管理员。" type="info" :closable="false" />
     </el-card>
 
     <el-row :gutter="16">
@@ -33,7 +34,8 @@
             <li>企业管理员维护本企业账号、角色和员工仓库范围。</li>
             <li>ERP 先维护商品、仓库，再保存草稿并确认入库或出库。</li>
             <li>已过账单据不能直接修改；通过关联退货、冲销或盘点纠错，保留历史流水。</li>
-            <li>当前不包含渠道店铺、物流、金额退款和财务核算。</li>
+            <li>订单录入/模板导入只保存待审核数据，不改变库存；导入任务可查看部分失败并显式重试。</li>
+            <li>订单可审核预占、取消释放，并按单包裹维护手工运单/确认本地出库；未提供真实渠道API、自动面单、金额退款和财务核算。</li>
           </ul>
         </el-card>
       </el-col>

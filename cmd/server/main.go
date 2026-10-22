@@ -72,6 +72,9 @@ func run() error {
 	if schemaErr == nil {
 		schemaErr = repository.VerifyERPControls(probeCtx)
 	}
+	if schemaErr == nil {
+		schemaErr = repository.VerifyERPPhase1Schema(probeCtx)
+	}
 	probeCancel()
 	if schemaErr != nil {
 		return schemaErr
@@ -104,6 +107,14 @@ func run() error {
 	}
 
 	// 定时任务调度器：从 sys_job 装载状态正常的任务。
+	if err := service.StartERPOrderImports(ctx, cfg.Upload); err != nil {
+		return err
+	}
+	defer func() {
+		stop, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
+		defer cancel()
+		_ = service.ShutdownERPOrderImports(stop)
+	}()
 	// 放在所有无副作用的启动校验之后，避免后续初始化失败时遗留任务。
 	if err := service.StartScheduler(ctx); err != nil {
 		return err
@@ -180,11 +191,12 @@ func shutdownComponents(
 }
 
 func shutdownAsyncWorkers(ctx context.Context) error {
-	results := make(chan error, 3)
+	results := make(chan error, 4)
 	go func() { results <- middleware.ShutdownOperLogPool(ctx) }()
 	go func() { results <- service.ShutdownManualJobPool(ctx) }()
 	go func() { results <- service.ShutdownPermissionRevocationQueue(ctx) }()
-	return errors.Join(<-results, <-results, <-results)
+	go func() { results <- service.ShutdownERPOrderImports(ctx) }()
+	return errors.Join(<-results, <-results, <-results, <-results)
 }
 
 func initLogger(level string) {

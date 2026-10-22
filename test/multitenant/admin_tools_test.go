@@ -121,7 +121,11 @@ func runTenantAdminTools(t *testing.T, parent *suite, other, platform string) {
 			if s.req("GET", "/system/user/list", owner, nil)["code"] != float64(403) {
 				s.t.Fatal("revoked endpoint remains accessible")
 			}
-			remaining, err := repository.SelectMenuIDsByRoleID(tenantctx.With(ctx, tenant.TenantID, false), roleID, false)
+			// Login helpers may legitimately wait a full rate-limit window. A
+			// fixture-wide 30s context must not be reused after that wait.
+			queryCtx, stop := context.WithTimeout(tenantctx.With(context.Background(), tenant.TenantID, false), 5*time.Second)
+			remaining, err := repository.SelectMenuIDsByRoleID(queryCtx, roleID, false)
+			stop()
 			if err != nil || len(remaining) != 0 {
 				s.t.Fatal("normal role retained revoked rows")
 			}
@@ -208,7 +212,13 @@ func runTenantAdminTools(t *testing.T, parent *suite, other, platform string) {
 			s.ok(s.req("GET", "/getInfo", owner, nil))
 			member = s.loginAs(code, "member", memberPassword)
 			s.ok(s.req("GET", "/getInfo", member, nil))
-			if count, err := s.redis.Exists(ctx, redisx.TenantPasswordKey(tenantctx.With(ctx, tenant.TenantID, false), "owner")).Result(); err != nil || count != 0 {
+			queryCtx, stop := context.WithTimeout(tenantctx.With(context.Background(), tenant.TenantID, false), 5*time.Second)
+			count, err := s.redis.Exists(queryCtx, redisx.TenantPasswordKey(queryCtx, "owner")).Result()
+			stop()
+			if err != nil {
+				s.t.Fatal("retry-counter verification query failed", err)
+			}
+			if count != 0 {
 				s.t.Fatal("owner login retry counter not cleared")
 			}
 		}) {

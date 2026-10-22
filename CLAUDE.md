@@ -13,6 +13,16 @@ ERP 等普通业务 CRUD 继续使用生成器。缺失租户上下文必须拒�
 新平台专属接口使用 `/platform/` 路径与 `platform:*` 权限；兼容的旧平台工具同样必须经平台入口检查。
 不得把本分支直接连到原单租户库启动。尚未提交的多租户改动会随工作区移动，切分支前先提交或暂存。
 
+2026-10-21用户已要求ERP一期步骤1—8：基线/设计、备份及显式结构升级、渠道/店铺/员工范围、商品SKU配对、待审核订单/私有模板导入、事务履约、页面工作台及本地验收收口，见
+[docs/ERP_PHASE1_DESIGN.md](./docs/ERP_PHASE1_DESIGN.md)及[核对记录](./docs/ERP_PHASE1_BASELINE.md)。
+步骤2的本地DDL及恢复演练见[docs/ERP_PHASE1_SCHEMA.md](./docs/ERP_PHASE1_SCHEMA.md)，步骤3见[docs/ERP_PHASE1_SHOPS.md](./docs/ERP_PHASE1_SHOPS.md)，步骤4见[docs/ERP_PHASE1_ITEMS.md](./docs/ERP_PHASE1_ITEMS.md)，步骤5见[docs/ERP_PHASE1_ORDERS.md](./docs/ERP_PHASE1_ORDERS.md)，步骤6见[docs/ERP_PHASE1_FULFILLMENT.md](./docs/ERP_PHASE1_FULFILLMENT.md)，步骤7见[docs/ERP_PHASE1_WORKSPACE.md](./docs/ERP_PHASE1_WORKSPACE.md)，步骤8见[docs/ERP_PHASE1_ACCEPTANCE.md](./docs/ERP_PHASE1_ACCEPTANCE.md)。本地回归及公开/私有附件配套恢复已验；不代表全部浏览器/手机真机、Linux实际部署、生产迁移或容量认证。
+新菜单仅注册定义，不给已有企业/员工自动开通；本地前后端为测试启动，其他环境不动。此前基础收口的验证与生产边界继续有效。erpphase1默认只读，写入必须显式确认独立库及已核验备份报告。
+2026-10-22用户明确“不要远程，先本地”。本轮本地补验已收口：员工范围/旧会话撤权、导入结果跳订单、ERP弹窗四视口与回归，见[docs/ERP_LOCAL_ACCEPTANCE_2026-10-22.md](./docs/ERP_LOCAL_ACCEPTANCE_2026-10-22.md)。只修改自有web的ERP布局/测试和文档，不再连接远程，不改生产/原库或既有账号密码；Linux部署、容量、生产升级/回退和异地备份按用户选择延后，不计成本轮失败或伪装通过。
+一期拟做店铺、商品配对及订单履约；供应商、采购订单、真实渠道API和财务仍不在一期实施范围。
+erp分支开发入口见[docs/ERP_FOUNDATION.md](./docs/ERP_FOUNDATION.md)，交付边界见
+[docs/ERP_RELEASE.md](./docs/ERP_RELEASE.md)。验证优先使用`scripts/verify-erp.ps1`：默认无数据库接口测试，
+只有显式`-Integration`才执行本地多租户回归并写入专用验收数据。不要误用下方旧单租户`test.ps1`作为本分支默认入口。
+
 用 Go 重做 RuoYi 后端。**目标是超越 Java 版**，同时冻结已有消费者依赖的契约面。
 
 ## 三层边界（先读这个，再读别的）
@@ -192,4 +202,5 @@ go run ./cmd/server       # 本地启动
   Vue 页面/API 和菜单 SQL。模板改动必须同步渲染测试并在 DECISIONS 说明
 - 做完一个模块，先补 `test/` 下的接口测试并全绿，再说完成；前端点一遍是补充验证不是主证据
 - 跑测试：`.\scripts\test.ps1 [用例名正则]`，结果在 `test/results/summary.log`
+  （仅旧单租户入口；erp分支用`.\scripts\verify-erp.ps1`，真实本地回归须显式`-Integration`）
 - 任何影响契约、分层、依赖的决定，追加一条到 @docs/DECISIONS.md

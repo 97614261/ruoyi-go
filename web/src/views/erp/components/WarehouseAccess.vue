@@ -1,6 +1,6 @@
 <template>
  <el-button v-if="userStore.identity?.tenantAdmin" @click="start" v-hasPermi="['erp:warehouse:grant']">员工仓库授权</el-button>
- <el-dialog v-model="open" title="员工仓库权限" width="760px" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving">
+ <el-dialog v-model="open" title="员工仓库权限" class="erp-dialog" width="min(760px, calc(100vw - 24px))" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving">
   <el-alert title="员工默认无仓库。保存会替换该员工的仓库集合；空集合表示全部撤回，后端立即按新集合校验。所有者始终拥有全部仓库。" type="warning" :closable="false"/>
   <el-form class="mt12" inline size="small"><el-form-item label="员工"><el-select v-model="userId" filterable remote :remote-method="findUsers" @visible-change="v=>v&&findUsers('')" @change="chooseUser" :disabled="saving" placeholder="搜索员工用户名"><el-option v-for="u in users" :key="u.userId" :value="u.userId" :label="u.userName+' · '+u.nickName"/></el-select></el-form-item><el-form-item label="仓库"><el-input v-model="query.warehouseName" :disabled="saving" @keyup.enter="search" placeholder="搜索仓库名称"/></el-form-item><el-form-item><el-button @click="search" :disabled="saving">查询</el-button></el-form-item></el-form>
   <p>已选 {{selected.length}} 个仓库（跨页保留），授权版本 v{{version||'—'}}</p>

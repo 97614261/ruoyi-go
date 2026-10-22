@@ -1,0 +1,22 @@
+import request from '@/utils/request'
+// Domain idempotency keys + component busy state. Never cache recipient bodies
+// in the generic browser repeat-submit guard, including its memory cache.
+export const listOrders = params => request({ url: '/erp/order/list', method: 'get', params })
+export const getOrder = id => request({ url: `/erp/order/${id}`, method: 'get' })
+export const orderWorkbench = params => request({ url: '/erp/order/workbench', method: 'get', params })
+export const orderReadiness = (id, params) => request({ url: `/erp/order/${id}/readiness`, method: 'get', params })
+export const addOrder = data => request({ url: '/erp/order', method: 'post', data, headers: { repeatSubmit: false } })
+export const editOrder = (id, data) => request({ url: `/erp/order/${id}`, method: 'put', data, headers: { repeatSubmit: false } })
+export const importOrders = data => request({ url: '/erp/order/import', method: 'post', data, headers: { repeatSubmit: false, 'Content-Type': 'multipart/form-data' }, timeout: 30000 })
+export const orderTemplate = () => request({ url: '/erp/order/importTemplate', method: 'get', responseType: 'blob' })
+export const listImportJobs = params => request({ url: '/erp/importJob/list', method: 'get', params })
+export const getImportJob = id => request({ url: `/erp/importJob/${id}`, method: 'get' })
+export const importResults = (id, params) => request({ url: `/erp/importJob/${id}/results`, method: 'get', params })
+export const retryImportJob = (id, data) => request({ url: `/erp/importJob/${id}/retry`, method: 'post', data, headers: { repeatSubmit: false } })
+export const importSourceFile = id => request({ url: `/erp/importJob/${id}/file`, method: 'get', responseType: 'blob' })
+export const reviewOrder = (id,data) => request({url:`/erp/order/${id}/review`,method:'put',data,headers:{repeatSubmit:false}})
+export const cancelOrder = (id,data) => request({url:`/erp/order/${id}/cancel`,method:'put',data,headers:{repeatSubmit:false}})
+export const listPackages = params => request({url:'/erp/package/list',method:'get',params})
+export const getPackage = id => request({url:`/erp/package/${id}`,method:'get'})
+export const savePackageLogistics = (id,data) => request({url:`/erp/package/${id}/logistics`,method:'put',data,headers:{repeatSubmit:false}})
+export const shipPackage = (id,data) => request({url:`/erp/package/${id}/ship`,method:'put',data,headers:{repeatSubmit:false}})

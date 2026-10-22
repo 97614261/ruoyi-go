@@ -19,7 +19,7 @@
    </template></el-table-column>
   </el-table>
   <pagination v-show="total>0" :total="total" v-model:page="query.pageNum" v-model:limit="query.pageSize" @pagination="load"/>
-  <el-dialog v-model="open" :title="form.documentId?'编辑草稿 · v'+form.version:'新建草稿'" width="min(850px, calc(100vw - 32px))" class="erp-document-dialog" align-center :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving">
+  <el-dialog v-model="open" :title="form.documentId?'编辑草稿 · v'+form.version:'新建草稿'" width="min(850px, calc(100vw - 32px))" class="erp-document-dialog erp-dialog" align-center :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving">
    <el-alert v-if="kind==='COUNT'" title="保存时记录账面快照；期间有库存流转将拒绝过账。编辑会重新取快照，请重新核对实盘。" type="warning" :closable="false" class="mb12"/>
    <el-form label-width="85px" :disabled="saving">
     <template v-if="correction">
@@ -37,7 +37,7 @@
    <el-input class="mt12" v-model="form.remark" :disabled="saving" type="textarea" maxlength="500" show-word-limit :placeholder="correction||kind==='COUNT'?'必填：退货／冲销／盘点原因':'备注（可选）'"/>
    <template #footer><el-button @click="open=false" :disabled="saving">取消</el-button><el-button type="primary" @click="save" :loading="saving">保存草稿</el-button></template>
   </el-dialog>
-  <el-dialog v-model="detailOpen" title="单据明细快照" width="min(900px, calc(100vw - 32px))" class="erp-document-dialog" align-center>
+  <el-dialog v-model="detailOpen" title="单据明细快照" width="min(900px, calc(100vw - 32px))" class="erp-document-dialog erp-dialog" align-center>
    <p>{{selected.documentNo}} · {{selected.warehouseName}} · {{label(selected.status)}} · v{{selected.version}}</p>
    <p v-if="selected.sourceDocumentId">关联原单 ID：{{selected.sourceDocumentId}} · {{selected.reversal?'整单冲销':'退货'}}</p>
    <el-table :data="selected.lines" size="small"><el-table-column label="SKU编码" prop="skuCode"/><el-table-column label="商品" prop="productName"/><el-table-column label="规格" prop="specification"/><el-table-column label="单位" prop="unit" width="60"/><el-table-column :label="kind==='COUNT'?'实盘':'数量'" prop="quantity" width="100"/><template v-if="kind==='COUNT'"><el-table-column label="账面快照" prop="expectedOnHand" width="100"/><el-table-column label="预占快照" prop="expectedReserved" width="100"/><el-table-column label="差异" width="100"><template #default="{row}">{{row.quantity-row.expectedOnHand}}</template></el-table-column></template></el-table>

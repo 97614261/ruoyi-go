@@ -22,6 +22,11 @@ var tenantTables = map[string]bool{
 	"erp_document_line": true, "erp_stock": true, "erp_stock_ledger": true,
 	"erp_warehouse_access": true,
 	"erp_warehouse_policy": true,
+	"erp_shop":             true, "erp_shop_access": true, "erp_shop_policy": true,
+	"erp_shop_item": true, "erp_shop_sku_mapping": true,
+	"erp_order": true, "erp_order_line": true, "erp_order_event": true,
+	"erp_package": true, "erp_package_line": true,
+	"erp_import_job": true, "erp_import_result": true,
 }
 var tenantJoinPattern = regexp.MustCompile(`(?i)((?:(?:LEFT|RIGHT|INNER|CROSS)(?:\s+OUTER)?\s+)?JOIN\s+)([a-z_]+)(?:\s+(?:AS\s+)?([a-z_]+))?(\s+ON\s+)`)
 var tenantBusinessNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -84,7 +89,7 @@ func scopedTenantTable(tx *gorm.DB, table string) bool {
 // map updates, which have no model schema. The marker never disables filtering.
 func TenantTable(q *gorm.DB, name string) *gorm.DB {
 	q = q.Session(&gorm.Session{})
-	if !tenantBusinessNamePattern.MatchString(name) || name == "sys_menu" || name == "sys_tenant" || name == "sys_tenant_menu" || name == "sys_tenant_policy" || strings.HasPrefix(name, "gen_") {
+	if !tenantBusinessNamePattern.MatchString(name) || name == "erp_schema_migration" || name == "sys_menu" || name == "sys_tenant" || name == "sys_tenant_menu" || name == "sys_tenant_policy" || strings.HasPrefix(name, "gen_") {
 		q.AddError(errors.New("非法或平台专属的业务表"))
 		return q
 	}

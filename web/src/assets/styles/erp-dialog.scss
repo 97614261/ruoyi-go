@@ -1,0 +1,84 @@
+// ERP-only namespace: dialogs may teleport outside their component's scoped CSS.
+// Keep the header/footer reachable; wide tables scroll inside the body, not the page.
+.el-dialog.erp-dialog {
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  margin: 16px auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  .el-dialog__header,
+  .el-dialog__footer {
+    flex: 0 0 auto;
+  }
+
+  .el-dialog__body {
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    overflow: auto;
+    overflow-wrap: anywhere;
+  }
+
+  .el-form-item__content {
+    min-width: 0;
+  }
+
+  .el-input,
+  .el-select,
+  .el-input-number,
+  .el-date-editor,
+  input[type='file'] {
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  input[type='file'] {
+    width: 100%;
+  }
+
+  // The inherited row's negative gutter would otherwise add horizontal body
+  // scrolling even at tablet/desktop widths. Keep column spacing inside the row.
+  .el-row {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+}
+
+// RuoYi's generic :not(.is-fullscreen) rule has an !important 6vh top margin.
+// Override it only here so the 32px height budget is correct in short viewports.
+.el-dialog.erp-dialog:not(.is-fullscreen) {
+  margin-top: 16px !important;
+}
+
+@media (max-width: 640px) {
+  .el-dialog.erp-dialog {
+    // Element Plus applies gutter margins/paddings inline. Neutralize only
+    // the mobile ERP dialog grid so even a 16px gutter cannot overflow its body.
+    .el-col {
+      flex: 0 0 100%;
+      max-width: 100%;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+    }
+
+    .el-form--inline .el-form-item {
+      display: flex;
+      margin-right: 0;
+      max-width: 100%;
+    }
+
+    .el-dialog__footer {
+      display: flex;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 8px;
+
+      .el-button + .el-button {
+        margin-left: 0;
+      }
+    }
+  }
+}

@@ -29,6 +29,9 @@ func validateERPSource(tx *gorm.DB, doc *model.ERPDocument, items []model.ERPLin
 	if err := requireERPWarehouse(tx, source.WarehouseID); err != nil {
 		return err
 	}
+	if err := requireERPDocumentRead(tx, source.DocumentID); err != nil {
+		return err
+	}
 	if doc.WarehouseID != source.WarehouseID || !((doc.Kind == "SR" && source.Kind == "SALE" && source.Status == "SHIPPED") || (doc.Kind == "PR" && source.Kind == "IN" && source.Status == "POSTED")) {
 		return errs.New("原单类型、仓库或状态不允许退货或冲销")
 	}
@@ -123,6 +126,9 @@ func UpdateERPDocumentDraft(ctx context.Context, input *model.ERPDocument, items
 		var hint model.ERPDocument
 		if err := tx.Where("document_id=? AND kind=?", input.DocumentID, input.Kind).Take(&hint).Error; err != nil {
 			return erpReferenceError(err)
+		}
+		if err := requireERPDocumentNotManaged(tx, input.DocumentID); err != nil {
+			return err
 		}
 		if err := requireERPWarehouse(tx, hint.WarehouseID); err != nil {
 			return err

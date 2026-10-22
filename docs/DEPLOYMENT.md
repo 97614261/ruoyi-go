@@ -3,6 +3,10 @@
 本页记录生产部署时必须人工确认的运行时事项。接口契约与开发规则仍以
 [CONVENTIONS.md](./CONVENTIONS.md) 为准，设计理由见 [DECISIONS.md](./DECISIONS.md)。
 
+> 本页下述Java硬切会话命令针对原单租户基线，不是erp分支的一键升级流程。
+> erp分支的独立环境、现有工具限制、备份及失败处理见[ERP_RELEASE.md](./ERP_RELEASE.md)。
+> 不得把不带`ruoyi_mt:`命名空间的旧清理模式或原库初始化SQL直接套用到多租户环境。
+
 ## Java 完全切换到 Go：清理残余登录会话
 
 Go 会为每个用户维护 `login_user_sessions:<userId>` 反向索引。Java 和旧 Go 创建的
