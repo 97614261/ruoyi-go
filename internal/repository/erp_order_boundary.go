@@ -43,5 +43,5 @@ func requireERPDocumentNotManaged(tx *gorm.DB, id int64) error {
 	if len(hits) > 0 {
 		return errs.New("该库存凭据由商业订单托管，请从订单/包裹执行操作")
 	}
-	return nil
+	return requireERPPurchaseVoucherIndependent(tx, id)
 }

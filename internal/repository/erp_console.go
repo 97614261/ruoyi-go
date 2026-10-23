@@ -159,6 +159,10 @@ func erpMenus() []model.SysMenu {
 		{7300, "order", "订单录入", []string{"query", "add", "edit", "import", "export", "review", "cancel"}},
 		{7400, "importJob", "订单导入任务", []string{"query"}},
 		{7500, "package", "包裹发货", []string{"query", "edit", "ship"}},
+		{7600, "supplier", "供应商管理", []string{"query", "add", "edit"}},
+		{7700, "purchase", "采购单", []string{"query", "add", "edit", "confirm", "cancel", "close"}},
+		{7800, "purchaseReceipt", "采购收货记录", []string{"query"}},
+		{7900, "purchaseReceive", "采购收货作业", nil},
 	} {
 		m := base
 		m.MenuID = spec.id
@@ -168,6 +172,9 @@ func erpMenus() []model.SysMenu {
 		m.MenuType = "C"
 		m.Component = ptr("erp/" + spec.key + "/index")
 		m.Perms = ptr("erp:" + spec.key + ":list")
+		if spec.key == "purchaseReceive" {
+			m.Perms = ptr("erp:purchase:receive")
+		}
 		m.Icon = "list"
 		menus = append(menus, m)
 		for i, action := range spec.actions {

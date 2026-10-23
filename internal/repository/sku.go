@@ -96,7 +96,11 @@ func UpdateErpSku(ctx context.Context, target *model.ErpSku) error {
 			if err := tx.Model(&model.ERPStock{}).Where("sku_id=?", target.SkuId).Count(&stocks).Error; err != nil {
 				return err
 			}
-			if lines > 0 || stocks > 0 {
+			purchases, err := purchaseSKUReferenceCount(tx, []int64{target.SkuId})
+			if err != nil {
+				return err
+			}
+			if lines > 0 || stocks > 0 || purchases > 0 {
 				return errs.New("商品已被单据或库存引用，不能修改计量单位")
 			}
 		}
@@ -112,6 +116,13 @@ func DeleteErpSkuByIDs(ctx context.Context, ids []string) error {
 		}
 		if len(rows) != len(ids) {
 			return errs.New("商品不存在或不属于当前企业")
+		}
+		purchases, err := purchaseSKUReferenceCount(tx, ids)
+		if err != nil {
+			return err
+		}
+		if purchases > 0 {
+			return errs.New("商品已被采购单引用，不能删除")
 		}
 		return tx.Where("sku_id IN ?", ids).Delete(&model.ErpSku{}).Error
 	}))

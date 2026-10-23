@@ -7,3 +7,8 @@ import _ "embed"
 //
 //go:embed 003_order_fulfillment.sql
 var Phase1 string
+
+// Purchasing is an independent immutable version, not an extension of Phase1.
+//
+//go:embed 004_purchasing.sql
+var Purchasing string

@@ -44,14 +44,19 @@ func ERPPhase1SHA256() string {
 // user SQL. One definition per line; no ALTER/DML or arbitrary identifiers.
 func phase1Manifest() ([]phase1Table, error) { return parsePhase1Manifest(erpsql.Phase1) }
 func parsePhase1Manifest(script string) ([]phase1Table, error) {
+	return parseERPCreateManifest(script, append([]string{"erp_schema_migration"}, phase1BusinessTables...))
+}
+
+// Only embedded reviewed manifests call this; each version owns its table list.
+func parseERPCreateManifest(script string, names []string) ([]phase1Table, error) {
 	var clean []string
 	for _, line := range strings.Split(script, "\n") {
 		if !strings.HasPrefix(strings.TrimSpace(line), "--") {
 			clean = append(clean, line)
 		}
 	}
-	allowed := map[string]bool{"erp_schema_migration": true}
-	for _, name := range phase1BusinessTables {
+	allowed := map[string]bool{}
+	for _, name := range names {
 		allowed[name] = true
 	}
 	header := regexp.MustCompile(`^CREATE TABLE ([a-z0-9_]+) \(\n([\s\S]+)\n\) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci$`)

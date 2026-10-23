@@ -1,0 +1,12 @@
+import request from '@/utils/request'
+export const listPurchases=params=>request({url:'/erp/purchase/list',method:'get',params})
+export const getPurchase=id=>request({url:`/erp/purchase/${id}`,method:'get'})
+export const purchaseEvents=(id,params)=>request({url:`/erp/purchase/${id}/events`,method:'get',params})
+export const addPurchase=data=>request({url:'/erp/purchase',method:'post',headers:{repeatSubmit:false},data})
+export const editPurchase=(id,data)=>request({url:`/erp/purchase/${id}`,method:'put',headers:{repeatSubmit:false},data})
+export const actPurchase=(id,action,data)=>request({url:`/erp/purchase/${id}/${action}`,method:'put',headers:{repeatSubmit:false},data})
+export const listReceivables=params=>request({url:'/erp/purchase/receivable/list',method:'get',params})
+export const getReceivable=id=>request({url:`/erp/purchase/${id}/receivable`,method:'get'})
+export const receivePurchase=(id,data)=>request({url:`/erp/purchase/${id}/receipts`,method:'post',headers:{repeatSubmit:false},data})
+export const listPurchaseReceipts=params=>request({url:'/erp/purchaseReceipt/list',method:'get',params})
+export const getPurchaseReceipt=id=>request({url:`/erp/purchaseReceipt/${id}`,method:'get'})

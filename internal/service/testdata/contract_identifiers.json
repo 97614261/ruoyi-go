@@ -103,6 +103,9 @@
     "tool:swagger:list"
   ],
   "erpMenuPermissions": [
+    "erp:purchase:receive", "erp:purchaseReceipt:list", "erp:purchaseReceipt:query",
+    "erp:purchase:list", "erp:purchase:query", "erp:purchase:add", "erp:purchase:edit", "erp:purchase:confirm", "erp:purchase:cancel", "erp:purchase:close",
+    "erp:supplier:list", "erp:supplier:query", "erp:supplier:add", "erp:supplier:edit",
     "erp:shopItem:list", "erp:shopItem:query", "erp:shopItem:add", "erp:shopItem:edit", "erp:shopItem:map",
     "erp:order:list", "erp:order:query", "erp:order:add", "erp:order:edit", "erp:order:import", "erp:order:export", "erp:importJob:list", "erp:importJob:query",
     "erp:order:review", "erp:order:cancel", "erp:package:list", "erp:package:query", "erp:package:edit", "erp:package:ship",

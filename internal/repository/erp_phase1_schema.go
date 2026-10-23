@@ -81,11 +81,17 @@ func inspectPhase1(q *gorm.DB) (*ERPPhase1SchemaStatus, error) {
 	if err != nil {
 		return nil, err
 	}
+	return inspectERPCreateSchema(q, manifest, ERPPhase1Version, ERPPhase1SHA256())
+}
+
+// Shared read-only metadata comparison, not an arbitrary SQL migration engine.
+func inspectERPCreateSchema(q *gorm.DB, manifest []phase1Table, version, hash string) (*ERPPhase1SchemaStatus, error) {
+	var err error
 	names := make([]string, len(manifest))
 	for i, t := range manifest {
 		names[i] = t.Name
 	}
-	s := &ERPPhase1SchemaStatus{Version: ERPPhase1Version, DDLHash: ERPPhase1SHA256(), MissingTables: []string{}}
+	s := &ERPPhase1SchemaStatus{Version: version, DDLHash: hash, MissingTables: []string{}}
 	var tables []struct{ TableName, Engine, TableCollation string }
 	if err = q.Raw("SELECT table_name,engine,table_collation FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ?", names).Scan(&tables).Error; err != nil {
 		return nil, err
@@ -103,7 +109,7 @@ func inspectPhase1(q *gorm.DB) (*ERPPhase1SchemaStatus, error) {
 			s.MissingTables = append(s.MissingTables, name)
 		}
 	}
-	if len(tables) == 0 {
+	if len(tables) == 0 && version == ERPPhase1Version {
 		return s, nil
 	}
 	var columns []phase1ActualColumn
@@ -207,11 +213,19 @@ func inspectPhase1(q *gorm.DB) (*ERPPhase1SchemaStatus, error) {
 			}
 		}
 	}
-	if present["erp_schema_migration"] {
+	metadataPresent := present["erp_schema_migration"]
+	if !metadataPresent && version != ERPPhase1Version {
+		var count int64
+		if err = q.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='erp_schema_migration' AND table_type='BASE TABLE'").Scan(&count).Error; err != nil {
+			return nil, err
+		}
+		metadataPresent = count == 1
+	}
+	if metadataPresent {
 		var rows []struct {
 			DDLHash string `gorm:"column:ddl_sha256"`
 		}
-		if err = q.Raw("SELECT ddl_sha256 FROM erp_schema_migration WHERE version_key=?", ERPPhase1Version).Scan(&rows).Error; err != nil {
+		if err = q.Raw("SELECT ddl_sha256 FROM erp_schema_migration WHERE version_key=?", version).Scan(&rows).Error; err != nil {
 			return nil, err
 		}
 		if len(rows) > 0 {

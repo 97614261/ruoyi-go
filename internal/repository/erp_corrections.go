@@ -32,6 +32,11 @@ func validateERPSource(tx *gorm.DB, doc *model.ERPDocument, items []model.ERPLin
 	if err := requireERPDocumentRead(tx, source.DocumentID); err != nil {
 		return err
 	}
+	if doc.Kind == "PR" {
+		if err := requireERPPurchaseVoucherIndependent(tx, source.DocumentID); err != nil {
+			return err
+		}
+	}
 	if doc.WarehouseID != source.WarehouseID || !((doc.Kind == "SR" && source.Kind == "SALE" && source.Status == "SHIPPED") || (doc.Kind == "PR" && source.Kind == "IN" && source.Status == "POSTED")) {
 		return errs.New("原单类型、仓库或状态不允许退货或冲销")
 	}
