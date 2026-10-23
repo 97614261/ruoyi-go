@@ -238,7 +238,7 @@ func ReceiveERPPurchase(ctx context.Context, id int64, in model.ERPPurchaseRecei
 // Only fixed internal metadata probes may use System; never carry it forward
 // into the customer business query or its nested tenant predicates.
 func purchasingTableExists(tx *gorm.DB, table string) (bool, error) {
-	if table != "erp_purchase_receipt" && table != "erp_purchase_order_line" {
+	if table != "erp_purchase_receipt" && table != "erp_purchase_order_line" && table != "erp_purchase_return_order" {
 		return false, errs.New("非法采购元数据探测")
 	}
 	var n int64
@@ -257,6 +257,17 @@ func requireERPPurchaseVoucherIndependent(tx *gorm.DB, id int64) error {
 	}
 	if n != 0 {
 		return errs.New("该库存凭据由采购收货托管，不支持直接修改、撤销或采购退货")
+	}
+	installed, e = purchasingTableExists(tx, "erp_purchase_return_order")
+	if e != nil || !installed {
+		return e
+	}
+	e = tx.Model(&model.ERPPurchaseReturn{}).Where(`stock_document_id=? OR stock_document_id=(SELECT pd.source_document_id FROM erp_document pd WHERE pd.tenant_id=? AND pd.document_id=?)`, id, tenantctx.ID(tx.Statement.Context), id).Count(&n).Error
+	if e != nil {
+		return e
+	}
+	if n != 0 {
+		return errs.New("该库存凭据由采购退货托管，不支持独立操作")
 	}
 	return nil
 }

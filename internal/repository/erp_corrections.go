@@ -19,6 +19,10 @@ func erpApplyCount(hand, reserved, target int64) (int64, int64, error) {
 // The original document row is the serialization point for all posted returns
 // and reversals. Locking reads below deliberately avoid an old RR snapshot.
 func validateERPSource(tx *gorm.DB, doc *model.ERPDocument, items []model.ERPLineInput) error {
+	return validateERPSourceWithReturn(tx, doc, items, nil)
+}
+
+func validateERPSourceWithReturn(tx *gorm.DB, doc *model.ERPDocument, items []model.ERPLineInput, proof *purchaseReturnSource) error {
 	if doc.SourceDocumentID == nil {
 		return nil
 	}
@@ -33,7 +37,11 @@ func validateERPSource(tx *gorm.DB, doc *model.ERPDocument, items []model.ERPLin
 		return err
 	}
 	if doc.Kind == "PR" {
-		if err := requireERPPurchaseVoucherIndependent(tx, source.DocumentID); err != nil {
+		if proof == nil {
+			if err := requireERPPurchaseVoucherIndependent(tx, source.DocumentID); err != nil {
+				return err
+			}
+		} else if err := proof.verify(tx, doc, &source); err != nil {
 			return err
 		}
 	}

@@ -78,6 +78,9 @@ func run() error {
 	if schemaErr == nil {
 		schemaErr = repository.VerifyERPPurchasingSchema(probeCtx)
 	}
+	if schemaErr == nil {
+		schemaErr = repository.VerifyERPPurchaseReturnSchema(probeCtx)
+	}
 	probeCancel()
 	if schemaErr != nil {
 		return schemaErr

@@ -29,6 +29,7 @@ var tenantTables = map[string]bool{
 	"erp_import_job": true, "erp_import_result": true,
 	"erp_supplier": true, "erp_purchase_order": true, "erp_purchase_order_line": true,
 	"erp_purchase_receipt": true, "erp_purchase_receipt_line": true, "erp_purchase_event": true,
+	"erp_purchase_return_order": true, "erp_purchase_return_line": true,
 }
 var tenantJoinPattern = regexp.MustCompile(`(?i)((?:(?:LEFT|RIGHT|INNER|CROSS)(?:\s+OUTER)?\s+)?JOIN\s+)([a-z_]+)(?:\s+(?:AS\s+)?([a-z_]+))?(\s+ON\s+)`)
 var tenantBusinessNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)

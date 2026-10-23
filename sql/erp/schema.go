@@ -12,3 +12,8 @@ var Phase1 string
 //
 //go:embed 004_purchasing.sql
 var Purchasing string
+
+// PurchaseReturns is an independent optional version; never auto-installed.
+//
+//go:embed 005_purchase_returns.sql
+var PurchaseReturns string

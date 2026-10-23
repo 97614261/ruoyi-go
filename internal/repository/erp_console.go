@@ -163,6 +163,7 @@ func erpMenus() []model.SysMenu {
 		{7700, "purchase", "采购单", []string{"query", "add", "edit", "confirm", "cancel", "close"}},
 		{7800, "purchaseReceipt", "采购收货记录", []string{"query"}},
 		{7900, "purchaseReceive", "采购收货作业", nil},
+		{8000, "purchaseReturnOrder", "采购退货", []string{"query", "return"}},
 	} {
 		m := base
 		m.MenuID = spec.id

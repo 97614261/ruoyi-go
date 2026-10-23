@@ -225,6 +225,15 @@ func TransitionERPDocument(ctx context.Context, kind string, id int64, action, o
 // This is the sole stock state transition core, shared by independent vouchers
 // and commercial-order orchestration. It never opens another transaction.
 func transitionERPDocumentLocked(tx *gorm.DB, doc *model.ERPDocument, action, operator string) error {
+	return transitionERPDocumentWithReturnLocked(tx, doc, action, operator, nil)
+}
+
+// The ordinary stock entry has no capability. Only purchase-return orchestration
+// supplies a proof tied to a newly inserted PR and its exact original receipt.
+func transitionERPDocumentWithReturnLocked(tx *gorm.DB, doc *model.ERPDocument, action, operator string, proof *purchaseReturnSource) error {
+	if proof != nil && (action != "confirm" || doc.Kind != "PR" || doc.Status != "DRAFT" || doc.SourceDocumentID == nil || proof.returnID < 1 || proof.receiptID < 1) {
+		return errs.New("采购退货来源证明不适用于此操作")
+	}
 	kind, id := doc.Kind, doc.DocumentID
 	next, event, err := erpNextState(kind, doc.Status, action)
 	if err := requireERPWarehouse(tx, doc.WarehouseID); err != nil {
@@ -252,7 +261,7 @@ func transitionERPDocumentLocked(tx *gorm.DB, doc *model.ERPDocument, action, op
 			for i, l := range doc.Lines {
 				items[i] = model.ERPLineInput{SkuID: l.SkuID, Quantity: l.Quantity}
 			}
-			if err = validateERPSource(tx, doc, items); err != nil {
+			if err = validateERPSourceWithReturn(tx, doc, items, proof); err != nil {
 				return err
 			}
 		}
