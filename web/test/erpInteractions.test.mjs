@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto'
 import { ref, reactive, computed,watch } from 'vue'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import * as erp from '../src/utils/erp.mjs'
+import * as logistics from '../src/utils/logistics.mjs'
 
 const deferred = () => {
   let resolve, reject
@@ -22,13 +23,14 @@ async function component(name, overrides = {}, props = {}) {
     .replace(/^import\s[^\n]*\n/gm, '').replace('export default', 'const component =')
   const messages = [], prompts = []
   const stubs = {
-    ref, reactive, computed,watch, onMounted() {},onBeforeUnmount(){}, ReferenceSelect: {},
+    ref, reactive, computed,watch, onMounted() {},onBeforeUnmount(){},onDeactivated(){},onActivated(){}, ReferenceSelect: {}, LogisticsMethodSelect:{},
     useRouter: () => ({ push() {} }),useRoute:()=>({query:{}}), saveAs() {}, download: async()=>{}, FormData,
     FulfillmentBatchDialog:{},OrderReadinessPanel:{},orderWorkbench:async()=>({data:{}}),orderReadiness:async()=>({data:{ready:true,version:1,issues:[],stocks:[]}}),
     OrderFulfillmentDialog:{},reviewOrder:async()=>{},cancelOrder:async()=>{},listPackages:async()=>({rows:[],total:0}),getPackage:async()=>({data:{lines:[]}}),savePackageLogistics:async()=>{},shipPackage:async()=>{},
     listOrders:async()=>({rows:[],total:0}),getOrder:async()=>({data:{lines:[]}}),addOrder:async()=>{},editOrder:async()=>{},importOrders:async()=>({data:{jobId:1}}),orderTemplate:async()=>{},
     listImportJobs:async()=>({rows:[],total:0}),getImportJob:async()=>({data:{}}),importResults:async()=>({rows:[],total:0}),retryImportJob:async()=>{},importSourceFile:async()=>{},
     crypto: { randomUUID }, ...erp,
+    ...logistics,packageShipping:async()=>({data:null}),savePackageShipping:async()=>{},checkTracking:async()=>({data:{duplicate:false}}),
     useUserStore: () => ({ id: 1, identity: { tenantAdmin: true } }),
     ElMessage: { warning: text => messages.push(['warning', text]), success: text => messages.push(['success', text]) },
     ElMessageBox: { confirm: async text => { prompts.push(text) } },
@@ -112,8 +114,9 @@ test('order cancel failure retains reason and retry key without false success',a
 test('package logistics double save uses snapshot and retains failed draft',async()=>{
  const pending=deferred(),writes=[];const {state}=await component('PackageWorkspace',{savePackageLogistics:(...args)=>{writes.push(args);return pending.promise}})
  state.open.value=true;state.editing.value=true;state.detail.value={packageId:7,version:3};state.form.value={carrierCode:'MANUAL',trackingNo:'00001',requestKey:'retain-key'}
- const first=state.save();await state.save();pending.reject(Error('offline'));await assert.rejects(first,/offline/)
+ const first=state.save();await state.save();pending.reject(Error('offline'));await first
  assert.equal(writes.length,1);assert.equal(writes[0][1].trackingNo,'00001');assert.equal(writes[0][1].version,3);assert.equal(state.form.value.trackingNo,'00001');assert.equal(state.saving.value,false)
+ assert.ok(state.savePending.value);assert.match(state.saveError.value,/未确认/)
 })
 test('package close invalidates late detail and clears logistics from memory',async()=>{
  const pending=deferred();const {state}=await component('PackageWorkspace',{getPackage:()=>pending.promise})

@@ -122,6 +122,10 @@ func ERPStockList(c *gin.Context) {
 		response.Fail(c, bindMessage(err))
 		return
 	}
+	if err := service.ValidateERPStockQuery(q); err != nil {
+		fail(c, err)
+		return
+	}
 	rows, total, err := service.ListERPStocks(c.Request.Context(), q, page.Parse(c, nil))
 	if err != nil {
 		fail(c, err)
@@ -133,6 +137,10 @@ func ERPLedgerList(c *gin.Context) {
 	var q model.ERPQuery
 	if err := c.ShouldBindQuery(&q); err != nil {
 		response.Fail(c, bindMessage(err))
+		return
+	}
+	if err := service.ValidateERPStockQuery(q); err != nil {
+		fail(c, err)
 		return
 	}
 	rows, total, err := service.ListERPLedger(c.Request.Context(), q, page.Parse(c, nil))

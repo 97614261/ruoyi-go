@@ -105,7 +105,7 @@ func parseERPCreateManifest(script string, names []string) ([]phase1Table, error
 					value := strings.Trim(d[1], "'")
 					c.Default = &value
 				}
-				if strings.HasPrefix(c.Type, "varchar") || strings.HasPrefix(c.Type, "char") {
+				if strings.HasPrefix(c.Type, "varchar") || strings.HasPrefix(c.Type, "char") || c.Type == "text" {
 					c.Collation = "utf8mb4_unicode_ci"
 					if d := coll.FindStringSubmatch(k[3]); d != nil {
 						c.Collation = d[1]

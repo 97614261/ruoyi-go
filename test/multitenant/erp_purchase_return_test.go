@@ -289,6 +289,7 @@ func TestERPPurchaseReturns(t *testing.T) {
 		s.ok(s.req("PUT", fmt.Sprintf("/erp/supplier/%d", sa), a.owner, sup))
 		sku["status"] = "0"
 		s.ok(s.req("PUT", "/erp/sku", a.owner, sku))
+		wh = data(s.req("GET", fmt.Sprintf("/erp/warehouse/%d", wa), a.owner, nil))
 		wh["status"] = "0"
 		s.ok(s.req("PUT", "/erp/warehouse", a.owner, wh))
 	})

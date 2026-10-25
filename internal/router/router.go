@@ -55,6 +55,7 @@ func New(cfg *config.Config) *gin.Engine {
 	// 而那恰恰是最需要能追溯的一条
 	r.Use(
 		middleware.Trace(),
+		middleware.DownloadErrorJSON("/erp/logistics/shipments/export"),
 		middleware.Recovery(),
 		middleware.Logger(),
 		middleware.CORS(),

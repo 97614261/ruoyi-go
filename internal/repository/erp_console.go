@@ -164,6 +164,21 @@ func erpMenus() []model.SysMenu {
 		{7800, "purchaseReceipt", "采购收货记录", []string{"query"}},
 		{7900, "purchaseReceive", "采购收货作业", nil},
 		{8000, "purchaseReturnOrder", "采购退货", []string{"query", "return"}},
+		{8100, "salesReturnOrder", "订单退货入库", []string{"query", "return"}},
+		{8200, "transfer", "仓库调拨", []string{"query", "add", "edit", "dispatch", "receive", "cancel"}},
+		{8300, "financeAccount", "财务资金账户", []string{"query", "add", "edit"}},
+		{8400, "payable", "采购应付", []string{"query", "add", "adjust", "export"}},
+		{8500, "payment", "采购付款", []string{"query", "add", "reverse"}},
+		{8600, "financeStatement", "供应商对账", []string{"export"}},
+		{8700, "receivable", "销售应收", []string{"query", "add", "adjust", "export"}},
+		{8800, "collection", "销售收款", []string{"query", "add", "reverse"}},
+		{8900, "shopStatement", "店铺对账", []string{"export"}},
+		{9000, "product", "商品档案", []string{"query", "add", "edit", "import", "export", "image"}},
+		{9100, "productCategory", "商品分类", []string{"add", "edit"}},
+		{9200, "logistics", "物流设置", []string{"query", "add", "edit"}},
+		{9300, "shipment", "发货记录", []string{"export"}},
+		{9400, "overview", "经营概览", nil},
+		{9500, "setup", "企业启用", nil},
 	} {
 		m := base
 		m.MenuID = spec.id
@@ -187,6 +202,18 @@ func erpMenus() []model.SysMenu {
 			b.Perms = ptr("erp:" + spec.key + ":" + action)
 			menus = append(menus, b)
 		}
+	}
+	for _, spec := range []struct {
+		id, parent int64
+		perm, name string
+	}{{6501, 6500, "erp:stock:export", "库存导出"}, {6502, 6500, "erp:stock:alert", "预警配置"}, {6503, 6500, "erp:stock:reconcile", "只读库存核对"}, {6601, 6600, "erp:ledger:export", "流水导出"}} {
+		b := base
+		b.MenuID = spec.id
+		b.ParentID = spec.parent
+		b.MenuName = spec.name
+		b.MenuType = "F"
+		b.Perms = ptr(spec.perm)
+		menus = append(menus, b)
 	}
 	return menus
 }

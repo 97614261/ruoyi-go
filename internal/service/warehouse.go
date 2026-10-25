@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"ruoyi-go/internal/model"
 	"ruoyi-go/internal/repository"
@@ -46,6 +47,9 @@ func CreateErpWarehouse(ctx context.Context, target *model.ErpWarehouse, operato
 	if err := validateERPWarehouse(target); err != nil {
 		return err
 	}
+	if utf8.RuneCountInString(target.Address) > 300 || utf8.RuneCountInString(target.Manager) > 64 {
+		return errs.New("地址或负责人过长")
+	}
 	target.WarehouseId = 0
 	target.CreateBy = operator
 	target.CreateTime = types.Now()
@@ -60,6 +64,9 @@ func UpdateErpWarehouse(ctx context.Context, target *model.ErpWarehouse, operato
 	}
 	if target.WarehouseId <= 0 {
 		return errs.New("主键不能为空")
+	}
+	if target.Version < 1 || utf8.RuneCountInString(target.Address) > 300 || utf8.RuneCountInString(target.Manager) > 64 {
+		return errs.New("请刷新取得当前版本，地址或负责人长度须合法")
 	}
 	target.UpdateBy = operator
 	target.UpdateTime = types.Now()

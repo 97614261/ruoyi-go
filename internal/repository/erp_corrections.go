@@ -22,7 +22,11 @@ func validateERPSource(tx *gorm.DB, doc *model.ERPDocument, items []model.ERPLin
 	return validateERPSourceWithReturn(tx, doc, items, nil)
 }
 
-func validateERPSourceWithReturn(tx *gorm.DB, doc *model.ERPDocument, items []model.ERPLineInput, proof *purchaseReturnSource) error {
+type erpReturnSourceProof interface {
+	verify(*gorm.DB, *model.ERPDocument, *model.ERPDocument) error
+}
+
+func validateERPSourceWithReturn(tx *gorm.DB, doc *model.ERPDocument, items []model.ERPLineInput, proof erpReturnSourceProof) error {
 	if doc.SourceDocumentID == nil {
 		return nil
 	}
@@ -39,6 +43,15 @@ func validateERPSourceWithReturn(tx *gorm.DB, doc *model.ERPDocument, items []mo
 	if doc.Kind == "PR" {
 		if proof == nil {
 			if err := requireERPPurchaseVoucherIndependent(tx, source.DocumentID); err != nil {
+				return err
+			}
+		} else if err := proof.verify(tx, doc, &source); err != nil {
+			return err
+		}
+	}
+	if doc.Kind == "SR" {
+		if proof == nil {
+			if err := requireERPSalesSourceIndependent(tx, source.DocumentID); err != nil {
 				return err
 			}
 		} else if err := proof.verify(tx, doc, &source); err != nil {

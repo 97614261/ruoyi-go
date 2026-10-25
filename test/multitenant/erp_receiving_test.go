@@ -317,6 +317,7 @@ func TestERPPurchaseReceiving(t *testing.T) {
 		wh["status"] = "1"
 		s.ok(s.req("PUT", "/erp/warehouse", a.owner, wh))
 		deny(receive(users[0], p, input(l, 1, 3)))
+		wh = data(s.req("GET", fmt.Sprintf("/erp/warehouse/%d", wa), a.owner, nil))
 		wh["status"] = "0"
 		s.ok(s.req("PUT", "/erp/warehouse", a.owner, wh))
 	})

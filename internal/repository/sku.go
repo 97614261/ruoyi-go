@@ -88,20 +88,16 @@ func UpdateErpSku(ctx context.Context, target *model.ErpSku) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("sku_id=?", target.SkuId).Take(&old).Error; err != nil {
 			return erpReferenceError(err)
 		}
-		if old.Unit != target.Unit {
-			var lines, stocks int64
-			if err := tx.Model(&model.ERPDocumentLine{}).Where("sku_id=?", target.SkuId).Count(&lines).Error; err != nil {
-				return err
+		if err := denyManagedCatalogSKU(tx, []int64{target.SkuId}); err != nil {
+			return err
+		}
+		if old.Unit != target.Unit || old.SkuCode != target.SkuCode || old.Specification != target.Specification {
+			refs, e := catalogSKUReferences(tx, []int64{target.SkuId})
+			if e != nil {
+				return e
 			}
-			if err := tx.Model(&model.ERPStock{}).Where("sku_id=?", target.SkuId).Count(&stocks).Error; err != nil {
-				return err
-			}
-			purchases, err := purchaseSKUReferenceCount(tx, []int64{target.SkuId})
-			if err != nil {
-				return err
-			}
-			if lines > 0 || stocks > 0 || purchases > 0 {
-				return errs.New("商品已被单据或库存引用，不能修改计量单位")
+			if refs[target.SkuId] {
+				return errs.New("商品已被业务引用，不能修改编码、单位或规格")
 			}
 		}
 		return tx.Model(&model.ErpSku{}).Where("sku_id=?", target.SkuId).Updates(updates).Error
@@ -116,6 +112,9 @@ func DeleteErpSkuByIDs(ctx context.Context, ids []string) error {
 		}
 		if len(rows) != len(ids) {
 			return errs.New("商品不存在或不属于当前企业")
+		}
+		if err := denyManagedCatalogSKU(tx, ids); err != nil {
+			return err
 		}
 		purchases, err := purchaseSKUReferenceCount(tx, ids)
 		if err != nil {

@@ -3,6 +3,7 @@ package handler
 import (
 	"log/slog"
 	"mime/multipart"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"ruoyi-go/internal/middleware"
 	"ruoyi-go/internal/service"
 	"ruoyi-go/pkg/errs"
 	"ruoyi-go/pkg/response"
@@ -121,13 +123,26 @@ func rollbackUploads(c *gin.Context, resources []string) {
 
 // CommonDownload GET /common/download?fileName=xxx.xlsx&delete=true
 //
-// 下载 profile/download/ 下的临时文件，通常是别的接口刚生成的。
+// 可下载当前企业已登记的文件；delete=true 仅用于当前上传者的
+// profile/tenants/<tenantId>/download/ 临时文件，不删除普通附件。
 // 前端封装在 plugins/download.js 的 download.name()。
 func CommonDownload(c *gin.Context) {
 	fileName := c.Query("fileName")
-	if _, err := service.AccessibleFile(c.Request.Context(), uploadCfg.URLPrefix+"/"+fileName); err != nil {
+	f, err := service.AccessibleFile(c.Request.Context(), uploadCfg.URLPrefix+"/"+fileName)
+	if err != nil {
 		response.FailDownload(c, response.CodeForbidden, "文件不存在或无权访问")
 		return
+	}
+	deleteAfter := c.Query("delete") == "true"
+	var userID int64
+	if user := middleware.CurrentUser(c); user != nil {
+		userID = user.UserID
+	}
+	if deleteAfter {
+		if err := service.ValidateTemporaryDownload(c.Request.Context(), f, userID, uploadCfg.URLPrefix); err != nil {
+			response.FailDownload(c, response.CodeForbidden, "文件不存在或无权删除")
+			return
+		}
 	}
 	if !upload.CheckAllowDownload(fileName) {
 		response.FailDownload(c, response.CodeError, "文件名称("+fileName+")非法，不允许下载。")
@@ -142,9 +157,19 @@ func CommonDownload(c *gin.Context) {
 
 	// 下载名对齐 Java：时间戳 + 第一个下划线之后的部分。
 	// 生成类接口落盘时用的是 <随机前缀>_<真实名称>，这里把前缀还原掉。
-	realName := strconv.FormatInt(time.Now().In(types.Location).UnixMilli(), 10) + nameAfterUnderscore(fileName)
+	realName := strconv.FormatInt(time.Now().In(types.Location).UnixMilli(), 10) + nameAfterUnderscore(path.Base(fileName))
 
-	serveDownload(c, absPath, realName, c.Query("delete") == "true")
+	if !serveDownload(c, absPath, realName) || !deleteAfter {
+		return
+	}
+	forgotten, err := service.ForgetDownloadedFile(c.Request.Context(), f, userID, uploadCfg.URLPrefix)
+	if err != nil || !forgotten {
+		slog.WarnContext(c.Request.Context(), "保留临时下载文件：登记未删除", "fileId", f.FileID, "err", err)
+		return
+	}
+	if _, err := upload.RemoveManagedFile(uploadCfg.Path, uploadCfg.URLPrefix, tenantFileDir(c, upload.DownloadSubDir), f.StorageKey); err != nil {
+		slog.WarnContext(c.Request.Context(), "删除临时下载文件失败", "fileId", f.FileID, "err", err)
+	}
 }
 
 // CommonDownloadResource GET /common/download/resource?resource=/profile/upload/2026/08/22/x.png
@@ -171,7 +196,7 @@ func CommonDownloadResource(c *gin.Context) {
 		return
 	}
 
-	serveDownload(c, absPath, path.Base(filepath.ToSlash(absPath)), false)
+	serveDownload(c, absPath, path.Base(filepath.ToSlash(absPath)))
 }
 
 // serveDownload 把文件写回响应。
@@ -182,24 +207,23 @@ func CommonDownloadResource(c *gin.Context) {
 //
 // 【用 c.File 而不是先 ReadFile】下载的可能是几百 MB 的导出包，
 // 整个读进内存等于把进程撑爆。所以先 Stat 确认存在再流式写。
-func serveDownload(c *gin.Context, absPath, downloadName string, deleteAfter bool) {
+// 只有完整GET成功写回且请求未取消才允许调用方继续清理临时文件。
+// Range、HEAD和304不会触发清理；成功写回也不代表客户端已保存到磁盘。
+func serveDownload(c *gin.Context, absPath, downloadName string) bool {
 	info, err := os.Stat(absPath)
 	if err != nil || info.IsDir() {
 		// 不回显磁盘路径，只说文件不存在
 		response.FailDownload(c, response.CodeError, "文件不存在或已被删除")
-		return
+		return false
 	}
 
 	setAttachmentHeader(c, downloadName)
 	c.Header("Content-Type", "application/octet-stream")
 	c.File(absPath)
 
-	if deleteAfter {
-		// 删除失败不影响本次下载，只记日志
-		if err := os.Remove(absPath); err != nil {
-			slog.WarnContext(c.Request.Context(), "删除临时下载文件失败", "err", err)
-		}
-	}
+	return c.Request.Method == http.MethodGet && c.Request.Header.Get("Range") == "" &&
+		c.Request.Context().Err() == nil && c.Writer.Status() == http.StatusOK &&
+		int64(c.Writer.Size()) == info.Size() && len(c.Errors) == 0
 }
 
 // setAttachmentHeader 设置下载响应头，对齐 Java 版 FileUtils.setAttachmentResponseHeader。

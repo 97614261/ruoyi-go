@@ -140,8 +140,9 @@
       />
 
       <!-- 添加或修改角色配置对话框 -->
-      <el-dialog :title="title" v-model="open" width="500px" append-to-body>
-         <el-form ref="roleRef" :model="form" :rules="rules" label-width="100px">
+      <el-dialog :title="title" v-model="open" width="500px" style="max-width:calc(100vw - 24px)" append-to-body>
+         <el-form ref="roleRef" :model="form" :rules="rules" label-width="100px" style="max-height:65vh;overflow:auto;padding-right:8px">
+            <RoleTemplatePicker :active="open && form.roleId == null" v-if="form.roleId == null" @apply="applyERPTemplate" />
             <el-form-item label="角色名称" prop="roleName">
                <el-input v-model="form.roleName" placeholder="请输入角色名称" />
             </el-form-item>
@@ -189,7 +190,7 @@
          </el-form>
          <template #footer>
             <div class="dialog-footer">
-               <el-button type="primary" @click="submitForm">确 定</el-button>
+               <el-button type="primary" :disabled="templateApplying" @click="submitForm">确 定</el-button>
                <el-button @click="cancel">取 消</el-button>
             </div>
          </template>
@@ -244,6 +245,9 @@
 <script setup name="Role">
 import { addRole, changeRoleStatus, dataScope, delRole, getRole, listRole, updateRole, deptTreeSelect } from "@/api/system/role"
 import { roleMenuTreeselect, treeselect as menuTreeselect } from "@/api/system/menu"
+import RoleTemplatePicker from '@/views/erp/components/RoleTemplatePicker.vue'
+const templateApplying = ref(false)
+let templateApplySequence = 0
 
 const router = useRouter()
 const { proxy } = getCurrentInstance()
@@ -377,9 +381,30 @@ function handleAuthUser(row) {
 
 /** 查询菜单树结构 */
 function getMenuTreeselect() {
-  menuTreeselect().then(response => {
+  return menuTreeselect().then(response => {
     menuOptions.value = response.data
   })
+}
+
+async function applyERPTemplate(draft) {
+  if (!open.value || form.value.roleId != null) return
+  const target = form.value
+  const sequence = ++templateApplySequence
+  templateApplying.value = true
+  try {
+    await getMenuTreeselect()
+    if (sequence !== templateApplySequence || !open.value || form.value !== target || form.value.roleId != null) return
+    form.value.roleName = draft.roleName
+    form.value.roleKey = draft.roleKey
+    form.value.menuCheckStrictly = false
+    menuNodeAll.value = false
+    await nextTick()
+    if (sequence === templateApplySequence && open.value && form.value === target) menuRef.value?.setCheckedKeys(draft.menuIds, false)
+  } catch {
+    if (sequence === templateApplySequence && open.value) proxy.$modal.msgError('菜单加载失败，模板未应用，请重试')
+  } finally {
+    if (sequence === templateApplySequence) templateApplying.value = false
+  }
 }
 
 /** 所有部门节点数据 */
@@ -394,6 +419,8 @@ function getDeptAllCheckedKeys() {
 
 /** 重置新增的表单以及其他数据  */
 function reset() {
+  ++templateApplySequence
+  templateApplying.value = false
   if (menuRef.value != undefined) {
     menuRef.value.setCheckedKeys([])
   }

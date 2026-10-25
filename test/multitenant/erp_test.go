@@ -277,13 +277,22 @@ func TestERPClosedLoop(t *testing.T) {
 		}
 	})
 	t.Run("generated_master_crud_and_snapshot", func(t *testing.T) {
+		previous := s.t
+		s.t = t
+		defer func() { s.t = previous }()
 		original := createDoc("sales", input(wa, model.ERPLineInput{SkuID: x, Quantity: 1}))
-		deny(s.req("PUT", "/erp/sku", a.owner, map[string]any{"skuId": x, "skuCode": "ITEM-001", "productName": "修改后的商品名", "specification": "更新规格", "unit": "箱", "status": "0"}))
-		s.ok(s.req("PUT", "/erp/sku", a.owner, map[string]any{"skuId": x, "skuCode": "ITEM-001", "productName": "修改后的商品名", "specification": "更新规格", "unit": "件", "status": "0"}))
+		for _, bad := range []struct{ key, value string }{{"skuCode", "CHANGED"}, {"unit", "箱"}, {"specification", "更新规格"}} {
+			v := map[string]any{"skuId": x, "skuCode": "ITEM-001", "productName": "修改后的商品名", "specification": "", "unit": "件", "status": "0"}
+			v[bad.key] = bad.value
+			deny(s.req("PUT", "/erp/sku", a.owner, v))
+		}
+		// Catalog010 deliberately freezes referenced identity/spec/unit. Names
+		// remain editable, without rewriting immutable historical line snapshots.
+		s.ok(s.req("PUT", "/erp/sku", a.owner, map[string]any{"skuId": x, "skuCode": "ITEM-001", "productName": "修改后的商品名", "specification": "", "unit": "件", "status": "0"}))
 		detail := s.req("GET", fmt.Sprintf("/erp/sku/%d", x), a.owner, nil)
 		s.ok(detail)
 		data := detail["data"].(map[string]any)
-		if data["updateBy"] != "owner" || data["productName"] != "修改后的商品名" {
+		if data["updateBy"] != "owner" || data["productName"] != "修改后的商品名" || data["specification"] != "" || data["unit"] != "件" || data["skuCode"] != "ITEM-001" {
 			t.Fatal("generated edit/audit not persisted")
 		}
 		line := state("sales", original)["lines"].([]any)[0].(map[string]any)
@@ -291,6 +300,7 @@ func TestERPClosedLoop(t *testing.T) {
 			t.Fatal("historical document snapshot changed with master data")
 		}
 		unused := createMaster(a.owner, "sku", "UNUSED")
+		s.ok(s.req("PUT", "/erp/sku", a.owner, map[string]any{"skuId": unused, "skuCode": "UNUSED", "productName": "未引用商品", "specification": "允许修改的规格", "unit": "包", "status": "0"}))
 		deny(s.req("DELETE", fmt.Sprintf("/erp/sku/%d,%d", unused, bx), a.owner, nil))
 		s.ok(s.req("GET", fmt.Sprintf("/erp/sku/%d", unused), a.owner, nil))
 		s.ok(s.req("DELETE", fmt.Sprintf("/erp/sku/%d", unused), a.owner, nil))

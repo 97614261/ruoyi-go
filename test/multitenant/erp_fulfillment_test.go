@@ -472,6 +472,7 @@ func TestERPFulfillment(t *testing.T) {
 		s.ok(s.req("PUT", fmt.Sprintf("/erp/shop/%d", sa), a.owner, shopRow))
 		skuRow["status"] = "0"
 		s.ok(s.req("PUT", "/erp/sku", a.owner, skuRow))
+		whRow = data(s.req("GET", fmt.Sprintf("/erp/warehouse/%d", wa), a.owner, nil))
 		whRow["status"] = "0"
 		s.ok(s.req("PUT", "/erp/warehouse", a.owner, whRow))
 	})

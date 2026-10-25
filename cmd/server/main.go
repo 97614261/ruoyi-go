@@ -67,7 +67,7 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	probeCtx, probeCancel := context.WithTimeout(ctx, 5*time.Second)
+	probeCtx, probeCancel := context.WithTimeout(ctx, 45*time.Second)
 	schemaErr := repository.VerifyTenantSchema(probeCtx)
 	if schemaErr == nil {
 		schemaErr = repository.VerifyERPControls(probeCtx)
@@ -80,6 +80,24 @@ func run() error {
 	}
 	if schemaErr == nil {
 		schemaErr = repository.VerifyERPPurchaseReturnSchema(probeCtx)
+	}
+	if schemaErr == nil {
+		schemaErr = repository.VerifyERPSalesReturnSchema(probeCtx)
+	}
+	if schemaErr == nil {
+		schemaErr = repository.VerifyERPWarehouseSchema(probeCtx)
+	}
+	if schemaErr == nil {
+		schemaErr = repository.VerifyERPFinanceSchema(probeCtx)
+	}
+	if schemaErr == nil {
+		schemaErr = repository.VerifyERPSalesFinanceSchema(probeCtx)
+	}
+	if schemaErr == nil {
+		schemaErr = repository.VerifyERPCatalogSchema(probeCtx)
+	}
+	if schemaErr == nil {
+		schemaErr = repository.VerifyERPLogisticsSchema(probeCtx)
 	}
 	probeCancel()
 	if schemaErr != nil {

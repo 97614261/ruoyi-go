@@ -61,11 +61,14 @@ func (ERPStock) TableName() string { return "erp_stock" }
 
 type ERPStockView struct {
 	ERPStock
-	WarehouseName string `json:"warehouseName"`
-	SkuCode       string `json:"skuCode"`
-	ProductName   string `json:"productName"`
-	Unit          string `json:"unit"`
-	Available     int64  `json:"available"`
+	WarehouseName     string `json:"warehouseName"`
+	SkuCode           string `json:"skuCode"`
+	ProductName       string `json:"productName"`
+	Unit              string `json:"unit"`
+	Available         int64  `json:"available"`
+	ThresholdQuantity *int64 `json:"thresholdQuantity"`
+	AlertVersion      int64  `json:"alertVersion"`
+	LowStock          bool   `json:"lowStock"`
 }
 type ERPLedger struct {
 	ERPRecord
@@ -79,6 +82,12 @@ type ERPLedger struct {
 	ReservedDelta int64  `gorm:"column:reserved_delta" json:"reservedDelta"`
 	OnHandAfter   int64  `gorm:"column:on_hand_after" json:"onHandAfter"`
 	ReservedAfter int64  `gorm:"column:reserved_after" json:"reservedAfter"`
+	WarehouseName string `gorm:"->" json:"warehouseName"`
+	SkuCode       string `gorm:"->" json:"skuCode"`
+	ProductName   string `gorm:"->" json:"productName"`
+	Unit          string `gorm:"->" json:"unit"`
+	DocumentKind  string `gorm:"->" json:"documentKind"`
+	TransferID    *int64 `gorm:"->" json:"transferId"`
 }
 
 func (ERPLedger) TableName() string { return "erp_stock_ledger" }
@@ -141,4 +150,8 @@ type ERPQuery struct {
 	WarehouseID int64  `form:"warehouseId" binding:"min=0"`
 	SkuID       int64  `form:"skuId" binding:"min=0"`
 	DocumentID  int64  `form:"documentId" binding:"min=0"`
+	StockState  string `form:"stockState" binding:"omitempty,oneof=ALL IN_STOCK ZERO RESERVED_OUT LOW HAS_STOCK HAS_RESERVED"`
+	Event       string `form:"event" binding:"omitempty,oneof=IN OUT RESERVE RELEASE SR PR COUNT TOUT TIN"`
+	BeginTime   string `form:"beginTime" binding:"max=19"`
+	EndTime     string `form:"endTime" binding:"max=19"`
 }

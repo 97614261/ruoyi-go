@@ -49,6 +49,7 @@ func TestDependencyFailuresDenyAuthenticatedRequests(t *testing.T) {
 	if err = redisx.Init(ctx, redisx.Options{Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB}); err != nil {
 		t.Fatal(err)
 	}
+	cancel() // Initialization budget is not a login/rate-limit waiting budget.
 	defer redisx.Close()
 	service.InitToken(cfg.JWT)
 	s := &suite{t: t, base: "http://127.0.0.1:8081", root: root, client: &http.Client{Timeout: 15 * time.Second}, passwords: loadTestAccounts(t, root), redis: redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB})}
@@ -75,7 +76,9 @@ func TestDependencyFailuresDenyAuthenticatedRequests(t *testing.T) {
 	}
 	_, healthy := request("GET", "/getInfo", nil)
 	s.ok(healthy)
-	before, err := repository.ResolveTenant(ctx, "demo")
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	before, err := repository.ResolveTenant(probeCtx, "demo")
+	probeCancel()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +111,9 @@ func TestDependencyFailuresDenyAuthenticatedRequests(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertClosed("redis_pool_disconnected")
-	after, err := repository.ResolveTenant(ctx, "demo")
+	probeCtx, probeCancel = context.WithTimeout(context.Background(), 5*time.Second)
+	after, err := repository.ResolveTenant(probeCtx, "demo")
+	probeCancel()
 	if err != nil || after.Version != before.Version {
 		t.Fatal("denied mutation changed tenant state")
 	}

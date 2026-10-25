@@ -36,12 +36,22 @@ func requireERPDocumentNotManaged(tx *gorm.DB, id int64) error {
 	if err := requireERPDocumentRead(tx, id); err != nil {
 		return err
 	}
+	var voucher model.ERPDocument
+	if err := tx.Select("document_id,kind").Where("document_id=?", id).Take(&voucher).Error; err != nil {
+		return erpReferenceError(err)
+	}
+	if voucher.Kind == "TOUT" || voucher.Kind == "TIN" {
+		return errs.New("该库存凭据由仓库调拨托管，请从调拨单操作")
+	}
 	var hits []int
 	if err := tx.Model(&model.ERPOrder{}).Select("1").Where("stock_document_id=?", id).Limit(1).Scan(&hits).Error; err != nil {
 		return err
 	}
 	if len(hits) > 0 {
 		return errs.New("该库存凭据由商业订单托管，请从订单/包裹执行操作")
+	}
+	if err := requireERPSalesReturnIndependent(tx, id); err != nil {
+		return err
 	}
 	return requireERPPurchaseVoucherIndependent(tx, id)
 }

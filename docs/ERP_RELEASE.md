@@ -1,5 +1,17 @@
 # ERP 底座交付、升级与失败处理
 
+2026-10-25企业启用本地验收见[报告](./ERP_ENABLEMENT_ACCEPTANCE.md)，操作与新环境顺序见[指南](./ERP_GETTING_STARTED.md)，本轮待提交边界见[发布清单](./ERP_ENABLEMENT_RELEASE.md)。独立空MySQL/Redis实例实际完成初始化、003—011升级、首笔业务和恢复；这不是生产或任意库一键迁移认证。新9500及两个只读GET无新表/索引/012，不自动给已有企业开通。
+
+物流011只新增四表（公司、方式、包裹关联、原结果动作），不ALTER001—010。erplogistics默认只读，显式本地apply要求新鲜配套恢复证据；启动只读校验。旧包裹GET和手工入口保留，不回填旧物流、不自动给既有企业加权。安装、GUI、回归和最终恢复见[ERP_LOGISTICS_ACCEPTANCE](./ERP_LOGISTICS_ACCEPTANCE.md)。
+
+商品010已按用户明确授权安装并完成本地验收：独立CREATE五表；erpcatalog默认只读、apply要求本地独立库确认及新鲜配套恢复证据。001—009不改、无旧SKU回填或旧企业自动加权。最终完整两轮、GUI/撤权、78表及公开/私有附件恢复和十组只读结构校验见[ERP_CATALOG_ACCEPTANCE](./ERP_CATALOG_ACCEPTANCE.md)。此前自动审批拒绝/待确认是历史，现已解决；启动仍只读，不因此改为自动迁移。
+
+销售财务009仅新增六张表，复用008账户；`erpsalesfinance`默认只读，apply要求本地ruoyi_go_mt明确确认与新鲜配套恢复证据，沿用共享ERP升级锁。启动只读拒绝部分/孤立版本/漂移，不ALTER已应用001—008、不自动修复、补历史应收或给旧企业开通。见ERP_SALES_FINANCE及独立验收；本地验证不代表生产发布/回退认证。
+
+采购财务008见[ERP_FINANCE](./ERP_FINANCE.md)及[验收](./ERP_FINANCE_ACCEPTANCE.md)：`erpfinance`默认只读；apply限本地独立库、显式确认和新鲜配套恢复证据，共用ERP升级锁。启动只读校验，全无可选，部分/孤立记录/漂移拒绝；不ALTER001—007，不自动开通已有企业、补历史账或修余额。财务记账不是银行操作；本地通过不等于生产升级、回退或容量认证。
+
+仓库007见[ERP_WAREHOUSE](./ERP_WAREHOUSE.md)及[验收](./ERP_WAREHOUSE_ACCEPTANCE.md)：erpwarehouse默认只读，apply仅本地确认＋新配套恢复证据，共用ERP升级锁；不ALTER001—006或自动给旧企业加权。启动只读检查007；源码存在/二进制启动不等于库已升级、菜单已开通或生产就绪。
+
 适用`erp`分支、独立多租户环境，当前边界为单服务器、单Go进程。
 本页是操作规范，**不是已在生产演练通过的声明**；实际执行须按用户授权范围。本地一期步骤2的备份、恢复及DDL结果见[ERP_PHASE1_SCHEMA.md](./ERP_PHASE1_SCHEMA.md)。后续步骤3为测试启动本地前后端，见[ERP_PHASE1_SHOPS.md](./ERP_PHASE1_SHOPS.md)，未操作远程服务。
 标准开发入口见[ERP_FOUNDATION.md](./ERP_FOUNDATION.md)，已有演练证据见[ERP_TEST_REPORT.md](./ERP_TEST_REPORT.md)。
@@ -9,6 +21,8 @@
 采购步骤2—6本地范围已完成：分批收货/托管保护、无价格DTO、配套恢复、完整两轮及所有者/仅收货员工GUI通过，见[最终验收第10节](./ERP_PURCHASING_ACCEPTANCE.md#10-仅收货员工实际页面补验与最终收口)。新GUI企业明确授权后才准备，结束撤权/恢复验证码/停用保留，旧企业未重开；这不是生产/容量认证。菜单7600—7603/7700—7706/7800/7801/7900仍只登记定义，已有企业须显式开通及员工功能/仓库授权，7900不隐含价格query。不得执行原包菜单SQL或擅加-grant-demo；工作区未提交，须核对dirty源码/产物。16:41Z恢复点不含之后新回归/GUI夹具，不当作实时备份。
 
 ## 1. 现有工具到底能做什么
+
+当前采购退货源码已本地提交`4c82ba7`，未推送；下方“仍待提交”为上一轮快照。商业订单退货006实施及验证见[说明](./ERP_SALES_RETURN.md)与[验收](./ERP_SALES_RETURN_ACCEPTANCE.md)。恢复点按该报告区分，不能将旧恢复点称为实时备份。
 
 采购/收货已固化为本地`ed524c3`，未推送，上文“工作区未提交”为上一轮状态。005退货另见[说明](./ERP_PURCHASE_RETURN.md)与[新验收](./ERP_PURCHASE_RETURN_ACCEPTANCE.md)，新增源码仍待提交。005先安装再给企业开通；旧收货GUI不覆盖新退货页面。
 
@@ -22,6 +36,10 @@
 | `cmd/erpphase1` | 默认只读；仅显式确认本地ruoyi_go_mt及已核验备份后安装003，无菜单、账号或授权写入 |
 | `cmd/erppurchasing` | 默认只读；仅本地ruoyi_go_mt，显式确认及24小时内数据库/公开/私有附件恢复证据后安装004；依赖完整003，不写菜单/账号/授权 |
 | `cmd/erppurchasereturn` | 默认只读；同样仅本地、显式确认及新配套恢复报告后安装005两表；依赖完整004，共用003/004命名锁，无业务种子或授权 |
+| `cmd/erpsalesreturn` | 默认只读；同样仅本地、显式确认及新配套恢复报告后安装006两表；依赖完整003，共用ERP命名锁，不改001—005或写业务种子/授权 |
+| `cmd/erpwarehouse` | 默认只读；显式本地确认与恢复证据安装007，旧版本不改 |
+| `cmd/erpfinance`、`cmd/erpsalesfinance` | 默认只读；显式本地确认与恢复证据依次安装008/009，不补历史账或真实资金事实 |
+| `cmd/erpcatalog`、`cmd/erplogistics` | 默认只读；显式本地确认与恢复证据依次安装010/011，不给旧企业自动加权 |
 | `cmd/server` | 启动只读检查多租户/已安装ERP关键结构，不能替代完整schema diff或迁移工具 |
 | `scripts/verify-erp.ps1` | 本地开发验证入口；真实集成仅显式开启，不代表升级/备份/生产容量验证 |
 | `sql/multitenant/base.sql` | 新库初始化用，含DROP；绝不能向现有库直接执行 |

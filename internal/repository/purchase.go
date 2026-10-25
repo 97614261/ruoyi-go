@@ -34,6 +34,9 @@ func purchaseQuery(tx *gorm.DB, q model.ERPPurchaseQuery) *gorm.DB {
 	if q.Status != "" {
 		tx = tx.Where("status=?", q.Status)
 	}
+	if q.AwaitingReceipt {
+		tx = purchaseAwaiting(tx)
+	}
 	return tx
 }
 func SelectERPPurchasePage(ctx context.Context, q model.ERPPurchaseQuery, pg page.Query) ([]model.ERPPurchaseSummary, int64, error) {

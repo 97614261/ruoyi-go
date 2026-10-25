@@ -228,11 +228,11 @@ func transitionERPDocumentLocked(tx *gorm.DB, doc *model.ERPDocument, action, op
 	return transitionERPDocumentWithReturnLocked(tx, doc, action, operator, nil)
 }
 
-// The ordinary stock entry has no capability. Only purchase-return orchestration
-// supplies a proof tied to a newly inserted PR and its exact original receipt.
-func transitionERPDocumentWithReturnLocked(tx *gorm.DB, doc *model.ERPDocument, action, operator string, proof *purchaseReturnSource) error {
-	if proof != nil && (action != "confirm" || doc.Kind != "PR" || doc.Status != "DRAFT" || doc.SourceDocumentID == nil || proof.returnID < 1 || proof.receiptID < 1) {
-		return errs.New("采购退货来源证明不适用于此操作")
+// Only domain orchestration supplies a private persisted proof. Its concrete
+// verifier checks exact kind, new head, original batch/package and stock source.
+func transitionERPDocumentWithReturnLocked(tx *gorm.DB, doc *model.ERPDocument, action, operator string, proof erpReturnSourceProof) error {
+	if proof != nil && (action != "confirm" || (doc.Kind != "PR" && doc.Kind != "SR") || doc.Status != "DRAFT" || doc.SourceDocumentID == nil) {
+		return errs.New("退货来源证明不适用于此操作")
 	}
 	kind, id := doc.Kind, doc.DocumentID
 	next, event, err := erpNextState(kind, doc.Status, action)
@@ -319,6 +319,14 @@ func transitionERPDocumentWithReturnLocked(tx *gorm.DB, doc *model.ERPDocument, 
 func erpNextState(kind, status, action string) (string, string, error) {
 	switch action {
 	case "confirm":
+		if kind == "TOUT" || kind == "TIN" {
+			if status == "DRAFT" {
+				return "POSTED", kind, nil
+			}
+			if status == "POSTED" {
+				return status, "", nil
+			}
+		}
 		if kind == "SR" || kind == "PR" || kind == "COUNT" {
 			if status == "POSTED" {
 				return status, "", nil
@@ -370,7 +378,7 @@ func erpApplyBalance(hand, reserved, qty int64, event string) (int64, int64, err
 		return 0, 0, errs.New("库存或单据数量异常")
 	}
 	switch event {
-	case "IN", "SR":
+	case "IN", "SR", "TIN":
 		if hand > model.ERPMaxStock-qty {
 			return 0, 0, errs.New("库存超过安全上限")
 		}
@@ -385,7 +393,7 @@ func erpApplyBalance(hand, reserved, qty int64, event string) (int64, int64, err
 			return 0, 0, errs.New("预占库存异常")
 		}
 		reserved -= qty
-	case "PR":
+	case "PR", "TOUT":
 		if hand-reserved < qty {
 			return 0, 0, errs.New("可用库存不足，不能退货或冲销已预占库存")
 		}
@@ -403,37 +411,28 @@ func erpApplyBalance(hand, reserved, qty int64, event string) (int64, int64, err
 }
 
 func SelectERPStocks(ctx context.Context, filter model.ERPQuery, pg page.Query) ([]model.ERPStockView, int64, error) {
-	q := erpWarehouseScope(TenantTable(DB(ctx), "erp_stock"), "erp_stock.warehouse_id")
-	if filter.WarehouseID > 0 {
-		q = q.Where("erp_stock.warehouse_id=?", filter.WarehouseID)
-	}
-	if filter.SkuID > 0 {
-		q = q.Where("erp_stock.sku_id=?", filter.SkuID)
+	q, columns, err := erpStockQuery(DB(ctx), filter)
+	if err != nil {
+		return nil, 0, err
 	}
 	var count int64
 	if err := q.Count(&count).Error; err != nil {
 		return nil, 0, err
 	}
 	rows := []model.ERPStockView{}
-	err := q.Joins("JOIN erp_sku s ON s.sku_id=erp_stock.sku_id").Joins("JOIN erp_warehouse w ON w.warehouse_id=erp_stock.warehouse_id").Select("erp_stock.*, s.sku_code, s.product_name, s.unit, w.warehouse_name, erp_stock.on_hand-erp_stock.reserved AS available").Order("erp_stock.stock_id DESC").Offset(pg.Offset()).Limit(pg.PageSize).Scan(&rows).Error
+	err = q.Select(columns).Order("erp_stock.stock_id DESC").Offset(pg.Offset()).Limit(pg.PageSize).Scan(&rows).Error
 	return rows, count, err
 }
 func SelectERPLedger(ctx context.Context, filter model.ERPQuery, pg page.Query) ([]model.ERPLedger, int64, error) {
-	q := erpManagedDocumentScope(erpWarehouseScope(DB(ctx).Model(&model.ERPLedger{}), "erp_stock_ledger.warehouse_id"), "erp_stock_ledger.document_id")
-	if filter.WarehouseID > 0 {
-		q = q.Where("warehouse_id=?", filter.WarehouseID)
-	}
-	if filter.SkuID > 0 {
-		q = q.Where("sku_id=?", filter.SkuID)
-	}
-	if filter.DocumentID > 0 {
-		q = q.Where("document_id=?", filter.DocumentID)
+	q, columns, err := erpLedgerQuery(DB(ctx), filter)
+	if err != nil {
+		return nil, 0, err
 	}
 	var count int64
 	if err := q.Count(&count).Error; err != nil {
 		return nil, 0, err
 	}
 	rows := []model.ERPLedger{}
-	err := q.Order("ledger_id DESC").Offset(pg.Offset()).Limit(pg.PageSize).Find(&rows).Error
+	err = q.Select(columns).Order("erp_stock_ledger.ledger_id DESC").Offset(pg.Offset()).Limit(pg.PageSize).Scan(&rows).Error
 	return rows, count, err
 }

@@ -37,7 +37,7 @@ func Logger() gin.HandlerFunc {
 		query := c.Request.URL.RawQuery
 		// Order filters may include business identifiers; unknown query fields can
 		// also carry recipient PII. These private domains log metadata only.
-		if strings.HasPrefix(path, "/erp/order") || strings.HasPrefix(path, "/erp/importJob") || strings.HasPrefix(path, "/erp/package") || strings.HasPrefix(path, "/erp/supplier") || strings.HasPrefix(path, "/erp/purchase") {
+		if strings.HasPrefix(path, "/erp/logistics") || strings.HasPrefix(path, "/erp/product") || (strings.HasPrefix(path, "/erp/finance") || strings.HasPrefix(path, "/erp/salesFinance")) || strings.HasPrefix(path, "/erp/warehouse") || strings.HasPrefix(path, "/erp/stock") || strings.HasPrefix(path, "/erp/ledger") || strings.HasPrefix(path, "/erp/transfer") || strings.HasPrefix(path, "/erp/order") || strings.HasPrefix(path, "/erp/importJob") || strings.HasPrefix(path, "/erp/package") || strings.HasPrefix(path, "/erp/supplier") || strings.HasPrefix(path, "/erp/purchase") || strings.HasPrefix(path, "/erp/salesReturnOrder") {
 			query = ""
 		}
 

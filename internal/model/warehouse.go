@@ -16,12 +16,16 @@ type ErpWarehouse struct {
 	UpdateBy      string     `gorm:"column:update_by" json:"updateBy"`     // 字段
 	UpdateTime    types.Time `gorm:"column:update_time" json:"updateTime"` // 字段
 	Remark        string     `gorm:"column:remark" json:"remark" binding:"max=500"`
+	Address       string     `gorm:"-" json:"address,omitempty" binding:"max=300"`
+	Manager       string     `gorm:"-" json:"manager,omitempty" binding:"max=64"`
+	Version       int64      `gorm:"-" json:"version" binding:"min=0"`
 }
 
 // ErpWarehouseQuery 查询条件。
 type ErpWarehouseQuery struct {
 	WarehouseCode string `form:"warehouseCode"`
 	WarehouseName string `form:"warehouseName"`
+	Status        string `form:"status" binding:"omitempty,oneof=0 1"`
 }
 
 var ErpWarehouseSortColumns = map[string]string{

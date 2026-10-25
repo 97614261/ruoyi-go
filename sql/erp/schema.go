@@ -17,3 +17,31 @@ var Purchasing string
 //
 //go:embed 005_purchase_returns.sql
 var PurchaseReturns string
+
+// SalesReturns is a separate CREATE-only optional version.
+//
+//go:embed 006_sales_returns.sql
+var SalesReturns string
+
+// WarehouseOperations is an independent CREATE-only optional version.
+//
+//go:embed 007_warehouse_operations.sql
+var WarehouseOperations string
+
+// Finance is explicit CREATE-only, never installed by server startup.
+//
+//go:embed 008_finance.sql
+var Finance string
+
+//go:embed 009_sales_finance.sql
+var SalesFinance string
+
+// Catalog is optional CREATE-only; startup only verifies.
+//
+//go:embed 010_catalog.sql
+var Catalog string
+
+// Logistics is explicit CREATE-only; existing package fields are untouched.
+//
+//go:embed 011_logistics.sql
+var Logistics string

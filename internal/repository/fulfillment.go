@@ -357,6 +357,10 @@ func updateFulfillmentPackage(tx *gorm.DB, p *model.ERPPackage, status, operator
 	return nil
 }
 func ActERPPackage(ctx context.Context, id int64, in model.ERPLogisticsInput, ship bool, hash, operator string) (*model.ERPFulfillmentResult, error) {
+	return actERPPackage(ctx, id, in, ship, hash, operator, 0)
+}
+
+func actERPPackage(ctx context.Context, id int64, in model.ERPLogisticsInput, ship bool, hash, operator string, shippingMethodID int64) (*model.ERPFulfillmentResult, error) {
 	var out *model.ERPFulfillmentResult
 	err := erpError(erpTransaction(ctx, func(tx *gorm.DB) error {
 		if err := lockERPActor(tx); err != nil {
@@ -416,6 +420,15 @@ func ActERPPackage(ctx context.Context, id int64, in model.ERPLogisticsInput, sh
 				return e
 			}
 		} else {
+			if shippingMethodID > 0 {
+				code, e := savePackageShipping(tx, p, shippingMethodID, operator)
+				if e != nil {
+					return e
+				}
+				in.CarrierCode = code
+			} else if e := clearPackageShipping(tx, p.PackageID); e != nil {
+				return e
+			}
 			if err = updateFulfillmentPackage(tx, &p, "READY_TO_SHIP", operator, &in); err != nil {
 				return err
 			}

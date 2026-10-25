@@ -12,6 +12,11 @@ import (
 )
 
 var tenantTables = map[string]bool{
+	"erp_carrier": true, "erp_shipping_method": true, "erp_package_shipping": true, "erp_logistics_action": true,
+	"erp_product_category": true, "erp_product": true, "erp_sku_profile": true, "erp_product_image": true, "erp_catalog_action": true,
+	"erp_sf_receivable": true, "erp_sf_receivable_line": true, "erp_sf_credit": true, "erp_sf_collection": true, "erp_sf_allocation": true, "erp_sf_action": true,
+	"erp_fin_account": true, "erp_fin_payable": true, "erp_fin_payable_line": true, "erp_fin_credit": true,
+	"erp_fin_payment": true, "erp_fin_allocation": true, "erp_fin_action": true,
 	"sys_user": true, "sys_role": true, "sys_dept": true, "sys_post": true,
 	"sys_config": true, "sys_dict_type": true, "sys_dict_data": true, "sys_notice": true,
 	"sys_user_role": true, "sys_user_post": true, "sys_role_menu": true, "sys_role_dept": true,
@@ -30,6 +35,9 @@ var tenantTables = map[string]bool{
 	"erp_supplier": true, "erp_purchase_order": true, "erp_purchase_order_line": true,
 	"erp_purchase_receipt": true, "erp_purchase_receipt_line": true, "erp_purchase_event": true,
 	"erp_purchase_return_order": true, "erp_purchase_return_line": true,
+	"erp_sales_return_order": true, "erp_sales_return_line": true,
+	"erp_warehouse_profile": true, "erp_stock_alert": true,
+	"erp_transfer": true, "erp_transfer_line": true, "erp_transfer_action": true,
 }
 var tenantJoinPattern = regexp.MustCompile(`(?i)((?:(?:LEFT|RIGHT|INNER|CROSS)(?:\s+OUTER)?\s+)?JOIN\s+)([a-z_]+)(?:\s+(?:AS\s+)?([a-z_]+))?(\s+ON\s+)`)
 var tenantBusinessNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)

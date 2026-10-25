@@ -17,7 +17,9 @@ func registerErpWarehouseGenerated(g *gin.RouterGroup) {
 	group.GET("/list", middleware.HasPermission("erp:warehouse:list"), handler.ErpWarehouseList)
 	group.POST("/export", middleware.ExportLimit(), middleware.HasPermission("erp:warehouse:export"), middleware.OperLog("仓库", model.BusinessTypeExport), handler.ErpWarehouseExport)
 	group.GET("/:id", middleware.HasPermission("erp:warehouse:query"), handler.ErpWarehouseGet)
-	group.POST("", noRepeat(), middleware.HasPermission("erp:warehouse:add"), middleware.OperLog("仓库", model.BusinessTypeInsert), handler.ErpWarehouseAdd)
-	group.PUT("", middleware.HasPermission("erp:warehouse:edit"), middleware.OperLog("仓库", model.BusinessTypeUpdate), handler.ErpWarehouseEdit)
+	// Minimal successful audit is committed inside the business transaction;
+	// address/manager and arbitrary body fields never enter generic body logs.
+	group.POST("", middleware.HasPermission("erp:warehouse:add"), handler.ErpWarehouseAdd)
+	group.PUT("", middleware.HasPermission("erp:warehouse:edit"), handler.ErpWarehouseEdit)
 	group.DELETE("/:ids", middleware.HasPermission("erp:warehouse:remove"), middleware.OperLog("仓库", model.BusinessTypeDelete), handler.ErpWarehouseRemove)
 }

@@ -1,6 +1,6 @@
 export const statusLabels={DRAFT:'草稿',POSTED:'已入库',RESERVED:'已预占',SHIPPED:'已出库',CANCELLED:'已取消'}
 export const actionLabels={confirm:'确认',ship:'确认出库',cancel:'取消单据'}
-export const eventLabels={IN:'采购入库',RESERVE:'销售预占',RELEASE:'取消释放',OUT:'销售出库',SR:'销售退回',PR:'采购退回',COUNT:'盘点调整'}
+export const eventLabels={IN:'采购入库',RESERVE:'销售预占',RELEASE:'取消释放',OUT:'销售出库',SR:'销售退回',PR:'采购退回',COUNT:'盘点调整',TOUT:'调拨出库',TIN:'调拨入库'}
 export const documentKinds={receipt:'IN',sales:'SALE',salesReturn:'SR',purchaseReturn:'PR',count:'COUNT'}
 export function documentActionPrompt(kind,action){
  const postingLabels={IN:'采购入库',SALE:'预占库存',SR:'销售退货入库',PR:'采购退货出库',COUNT:'盘点过账'}

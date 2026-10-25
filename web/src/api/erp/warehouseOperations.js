@@ -1,0 +1,10 @@
+import request from '@/utils/request'
+export const listTransfers=params=>request({url:'/erp/transfer/list',method:'get',params})
+export const getTransfer=id=>request({url:`/erp/transfer/${id}`,method:'get'})
+export const addTransfer=data=>request({url:'/erp/transfer',method:'post',headers:{repeatSubmit:false},data})
+export const editTransfer=(id,data)=>request({url:`/erp/transfer/${id}`,method:'put',headers:{repeatSubmit:false},data})
+export const actTransfer=(id,action,data)=>request({url:`/erp/transfer/${id}/${action}`,method:'post',headers:{repeatSubmit:false},data})
+export const getStockAlert=params=>request({url:'/erp/stock/alert',method:'get',params})
+export const setStockAlert=data=>request({url:'/erp/stock/alert',method:'put',headers:{repeatSubmit:false},data})
+export const reconcileStock=params=>request({url:'/erp/stock/reconcile',method:'get',params})
+export const stockReservations=params=>request({url:'/erp/stock/reservations',method:'get',params})

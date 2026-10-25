@@ -94,10 +94,11 @@ type ERPPurchaseResult struct {
 	Existing   bool   `json:"existing"`
 }
 type ERPPurchaseQuery struct {
-	PurchaseNo  string `form:"purchaseNo" binding:"max=64"`
-	SupplierID  int64  `form:"supplierId" binding:"min=0"`
-	WarehouseID int64  `form:"warehouseId" binding:"min=0"`
-	Status      string `form:"status" binding:"max=24"`
+	AwaitingReceipt bool   `form:"awaitingReceipt"`
+	PurchaseNo      string `form:"purchaseNo" binding:"max=64"`
+	SupplierID      int64  `form:"supplierId" binding:"min=0"`
+	WarehouseID     int64  `form:"warehouseId" binding:"min=0"`
+	Status          string `form:"status" binding:"max=24"`
 }
 type ERPPurchaseSummary struct {
 	OrderedQuantity  int64      `gorm:"-" json:"orderedQuantity"`
