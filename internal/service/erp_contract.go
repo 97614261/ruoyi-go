@@ -2,6 +2,7 @@ package service
 
 // ERP-specific identifiers do not change the frozen Java baseline manifest.
 var erpMenuPermissions = stringSet(
+	"erp:picking:list", "erp:picking:query", "erp:picking:check", "erp:picking:ship",
 	"erp:setup:list",
 	"erp:overview:list",
 	"erp:logistics:list", "erp:logistics:query", "erp:logistics:add", "erp:logistics:edit", "erp:shipment:list", "erp:shipment:export",

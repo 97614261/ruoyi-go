@@ -20,7 +20,7 @@
   </el-table>
   <pagination v-show="total>0" :total="total" v-model:page="query.pageNum" v-model:limit="query.pageSize" @pagination="load"/>
   <el-dialog v-model="open" :title="readonly?'店铺详情':form.shopId?'修改店铺':'新增店铺'" class="erp-dialog" width="min(620px, calc(100vw - 24px))" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving" @close="closed">
-   <el-form ref="formRef" :model="form" :rules="rules" label-width="90px" size="small" :disabled="saving||readonly">
+   <el-alert v-if="pending" title="结果未确认，原内容和版本已固定。可用原内容重试；编码重复或版本冲突时请先查询确认。" type="warning" :closable="false"/><el-form ref="formRef" :model="form" :rules="rules" label-width="90px" size="small" :disabled="saving||readonly||!!pending">
     <el-form-item label="店铺编码" prop="shopCode"><el-input v-model="form.shopCode" maxlength="64" placeholder="企业内唯一，字母数字及._-"/></el-form-item>
     <el-form-item label="店铺名称" prop="shopName"><el-input v-model="form.shopName" maxlength="120"/></el-form-item>
     <el-form-item label="渠道" prop="channelCode"><el-select v-if="channels.length" v-model="form.channelCode"><el-option v-for="c in channels" :key="c.channelCode" :value="c.channelCode" :label="c.channelName+'（未接API）'"/></el-select><el-input v-else v-model="form.channelCode" maxlength="32" placeholder="渠道目录编码，如 MANUAL"/></el-form-item>
@@ -35,6 +35,8 @@
  </div>
 </template>
 <script setup name="ErpShop">
+let alive=true,view=0,operation=0,wasInactive=false
+import {onBeforeUnmount,onDeactivated,onActivated} from 'vue'
 import { ref, reactive, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import useUserStore from '@/store/modules/user'
@@ -46,25 +48,25 @@ const rows=ref([]),total=ref(0),loading=ref(false),detailLoading=ref(false),savi
 const query=reactive({pageNum:1,pageSize:10,shopCode:'',shopName:'',status:''})
 const rules={shopCode:[{required:true,message:'请填写店铺编码',trigger:'blur'}],shopName:[{required:true,message:'请填写店铺名称',trigger:'blur'}],channelCode:[{required:true,message:'请选择渠道',trigger:'change'}],siteCode:[{required:true,message:'请填写站点编码',trigger:'blur'}],currency:[{required:true,message:'请填写币种',trigger:'blur'}],status:[{required:true,message:'请选择状态',trigger:'change'}]}
 let listSequence=0,detailSequence=0
-async function load(){const ticket=++listSequence;loading.value=true;try{const r=await listErpShop({...query});if(ticket===listSequence){rows.value=r.rows;total.value=r.total}}finally{if(ticket===listSequence)loading.value=false}}
+const pending=ref(null)
+async function load(){if(!alive)return;const seq=++listSequence;loading.value=true;try{const r=await listErpShop({...query});if(alive&&seq===listSequence){rows.value=r.rows;total.value=r.total}}catch(e){if(alive&&seq===listSequence){rows.value=[];total.value=0;if(typeof error!=="undefined")error.value=e.message||"读取失败"}}finally{if(seq===listSequence)loading.value=false}}
 function search(){query.pageNum=1;return load()}
 function reset(){Object.assign(query,{shopCode:'',shopName:'',status:''});return search()}
-function start(){if(saving.value||detailLoading.value)return;++detailSequence;form.value={shopCode:'',shopName:'',channelCode:'MANUAL',siteCode:'GLOBAL',currency:'CNY',status:'0',remark:''};readonly.value=false;open.value=true;formRef.value?.clearValidate()}
-async function edit(row,readOnly){if(saving.value||detailLoading.value)return;const ticket=++detailSequence;detailLoading.value=true;try{const r=await getErpShop(row.shopId);if(ticket===detailSequence){form.value={...r.data};readonly.value=readOnly;open.value=true;formRef.value?.clearValidate()}}finally{if(ticket===detailSequence)detailLoading.value=false}}
+function start(){if(!alive||saving.value||detailLoading.value||pending.value&&open.value)return;pending.value=null;if(saving.value||detailLoading.value)return;++detailSequence;form.value={shopCode:'',shopName:'',channelCode:'MANUAL',siteCode:'GLOBAL',currency:'CNY',status:'0',remark:''};readonly.value=false;open.value=true;formRef.value?.clearValidate()}
+async function edit(row,readOnly=false){if(!alive||saving.value||detailLoading.value)return;const seq=++detailSequence;detailLoading.value=true;pending.value=null;try{const r=await getErpShop(row.shopId);if(!alive||seq!==detailSequence)return;form.value=r.data;readonly.value=!!readOnly;formRef.value?.clearValidate?.();open.value=true}finally{if(seq===detailSequence)detailLoading.value=false}}
 // Invalidate at close-start, not after animation: a delayed `closed` event
 // must never cancel the next dialog's detail request or leave it busy forever.
-function closed(){if(open.value)return;++detailSequence;detailLoading.value=false;formRef.value?.clearValidate()}
+function closed(){if(open.value)return;pending.value=null;form.value={};++detailSequence;detailLoading.value=false;formRef.value?.clearValidate()}
 async function save(){
- if(saving.value||readonly.value||!open.value)return
- // Include async form validation in busy state and preserve the draft on error.
- saving.value=true
- try{
-  await formRef.value.validate()
-  const id=form.value.shopId,payload=Object.fromEntries(['shopCode','shopName','channelCode','siteCode','currency','status','remark','version'].map(k=>[k,form.value[k]]))
-  if(id)await updateErpShop(id,payload);else await addErpShop(payload)
-  open.value=false;ElMessage.success('店铺已保存');await load()
- }finally{saving.value=false}
+ if(!alive||saving.value||!open.value||typeof readonly!=="undefined"&&readonly.value)return
+ const owner=view,op=++operation;saving.value=true
+ try{let c=pending.value;if(!c){await formRef.value.validate();if(!alive||owner!==view||op!==operation||!open.value)return;c=JSON.parse(JSON.stringify({id:form.value.shopId,payload:Object.fromEntries(['shopCode','shopName','channelCode','siteCode','currency','status','remark','version'].map(k=>[k,form.value[k]]))}));pending.value=c};if(c.id!=null){await updateErpShop(c.id,c.payload)}else await addErpShop(c.payload);if(!alive||owner!==view||op!==operation)return;open.value=false;closedRequest();if(typeof ElMessage!=="undefined")ElMessage.success('已保存');else proxy.$modal.msgSuccess('操作成功');await load()}
+ catch(e){if(alive&&owner===view&&op===operation){if(typeof error!=="undefined")error.value='结果未确认，原内容已固定；请先查询确认。';else throw e}}
+ finally{if(op===operation)saving.value=false}
 }
-async function loadChannels(){if(checkPermi(['erp:channel:list'])){const r=await listChannels({pageNum:1,pageSize:100});channels.value=r.rows}}
+async function loadChannels(){if(!alive||!checkPermi(['erp:channel:list']))return;const owner=view;const r=await listChannels({pageNum:1,pageSize:100});if(alive&&owner===view)channels.value=r.rows}
 load();loadChannels()
+function closedRequest(){if(open.value)return;++detailSequence;form.value={};pending.value=null}
+function leave(){alive=false;++view;++operation;++listSequence;++detailSequence;saving.value=false;loading.value=false;open.value=false;form.value={};pending.value=null;rows.value=[];total.value=0;if(typeof channels!=="undefined")channels.value=[];if(typeof ids!=="undefined")ids.value=[]}
+onBeforeUnmount(leave);onDeactivated(()=>{wasInactive=true;leave()});onActivated(()=>{if(wasInactive){wasInactive=false;alive=true;return Promise.all([load(),loadChannels()])}})
 </script>

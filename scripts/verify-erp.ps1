@@ -32,9 +32,9 @@ $frontTests = @(Get-ChildItem -LiteralPath (Join-Path $webRoot 'test') -Filter '
 if ($frontTests.Count -eq 0) { throw 'No frontend test files found.' }
 
 $steps = @(
-    [pscustomobject]@{ name = 'format'; tool = 'gofmt'; cwd = $projectRoot; arguments = @('-l', 'cmd', 'internal', 'pkg', 'test/multitenant') },
-    [pscustomobject]@{ name = 'go-unit'; tool = 'go'; cwd = $projectRoot; arguments = @('test', '-mod=readonly', './cmd/...', './internal/...', './pkg/...', '-count=1', '-timeout=5m') },
-    [pscustomobject]@{ name = 'go-vet'; tool = 'go'; cwd = $projectRoot; arguments = @('vet', '-mod=readonly', './cmd/...', './internal/...', './pkg/...', './test/multitenant') },
+    [pscustomobject]@{ name = 'format'; tool = 'gofmt'; cwd = $projectRoot; arguments = @('-l', 'cmd', 'internal', 'pkg', 'test/multitenant', 'test/erpreliability') },
+    [pscustomobject]@{ name = 'go-unit'; tool = 'go'; cwd = $projectRoot; arguments = @('test', '-mod=readonly', './cmd/...', './internal/...', './pkg/...', './test/erpreliability', '-count=1', '-timeout=5m') },
+    [pscustomobject]@{ name = 'go-vet'; tool = 'go'; cwd = $projectRoot; arguments = @('vet', '-mod=readonly', './cmd/...', './internal/...', './pkg/...', './test/multitenant', './test/erpreliability') },
     [pscustomobject]@{ name = 'frontend-test'; tool = 'node'; cwd = $webRoot; arguments = @('--test') + $frontTests },
     [pscustomobject]@{ name = 'frontend-build'; tool = 'node'; cwd = $webRoot; arguments = @('node_modules/vite/bin/vite.js', 'build') }
 )

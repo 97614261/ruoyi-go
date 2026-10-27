@@ -26,7 +26,7 @@
   </el-table>
   <pagination v-show="total>0" :total="total" v-model:page="query.pageNum" v-model:limit="query.pageSize" @pagination="load"/>
   <el-dialog v-model="open" :title="readOnly?'店铺商品详情':form.itemId?'修改店铺商品':'新增店铺商品'" class="erp-dialog" width="min(660px, calc(100vw - 24px))" :close-on-click-modal="false" :show-close="!saving" :close-on-press-escape="!saving" @close="closeItem">
-   <el-form ref="formRef" :model="form" :rules="rules" label-width="110px" size="small" :disabled="saving||readOnly">
+   <el-form ref="formRef" :model="form" :rules="rules" label-width="110px" size="small" :disabled="saving||readOnly||!!itemPending">
     <el-form-item label="店铺" prop="shopId"><el-select v-model="form.shopId" :disabled="!!form.itemId" filterable remote :remote-method="findShops" @visible-change="v=>v&&findShops('')" style="width:100%"><el-option v-if="form.itemId" :key="form.shopId" :value="form.shopId" :label="form.shopCode+' · '+form.shopName"/><template v-else><el-option v-for="s in shops" :key="s.shopId" :value="s.shopId" :label="s.shopCode+' · '+s.shopName" :disabled="s.status!=='0'"/></template></el-select></el-form-item>
     <el-form-item label="店铺SKU编码" prop="shopItemCode"><el-input v-model="form.shopItemCode" maxlength="128" placeholder="作为文本保留前导零，不含首尾空白"/></el-form-item>
     <el-form-item label="外部商品ID"><el-input v-model="form.externalProductId" maxlength="128" placeholder="可选，未接平台API"/></el-form-item>
@@ -38,7 +38,7 @@
    <el-alert v-if="form.itemId" :title="`商品版本 v${form.version}。有配对历史或订单引用后，SKU编码和外部标识不可改；不支持转移店铺或删除。`" type="info" :closable="false"/>
    <template #footer><el-button @click="open=false" :disabled="saving">关闭</el-button><el-button v-if="!readOnly" type="primary" @click="saveItem" :loading="saving">保存</el-button></template>
   </el-dialog>
-  <el-dialog v-model="mappingOpen" title="配对内部 SKU" class="erp-dialog" width="min(600px, calc(100vw - 24px))" :close-on-click-modal="false" :show-close="!saving" :close-on-press-escape="!saving" @close="closeMapping">
+  <el-alert v-if="mappingPending||itemPending" title="上次结果未确认，重试固定原目标/内容/版本；请先查记录，版本冲突不能视为未提交。" type="warning" :closable="false"/><el-dialog v-model="mappingOpen" title="配对内部 SKU" class="erp-dialog" width="min(600px, calc(100vw - 24px))" :close-on-click-modal="false" :show-close="!saving" :close-on-press-escape="!saving" @close="closeMapping">
    <el-alert title="商品版本控制编辑、配对和解绑。版本冲突请关闭后重新打开；未结束订单引用会阻止改配对，已解绑行不物理删除。" type="warning" :closable="false"/>
    <p>{{mapping.item?.shopName}} / {{mapping.item?.shopItemCode}} · 商品版本 v{{mapping.item?.version}}，配对版本 v{{mapping.item?.mappingVersion||'—'}}</p>
    <el-form label-width="100px" size="small" :disabled="saving">
@@ -50,7 +50,7 @@
  </div>
 </template>
 <script setup>
-import { ref, reactive, computed, onMounted,watch,onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, onMounted,watch,onBeforeUnmount,onDeactivated,onActivated } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { checkPermi } from '@/utils/permission'
@@ -62,23 +62,26 @@ const busy=computed(()=>saving.value||detailLoading.value)
 const query=reactive({pageNum:1,pageSize:10,shopId:undefined,shopItemCode:'',title:'',status:'',mappingState:''})
 const route=useRoute()
 const rules={shopId:[{required:true,message:'请选择店铺',trigger:'change'}],shopItemCode:[{required:true,message:'请输入店铺SKU编码',trigger:'blur'}],title:[{required:true,message:'请输入商品标题',trigger:'blur'}],status:[{required:true,message:'请选择状态',trigger:'change'}]}
-let listSequence=0,detailSequence=0,shopSequence=0,skuSequence=0
-async function load(){const ticket=++listSequence;loading.value=true;try{const r=await listShopItems({...query});if(ticket===listSequence){rows.value=r.rows;total.value=r.total}}finally{if(ticket===listSequence)loading.value=false}}
+const mappingPending=ref(null),itemPending=ref(null)
+let listSequence=0,detailSequence=0,shopSequence=0,skuSequence=0,view=0,operation=0,alive=true,wasInactive=false
+async function load(){if(!alive)return;const ticket=++listSequence;loading.value=true;try{const r=await listShopItems({...query});if(alive&&ticket===listSequence){rows.value=r.rows;total.value=r.total}}catch(e){if(alive&&ticket===listSequence){rows.value=[];total.value=0;throw e}}finally{if(ticket===listSequence)loading.value=false}}
 function search(){query.pageNum=1;return load()}
 function reset(){Object.assign(query,{shopId:undefined,shopItemCode:'',title:'',status:'',mappingState:''});return search()}
-async function findShops(shopName){if(!checkPermi(['erp:shop:list'])){ElMessage.warning('店铺选择器需要店铺列表权限');return}const ticket=++shopSequence;const r=await listErpShop({shopName,pageNum:1,pageSize:100});if(ticket===shopSequence)shops.value=r.rows}
-async function findSkus(productName){if(!checkPermi(['erp:sku:list'])){ElMessage.warning('SKU选择器需要SKU列表权限');return}const ticket=++skuSequence;const r=await listErpSku({productName,pageNum:1,pageSize:100});if(ticket===skuSequence&&mappingOpen.value){const current=mapping.value.item;skus.value=r.rows;if(current?.skuId&&!skus.value.some(s=>s.skuId===current.skuId))skus.value.unshift({skuId:current.skuId,skuCode:current.skuCode,productName:current.productName,unit:current.unit,status:current.skuStatus})}}
-function start(){if(busy.value)return;++detailSequence;form.value={shopId:query.shopId,shopItemCode:'',externalProductId:'',externalVariantId:'',title:'',status:'0',remark:''};readOnly.value=false;open.value=true;formRef.value?.clearValidate()}
-async function fetchDetail(row,apply){if(busy.value)return;const ticket=++detailSequence;detailLoading.value=true;try{const r=await getShopItem(row.itemId);if(ticket===detailSequence)apply(r.data)}finally{if(ticket===detailSequence)detailLoading.value=false}}
+async function findShops(shopName){if(!alive)return;if(!checkPermi(['erp:shop:list'])){ElMessage.warning('店铺选择器需要店铺列表权限');return}const ticket=++shopSequence;const r=await listErpShop({shopName,pageNum:1,pageSize:100});if(ticket===shopSequence)shops.value=r.rows}
+async function findSkus(productName){if(!alive)return;if(!checkPermi(['erp:sku:list'])){ElMessage.warning('SKU选择器需要SKU列表权限');return}const ticket=++skuSequence;const r=await listErpSku({productName,pageNum:1,pageSize:100});if(ticket===skuSequence&&mappingOpen.value){const current=mapping.value.item;skus.value=r.rows;if(current?.skuId&&!skus.value.some(s=>s.skuId===current.skuId))skus.value.unshift({skuId:current.skuId,skuCode:current.skuCode,productName:current.productName,unit:current.unit,status:current.skuStatus})}}
+function start(){if(!alive||busy.value||itemPending.value&&open.value)return;itemPending.value=null;if(busy.value)return;++detailSequence;form.value={shopId:query.shopId,shopItemCode:'',externalProductId:'',externalVariantId:'',title:'',status:'0',remark:''};readOnly.value=false;open.value=true;formRef.value?.clearValidate()}
+async function fetchDetail(row,apply){if(!alive)return;if(busy.value)return;const ticket=++detailSequence;detailLoading.value=true;try{const r=await getShopItem(row.itemId);if(ticket===detailSequence)apply(r.data)}finally{if(ticket===detailSequence)detailLoading.value=false}}
 function openItem(row,readonly){return fetchDetail(row,d=>{form.value={...d};readOnly.value=readonly;open.value=true;formRef.value?.clearValidate()})}
 function openMapping(row){return fetchDetail(row,d=>{++skuSequence;skus.value=d.skuId?[{skuId:d.skuId,skuCode:d.skuCode,productName:d.productName,unit:d.unit,status:d.skuStatus}]:[];mapping.value={item:d,skuId:d.mappingStatus==='0'?d.skuId:undefined,remark:''};mappingOpen.value=true})}
-function closeItem(){if(open.value)return;++detailSequence;detailLoading.value=false;formRef.value?.clearValidate()}
-function closeMapping(){if(mappingOpen.value)return;++detailSequence;++skuSequence;detailLoading.value=false}
-async function saveItem(){if(saving.value||readOnly.value||!open.value)return;saving.value=true;try{await formRef.value.validate();const id=form.value.itemId,payload=Object.fromEntries(['shopId','shopItemCode','externalProductId','externalVariantId','title','status','version','remark'].map(k=>[k,form.value[k]]));if(id)await editShopItem(id,payload);else await addShopItem(payload);open.value=false;ElMessage.success('店铺商品已保存');await load()}finally{saving.value=false}}
-async function saveMapping(){if(saving.value||!mappingOpen.value)return;if(!mapping.value.skuId){ElMessage.warning('请选择内部SKU');return}const id=mapping.value.item.itemId,payload={version:mapping.value.item.version,skuId:mapping.value.skuId,remark:mapping.value.remark||''};saving.value=true;try{try{await ElMessageBox.confirm('确认替换该商品的内部SKU配对？历史引用不会被物理删除。','确认配对',{type:'warning'})}catch{return}await setShopItemMapping(id,payload);mappingOpen.value=false;ElMessage.success('配对已保存');await load()}finally{saving.value=false}}
-async function unmap(row){if(busy.value)return;const id=row.itemId,version=row.version;saving.value=true;try{try{await ElMessageBox.confirm('确认解绑该商品？配对历史保留，未结束订单引用时会拒绝。','确认解绑',{type:'warning'})}catch{return}await cancelShopItemMapping(id,version);ElMessage.success('配对已停用');await load()}finally{saving.value=false}}
-function followShopLink(){if(saving.value)return;++detailSequence;detailLoading.value=false;open.value=false;mappingOpen.value=false;const raw=route.query.shopId;if(raw!==undefined&&(typeof raw!=='string'||!/^[1-9]\d*$/.test(raw)||!Number.isSafeInteger(Number(raw)))){++listSequence;rows.value=[];total.value=0;ElMessage.warning('店铺链接编号无效');return}query.shopId=raw?Number(raw):undefined;query.pageNum=1;return load()}
+function closeItem(){if(open.value)return;itemPending.value=null;form.value={};++detailSequence;detailLoading.value=false;formRef.value?.clearValidate()}
+function closeMapping(){if(mappingOpen.value)return;mappingPending.value=null;mapping.value={};++detailSequence;++skuSequence;detailLoading.value=false}
+async function saveItem(){if(!alive||saving.value||readOnly.value||!open.value)return;const owner=view,op=++operation;saving.value=true;try{let c=itemPending.value;if(!c){await formRef.value.validate();if(!alive||owner!==view||op!==operation||!open.value)return;c=JSON.parse(JSON.stringify({id:form.value.itemId,payload:Object.fromEntries(['shopId','shopItemCode','externalProductId','externalVariantId','title','status','version','remark'].map(k=>[k,form.value[k]]))}));itemPending.value=c};if(c.id)await editShopItem(c.id,c.payload);else await addShopItem(c.payload);if(!alive||owner!==view||op!==operation)return;open.value=false;itemPending.value=null;ElMessage.success('店铺商品已保存');await load()}finally{if(op===operation)saving.value=false}}
+async function saveMapping(){if(!alive||saving.value||!mappingOpen.value)return;if(!mappingPending.value&&!mapping.value.skuId){ElMessage.warning('请选择内部SKU');return}const c=mappingPending.value||JSON.parse(JSON.stringify({id:mapping.value.item.itemId,payload:{version:mapping.value.item.version,skuId:mapping.value.skuId,remark:mapping.value.remark||''}})),owner=view,op=++operation;saving.value=true;try{try{await ElMessageBox.confirm('确认替换该商品的内部SKU配对？历史引用不会被物理删除。','确认配对',{type:'warning'})}catch{return};if(!alive||owner!==view||op!==operation)return;mappingPending.value=c;await setShopItemMapping(c.id,c.payload);if(!alive||owner!==view||op!==operation)return;mappingOpen.value=false;mappingPending.value=null;ElMessage.success('配对已保存');await load()}finally{if(op===operation)saving.value=false}}
+async function unmap(row){if(!alive||busy.value)return;const id=row.itemId,version=row.version,owner=view,op=++operation;saving.value=true;try{try{await ElMessageBox.confirm('确认解绑该商品？配对历史保留，未结束订单引用时会拒绝。','确认解绑',{type:'warning'})}catch{return};if(!alive||owner!==view||op!==operation)return;await cancelShopItemMapping(id,version);if(!alive||owner!==view||op!==operation)return;ElMessage.success('配对已停用');await load()}finally{if(op===operation)saving.value=false}}
+function followShopLink(){if(!alive)return;if(saving.value)return;++detailSequence;detailLoading.value=false;open.value=false;mappingOpen.value=false;const raw=route.query.shopId;if(raw!==undefined&&(typeof raw!=='string'||!/^[1-9]\d*$/.test(raw)||!Number.isSafeInteger(Number(raw)))){++listSequence;rows.value=[];total.value=0;ElMessage.warning('店铺链接编号无效');return}query.shopId=raw?Number(raw):undefined;query.pageNum=1;return load()}
 watch(()=>route.query.shopId,followShopLink)
-onBeforeUnmount(()=>{++listSequence;++detailSequence;++shopSequence;++skuSequence})
+
 onMounted(followShopLink)
+function leave(){mappingPending.value=null;itemPending.value=null;alive=false;++view;++operation;++listSequence;++detailSequence;++shopSequence;++skuSequence;saving.value=false;loading.value=false;detailLoading.value=false;open.value=false;mappingOpen.value=false;rows.value=[];total.value=0;form.value={};mapping.value={};shops.value=[];skus.value=[]}
+onBeforeUnmount(leave);onDeactivated(()=>{wasInactive=true;leave()});onActivated(()=>{if(wasInactive){wasInactive=false;alive=true;return followShopLink()}})
 </script>

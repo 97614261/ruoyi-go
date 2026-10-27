@@ -23,7 +23,7 @@
   <pagination v-show="!listError&&total>0" :total="total" v-model:page="query.pageNum" v-model:limit="query.pageSize" @pagination="load"/>
   <el-dialog v-model="open" :title="readonly?'供应商详情':form.supplierId?'修改供应商':'新增供应商'" class="erp-dialog" width="min(680px, calc(100vw - 24px))" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving" :before-close="beforeClose" @close="closed" @closed="closing=false">
    <el-alert v-if="saveError" type="warning" :title="saveError" :closable="false" class="mb8"/>
-   <el-form ref="formRef" :model="form" :rules="rules" label-width="90px" size="small" :disabled="saving||readonly">
+   <el-alert v-if="pending" title="结果未确认，原内容和版本已固定；编码重复或版本冲突时先查询确认。" type="warning" :closable="false"/><el-form ref="formRef" :model="form" :rules="rules" label-width="90px" size="small" :disabled="saving||readonly||!!pending">
     <el-form-item label="供应商编码" prop="supplierCode"><el-input v-model="form.supplierCode" maxlength="64" :disabled="!!form.supplierId" placeholder="企业内唯一，字母数字及._-"/></el-form-item>
     <el-form-item label="供应商名称" prop="supplierName"><el-input v-model="form.supplierName" maxlength="120"/></el-form-item>
     <el-row :gutter="16"><el-col :span="12"><el-form-item label="联系人"><el-input v-model="form.contactName" maxlength="64"/></el-form-item></el-col><el-col :span="12"><el-form-item label="联系电话"><el-input v-model="form.phone" maxlength="64"/></el-form-item></el-col></el-row>
@@ -47,8 +47,9 @@ const rows=ref([]),total=ref(0),loading=ref(false),listError=ref(false),detailLo
 const query=reactive({pageNum:1,pageSize:10,supplierCode:'',supplierName:'',status:''})
 const canEdit=computed(()=>checkPermi(['erp:supplier:query'])&&checkPermi(['erp:supplier:edit']))
 const rules={supplierCode:[{required:true,message:'请填写供应商编码',trigger:'blur'}],supplierName:[{required:true,message:'请填写供应商名称',trigger:'blur'}],status:[{required:true,message:'请选择状态',trigger:'change'}],email:[{type:'email',message:'邮箱格式不正确',trigger:'blur'}]}
+const pending=ref(null)
 let listSequence=0,detailSequence=0,viewSequence=0,deactivated=false
-async function load(){
+async function load(){if(deactivated)return;
  const ticket=++listSequence;loading.value=true;listError.value=false
  try{const r=await listSuppliers({...query});if(ticket===listSequence){rows.value=r.rows;total.value=r.total}}
  catch{if(ticket===listSequence){rows.value=[];total.value=0;listError.value=true}}
@@ -56,8 +57,8 @@ async function load(){
 }
 function search(){query.pageNum=1;return load()}
 function reset(){Object.assign(query,{supplierCode:'',supplierName:'',status:''});return search()}
-function start(){if(saving.value||detailLoading.value||closing.value||open.value||!checkPermi(['erp:supplier:add']))return;++detailSequence;saveError.value='';form.value={supplierCode:'',supplierName:'',contactName:'',phone:'',email:'',address:'',status:'0',remark:''};readonly.value=false;open.value=true;formRef.value?.clearValidate()}
-async function edit(row,readOnly){
+function start(){if(deactivated||saving.value||open.value)return;pending.value=null;if(saving.value||detailLoading.value||closing.value||open.value||!checkPermi(['erp:supplier:add']))return;++detailSequence;saveError.value='';form.value={supplierCode:'',supplierName:'',contactName:'',phone:'',email:'',address:'',status:'0',remark:''};readonly.value=false;open.value=true;formRef.value?.clearValidate()}
+async function edit(row,readOnly){if(deactivated)return;
  if(saving.value||detailLoading.value||closing.value||open.value||!checkPermi(['erp:supplier:query'])||(!readOnly&&!canEdit.value))return
  const ticket=++detailSequence;detailLoading.value=true;saveError.value=''
  try{const r=await getSupplier(row.supplierId);if(ticket===detailSequence){form.value={...r.data};readonly.value=readOnly;open.value=true;formRef.value?.clearValidate()}}
@@ -66,19 +67,14 @@ async function edit(row,readOnly){
 // Set the guard before Vue emits close: a new fetch must not race the old close event.
 function closeDialog(){if(saving.value)return;closing.value=true;open.value=false;closed()}
 function beforeClose(done){if(saving.value)return;closeDialog();done()}
-function closed(){if(open.value)return;closing.value=true;++detailSequence;detailLoading.value=false;form.value={};saveError.value='';formRef.value?.clearValidate()}
-function clearPrivate(){++viewSequence;++detailSequence;++listSequence;open.value=false;form.value={};rows.value=[];total.value=0;detailLoading.value=false;loading.value=false;saveError.value=''}
+function closed(){if(open.value)return;pending.value=null;closing.value=true;++detailSequence;detailLoading.value=false;form.value={};saveError.value='';formRef.value?.clearValidate()}
+function clearPrivate(){pending.value=null;deactivated=true;saving.value=false;++viewSequence;++detailSequence;++listSequence;open.value=false;form.value={};rows.value=[];total.value=0;detailLoading.value=false;loading.value=false;saveError.value=''}
 async function save(){
- if(saving.value||readonly.value||!open.value)return
+ if(deactivated||saving.value||readonly.value||!open.value)return
  const ticket=viewSequence;saving.value=true;saveError.value=''
- try{
-  try{await formRef.value.validate()}catch{return}
-  if(ticket!==viewSequence||!open.value)return
-  const id=form.value.supplierId,payload=Object.fromEntries(['supplierCode','supplierName','contactName','phone','email','address','status','remark'].map(k=>[k,form.value[k]]))
-  if(id)await editSupplier(id,{...payload,version:form.value.version});else await addSupplier(payload)
-  if(ticket===viewSequence){closing.value=true;open.value=false;form.value={};ElMessage.success('供应商已保存');await load()}
- }catch{if(ticket===viewSequence)saveError.value='保存失败或结果未确认，输入已保留。版本冲突请重新打开；新增结果不明确时，先按编码查询再决定重试。'}
- finally{saving.value=false}
+ try{let c=pending.value;if(!c){try{await formRef.value.validate()}catch{return};if(ticket!==viewSequence||!open.value)return;const payload=Object.fromEntries(['supplierCode','supplierName','contactName','phone','email','address','status','remark'].map(k=>[k,form.value[k]]));if(form.value.supplierId)payload.version=form.value.version;c=JSON.parse(JSON.stringify({id:form.value.supplierId,payload}));pending.value=c};if(c.id)await editSupplier(c.id,c.payload);else await addSupplier(c.payload);if(ticket===viewSequence){closing.value=true;open.value=false;form.value={};pending.value=null;ElMessage.success('供应商已保存');await load()}}
+ catch{if(ticket===viewSequence)saveError.value='结果未确认，原内容已保留；版本冲突或编码重复请先查询，不要改变原请求继续重试。'}
+ finally{if(ticket===viewSequence)saving.value=false}
 }
 onBeforeUnmount(clearPrivate)
 onDeactivated(()=>{deactivated=true;clearPrivate()})

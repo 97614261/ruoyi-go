@@ -18,7 +18,7 @@
     <pagination v-show="total > 0" :total="total" v-model:page="queryParams.pageNum" v-model:limit="queryParams.pageSize" @pagination="getList" />
     <el-alert title="停用后不能普通入/出库或盘点；历史退货、取消释放仍按原规则检查。被引用的仓库不能删除。" type="info" :closable="false"/>
     <el-alert v-if="error" :title="error" type="warning" :closable="false"/>
-    <el-dialog :title="title" v-model="open" class="erp-dialog" width="min(600px, calc(100vw - 24px))" :close-on-click-modal="false" :show-close="!busy" :close-on-press-escape="!busy" append-to-body><el-form ref="formRef" :model="form" :rules="rules" :disabled="busy" label-width="100px">
+    <el-dialog :title="title" v-model="open" class="erp-dialog" width="min(600px, calc(100vw - 24px))" :close-on-click-modal="false" :show-close="!busy" :close-on-press-escape="!busy" append-to-body @close="closedRequest"><el-alert v-if="pending" title="结果未确认，原内容和版本已固定。可用原内容重试；编码重复或版本冲突时请先查询确认。" type="warning" :closable="false"/><el-form ref="formRef" :disabled="busy||!!pending" :model="form" :rules="rules" label-width="100px">
       <el-form-item label="仓库编码" prop="warehouseCode"><el-input v-model="form.warehouseCode" /></el-form-item>
       <el-form-item label="仓库名称" prop="warehouseName"><el-input v-model="form.warehouseName" /></el-form-item>
       <el-form-item label="状态" prop="status"><el-radio-group v-model="form.status"><el-radio v-for="dict in sys_normal_disable" :key="dict.value" :value="dict.value">{{ dict.label }}</el-radio></el-radio-group></el-form-item>
@@ -30,12 +30,15 @@
 </template>
 
 <script setup name="ErpWarehouse">
+let alive=true,view=0,operation=0,wasInactive=false
+import {onBeforeUnmount,onDeactivated,onActivated} from 'vue'
 import { listErpWarehouse, getErpWarehouse, addErpWarehouse, updateErpWarehouse, delErpWarehouse } from '@/api/erp/warehouse'
 import WarehouseAccess from '../components/WarehouseAccess.vue'
 const { proxy } = getCurrentInstance()
 const formRef = ref()
 const busy=ref(false),error=ref('')
 let listSeq=0,detailSeq=0
+const pending=ref(null)
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
@@ -51,15 +54,24 @@ const rules = reactive({
   warehouseName: [{ required: true, message: "仓库名称不能为空", trigger: 'blur' }],
   status: [{ required: true, message: "状态不能为空", trigger: 'blur' }],
 })
-async function getList() { const seq=++listSeq;loading.value=true;rows.value=[];total.value=0;try {const res=await listErpWarehouse({...queryParams});if(seq===listSeq){rows.value=res.rows;total.value=res.total}}catch(e){if(seq===listSeq)error.value=e.message||'读取失败'}finally{if(seq===listSeq)loading.value=false} }
+async function getList(){if(!alive)return;const seq=++listSeq;loading.value=true;try{const r=await listErpWarehouse({...queryParams});if(alive&&seq===listSeq){rows.value=r.rows;total.value=r.total}}catch(e){if(alive&&seq===listSeq){rows.value=[];total.value=0;if(typeof error!=="undefined")error.value=e.message||"读取失败"}}finally{if(seq===listSeq)loading.value=false}}
 function handleQuery() { queryParams.pageNum = 1; getList() }
 function resetQuery() { proxy.resetForm('queryRef'); handleQuery() }
 function handleSelectionChange(selection) { ids.value = selection.map(item => item.warehouseId); multiple.value = !selection.length }
-function handleAdd() {if(busy.value)return;++detailSeq;error.value='';form.value={status:'0',address:'',manager:''};title.value='新增仓库';open.value=true}
-async function handleUpdate(row) {if(busy.value)return;const seq=++detailSeq;open.value=false;error.value='';try{const res=await getErpWarehouse(row.warehouseId);if(seq!==detailSeq)return;form.value=res.data;title.value='修改仓库 · v'+res.data.version;open.value=true}catch(e){error.value=e.message||'读取失败'}}
-async function submitForm() {if(busy.value)return;busy.value=true;try{await formRef.value.validate();const f=form.value;const body={warehouseId:f.warehouseId,warehouseCode:f.warehouseCode,warehouseName:f.warehouseName,status:f.status,version:f.version,address:f.address||'',manager:f.manager||'',remark:f.remark||''};if(body.warehouseId!=null)await updateErpWarehouse(body);else await addErpWarehouse(body);proxy.$modal.msgSuccess('操作成功');open.value=false;await getList()}catch(e){error.value=e.message||'未确认保存，请重读核对后再修改'}finally{busy.value=false}}
-async function handleDelete(row = {}) {if(busy.value)return;busy.value=true;const target=row.warehouseId??[...ids.value];try{await proxy.$modal.confirm('确认删除选中数据？被引用的仓库不能删除。');await delErpWarehouse(target);proxy.$modal.msgSuccess('删除成功');await getList()}finally{busy.value=false}}
+function handleAdd() {if(!alive||busy.value||pending.value&&open.value)return;pending.value=null;if(busy.value)return;++detailSeq;error.value='';form.value={status:'0',address:'',manager:''};title.value='新增仓库';open.value=true}
+async function handleUpdate(row,readOnly=false){if(!alive||busy.value)return;const seq=++detailSeq;pending.value=null;try{const r=await getErpWarehouse(row.warehouseId);if(!alive||seq!==detailSeq)return;form.value=r.data;title.value="修改仓库 · v"+r.data.version;open.value=true}catch(e){if(alive&&seq===detailSeq&&typeof error!=="undefined")error.value=e.message||"读取失败"}}
+async function submitForm(){
+ if(!alive||busy.value||!open.value)return
+ const owner=view,op=++operation;busy.value=true
+ try{let c=pending.value;if(!c){await formRef.value.validate();if(!alive||owner!==view||op!==operation||!open.value)return;c=JSON.parse(JSON.stringify({id:form.value.warehouseId,payload:Object.fromEntries(['warehouseId','warehouseCode','warehouseName','status','version','address','manager','remark'].map(k=>[k,form.value[k]]))}));pending.value=c};if(c.id!=null){await updateErpWarehouse(c.payload)}else await addErpWarehouse(c.payload);if(!alive||owner!==view||op!==operation)return;open.value=false;closedRequest();if(typeof ElMessage!=="undefined")ElMessage.success('已保存');else proxy.$modal.msgSuccess('操作成功');await getList()}
+ catch(e){if(alive&&owner===view&&op===operation){if(typeof error!=="undefined")error.value='结果未确认，原内容已固定；请先查询确认。';else throw e}}
+ finally{if(op===operation)busy.value=false}
+}
+async function handleDelete(row={}){if(!alive||busy.value)return;const owner=view,op=++operation,target=JSON.parse(JSON.stringify(row.warehouseId??ids.value));busy.value=true;try{await proxy.$modal.confirm("确认删除选中数据？被引用的数据不能删除。");if(!alive||owner!==view||op!==operation)return;await delErpWarehouse(target);if(!alive||owner!==view||op!==operation)return;proxy.$modal.msgSuccess("删除成功");await getList()}finally{if(op===operation)busy.value=false}}
 function handleExport() { proxy.download('erp/warehouse/export', { ...queryParams }, 'warehouse_' + new Date().getTime() + '.xlsx') }
 getList()
-onBeforeUnmount(()=>{++listSeq;++detailSeq})
+
+function closedRequest(){if(open.value)return;++detailSeq;form.value={};pending.value=null}
+function leave(){alive=false;++view;++operation;++listSeq;++detailSeq;busy.value=false;loading.value=false;open.value=false;form.value={};pending.value=null;rows.value=[];total.value=0;if(typeof channels!=="undefined")channels.value=[];if(typeof ids!=="undefined")ids.value=[]}
+onBeforeUnmount(leave);onDeactivated(()=>{wasInactive=true;leave()});onActivated(()=>{if(wasInactive){wasInactive=false;alive=true;return getList()}})
 </script>

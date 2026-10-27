@@ -105,6 +105,10 @@
   "erpMenuPermissions": [
     "erp:overview:list",
     "erp:setup:list",
+    "erp:picking:list",
+    "erp:picking:query",
+    "erp:picking:check",
+    "erp:picking:ship",
     "erp:logistics:list",
     "erp:logistics:query",
     "erp:logistics:add",

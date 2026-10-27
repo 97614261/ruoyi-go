@@ -21,9 +21,9 @@ async function component(name, overrides = {}, props = {}) {
   const { descriptor } = parse(await readFile(file, 'utf8'))
   const compiled = compileScript(descriptor, { id: `test-${name}` }).content
     .replace(/^import\s[^\n]*\n/gm, '').replace('export default', 'const component =')
-  const messages = [], prompts = []
+  const messages = [], prompts = [], lifecycle = { deactivate: [], unmount: [], activate: [] }
   const stubs = {
-    ref, reactive, computed,watch, onMounted() {},onBeforeUnmount(){},onDeactivated(){},onActivated(){}, ReferenceSelect: {}, LogisticsMethodSelect:{},
+    ref, reactive, computed,watch, onMounted() {},onBeforeUnmount(fn){lifecycle.unmount.push(fn)},onDeactivated(fn){lifecycle.deactivate.push(fn)},onActivated(fn){lifecycle.activate.push(fn)}, ReferenceSelect: {}, LogisticsMethodSelect:{},
     useRouter: () => ({ push() {} }),useRoute:()=>({query:{}}), saveAs() {}, download: async()=>{}, FormData,
     FulfillmentBatchDialog:{},OrderReadinessPanel:{},orderWorkbench:async()=>({data:{}}),orderReadiness:async()=>({data:{ready:true,version:1,issues:[],stocks:[]}}),
     OrderFulfillmentDialog:{},reviewOrder:async()=>{},cancelOrder:async()=>{},listPackages:async()=>({rows:[],total:0}),getPackage:async()=>({data:{lines:[]}}),savePackageLogistics:async()=>{},shipPackage:async()=>{},
@@ -55,8 +55,154 @@ async function component(name, overrides = {}, props = {}) {
   const definition = vm.runInNewContext(`${compiled}\ncomponent`, stubs, { filename: file.pathname })
   const emitted=[]
   const state = definition.setup(props, { expose() {}, emit:(...args)=>emitted.push(args) })
-  return { state, messages, prompts, emitted }
+  return { state, messages, prompts, emitted, deactivate:()=>lifecycle.deactivate.forEach(fn=>fn()), unmount:()=>lifecycle.unmount.forEach(fn=>fn()), activate:async()=>{for(const fn of lifecycle.activate)await fn()} }
 }
+
+test('pending single-order and package confirmations cannot send writes after leaving or unmounting',async()=>{
+ for(const name of ['OrderFulfillmentDialog','PackageWorkspace'])for(const leave of ['deactivate','unmount']){
+  const confirmation=deferred(),writes=[]
+  const a=await component(name,{ElMessageBox:{confirm:()=>confirmation.promise},reviewOrder:async(...v)=>writes.push(v),shipPackage:async(...v)=>writes.push(v)})
+  let operation
+  if(name==='OrderFulfillmentDialog'){a.state.show({orderId:1,version:2},'review');a.state.form.value.warehouseId=3;operation=a.state.submit()}
+  else operation=a.state.ship({packageId:1,version:2})
+  a[leave]();if(leave==='deactivate')await a.activate()
+  confirmation.resolve();await operation
+  assert.equal(writes.length,0,`${name} ${leave} sent a stale write`);assert.equal(a.emitted.length,0);assert.equal(a.state.saving.value,false)
+ }
+})
+
+test('batch confirmation is canceled by close, cached-page leave or unmount',async()=>{
+ for(const leave of ['close','deactivate','unmount']){
+  const confirmation=deferred(),writes=[]
+  const a=await component('FulfillmentBatchDialog',{ElMessageBox:{confirm:()=>confirmation.promise},cancelOrder:async(...v)=>writes.push(v)})
+  a.state.show([{orderId:1,version:1,status:'PENDING_REVIEW'},{orderId:2,version:1,status:'PENDING_REVIEW'}],'cancel');a.state.form.value.reason='fixed reason'
+  const operation=a.state.run()
+  if(leave==='close'){a.state.open.value=false;a.state.closed()}else a[leave]()
+  confirmation.resolve();await operation
+  assert.equal(writes.length,0);assert.equal(a.emitted.length,0);assert.equal(a.state.results.value.length,0);assert.equal(a.state.saving.value,false)
+ }
+})
+
+for(const outcome of ['success','failure'])test(`leaving an in-flight batch stops later rows after ${outcome}`,async()=>{
+ const first=deferred(),started=deferred(),writes=[]
+ const a=await component('FulfillmentBatchDialog',{shipPackage:(id)=>{writes.push(id);started.resolve();return writes.length===1?first.promise:Promise.resolve({data:{}})}})
+ a.state.show([{packageId:1,version:1,status:'READY_TO_SHIP'},{packageId:2,version:1,status:'READY_TO_SHIP'}],'ship')
+ const operation=a.state.run();await started.promise;a.deactivate()
+ if(outcome==='success')first.resolve({data:{}});else first.reject(Error('lost response'))
+ await operation
+ assert.deepEqual(writes,[1]);assert.equal(a.emitted.length,0);assert.equal(a.state.open.value,false);assert.equal(a.state.results.value.length,0)
+})
+
+for(const outcome of ['success','failure'])test(`leaving a batch preview stops later reads after ${outcome}`,async()=>{
+ const first=deferred(),started=deferred(),reads=[]
+ const a=await component('FulfillmentBatchDialog',{orderReadiness:id=>{reads.push(id);started.resolve();return reads.length===1?first.promise:Promise.resolve({data:{version:1,ready:true}})}})
+ a.state.show([{orderId:1,version:1,status:'PENDING_REVIEW'},{orderId:2,version:1,status:'PENDING_REVIEW'}],'review');a.state.form.value.warehouseId=3
+ const operation=a.state.checkAll();await started.promise;a.deactivate()
+ if(outcome==='success')first.resolve({data:{version:1,ready:true}});else first.reject(Error('denied'))
+ await operation
+ assert.deepEqual(reads,[1]);assert.equal(a.state.results.value.length,0);assert.equal(a.state.checking.value,false)
+})
+
+test('a late old batch cannot clear the busy state or results of a reactivated new batch',async()=>{
+ const oldReply=deferred(),newReply=deferred(),oldStarted=deferred(),newStarted=deferred(),calls=[]
+ const a=await component('FulfillmentBatchDialog',{shipPackage:id=>{calls.push(id);if(id===1){oldStarted.resolve();return oldReply.promise}newStarted.resolve();return newReply.promise}})
+ a.state.show([{packageId:1,version:1,status:'READY_TO_SHIP'},{packageId:2,version:1,status:'READY_TO_SHIP'}],'ship')
+ const old=a.state.run();await oldStarted.promise;a.deactivate();assert.equal(a.state.saving.value,false);await a.activate()
+ a.state.show([{packageId:9,version:2,status:'READY_TO_SHIP'}],'ship');const current=a.state.run();await newStarted.promise
+ oldReply.resolve({data:{}});await old
+ assert.equal(a.state.saving.value,true);assert.equal(a.state.results.value[0].state,'RUNNING');assert.equal(a.emitted.length,0)
+ newReply.resolve({data:{}});await current
+ assert.deepEqual(calls,[1,9]);assert.equal(a.state.count('DONE'),1);assert.equal(a.emitted.length,1)
+})
+
+test('a late old order action cannot close or unlock a newly reactivated order action',async()=>{
+ const oldReply=deferred(),newReply=deferred(),oldStarted=deferred(),newStarted=deferred()
+ const a=await component('OrderFulfillmentDialog',{reviewOrder:id=>{if(id===1){oldStarted.resolve();return oldReply.promise}newStarted.resolve();return newReply.promise}})
+ a.state.show({orderId:1,version:1},'review');a.state.form.value.warehouseId=3
+ const old=a.state.submit();await oldStarted.promise;a.deactivate();assert.equal(a.state.saving.value,false);await a.activate()
+ a.state.show({orderId:9,version:2},'review');a.state.form.value.warehouseId=3;const current=a.state.submit();await newStarted.promise
+ oldReply.resolve();await old
+ assert.equal(a.state.saving.value,true);assert.equal(a.state.open.value,true);assert.equal(a.state.target.value.orderId,9);assert.equal(a.emitted.length,0)
+ newReply.resolve();await current;assert.equal(a.emitted.length,1)
+})
+
+test('a late old package shipment cannot unlock a newer shipment or reload its page',async()=>{
+ const oldReply=deferred(),newReply=deferred(),oldStarted=deferred(),newStarted=deferred();let reads=0
+ const a=await component('PackageWorkspace',{shipPackage:id=>{if(id===1){oldStarted.resolve();return oldReply.promise}newStarted.resolve();return newReply.promise},listPackages:async()=>{reads++;return{rows:[],total:0}}})
+ const old=a.state.ship({packageId:1,version:1});await oldStarted.promise;a.deactivate();assert.equal(a.state.saving.value,false);await a.activate()
+ const current=a.state.ship({packageId:9,version:2});await newStarted.promise;const before=reads
+ oldReply.resolve();await old
+ assert.equal(a.state.saving.value,true);assert.equal(a.state.shipPending.value.id,9);assert.equal(reads,before);assert.equal(a.messages.length,0)
+ newReply.resolve();await current;assert.equal(a.state.saving.value,false);assert.equal(a.messages.length,1)
+})
+
+test('a late package save failure cannot unlock a newer save',async()=>{
+ const oldReply=deferred(),newReply=deferred(),oldStarted=deferred(),newStarted=deferred()
+ const a=await component('PackageWorkspace',{savePackageLogistics:id=>{if(id===1){oldStarted.resolve();return oldReply.promise}newStarted.resolve();return newReply.promise}})
+ const edit=id=>{a.state.open.value=true;a.state.editing.value=true;a.state.detail.value={packageId:id,version:1};a.state.form.value={mode:'MANUAL',carrierCode:'MANUAL',trackingNo:'00001',requestKey:`request-key-${id}`}}
+ edit(1);const old=a.state.save();await oldStarted.promise;a.deactivate();assert.equal(a.state.saving.value,false);await a.activate()
+ edit(9);const current=a.state.save();await newStarted.promise
+ oldReply.reject(Error('lost reply'));await old
+ assert.equal(a.state.saving.value,true);assert.equal(a.state.savePending.value.id,9);assert.equal(a.state.saveError.value,'')
+ newReply.resolve();await current;assert.equal(a.state.saving.value,false)
+})
+
+test('a late duplicate-tracking precheck cannot open a confirmation or write after leaving',async()=>{
+ const check=deferred(),started=deferred();let confirmations=0,writes=0
+ const a=await component('PackageWorkspace',{checkTracking:()=>{started.resolve();return check.promise},ElMessageBox:{confirm:async()=>{confirmations++}},savePackageShipping:async()=>writes++})
+ a.state.open.value=true;a.state.editing.value=true;a.state.detail.value={packageId:1,version:1};a.state.form.value={mode:'CATALOG',shippingMethodId:7,trackingNo:'00001',requestKey:'original-key'}
+ const operation=a.state.save();await started.promise;a.deactivate();check.resolve({data:{duplicate:true}});await operation
+ assert.equal(confirmations,0);assert.equal(writes,0);assert.equal(a.state.saving.value,false)
+})
+
+test('leaving an order form during validation prevents the subsequent create request',async()=>{
+ for(const leave of ['deactivate','unmount']){
+  const validation=deferred();let writes=0
+  const a=await component('OrderWorkspace',{addOrder:async()=>writes++})
+  a.state.start();a.state.formRef.value={validate:()=>validation.promise};const operation=a.state.saveOrder()
+  a[leave]();validation.resolve();await operation
+  assert.equal(writes,0);assert.equal(a.state.open.value,false);assert.equal(a.state.saving.value,false)
+ }
+})
+
+test('cached order leave clears recipient and upload data and discards late private details',async()=>{
+ const reply=deferred(),a=await component('OrderWorkspace',{getOrder:()=>reply.promise})
+ const reading=a.state.openOrder({orderId:1},true)
+ a.state.form.value.receiverName='private';a.state.uploadOpen.value=true;a.state.upload.file=new Blob(['private'])
+ a.deactivate()
+ assert.equal(a.state.form.value.receiverName,undefined);assert.equal(a.state.uploadOpen.value,false);assert.equal(a.state.upload.file,null)
+ reply.resolve({data:{orderId:1,receiverName:'late private',lines:[]}});await reading
+ assert.equal(a.state.open.value,false);assert.equal(a.state.form.value.receiverName,undefined)
+})
+
+test('a late old order save cannot close or unlock a new order form',async()=>{
+ const oldReply=deferred(),newReply=deferred(),oldStarted=deferred(),newStarted=deferred()
+ const a=await component('OrderWorkspace',{addOrder:payload=>{if(payload.sourceOrderNo==='old'){oldStarted.resolve();return oldReply.promise}newStarted.resolve();return newReply.promise}})
+ const edit=source=>{a.state.start();a.state.form.value.sourceOrderNo=source;a.state.formRef.value={validate:async()=>{},clearValidate(){}}}
+ edit('old');const old=a.state.saveOrder();await oldStarted.promise;a.deactivate();assert.equal(a.state.saving.value,false);await a.activate()
+ edit('new');const current=a.state.saveOrder();await newStarted.promise
+ oldReply.resolve({data:{}});await old
+ assert.equal(a.state.saving.value,true);assert.equal(a.state.open.value,true);assert.equal(a.state.form.value.sourceOrderNo,'new');assert.equal(a.messages.length,0)
+ newReply.resolve({data:{}});await current;assert.equal(a.messages.length,1)
+})
+
+test('a late import result cannot close or clear a reactivated new upload',async()=>{
+ const oldReply=deferred(),newReply=deferred(),oldStarted=deferred(),newStarted=deferred()
+ const a=await component('OrderWorkspace',{importOrders:data=>{if(data.get('requestKey')==='old'){oldStarted.resolve();return oldReply.promise}newStarted.resolve();return newReply.promise}})
+ const upload=key=>{a.state.openUpload();Object.assign(a.state.upload,{shopId:1,file:new Blob(['test']),requestKey:key})}
+ upload('old');const old=a.state.submitImport();await oldStarted.promise;a.deactivate();assert.equal(a.state.saving.value,false);await a.activate()
+ upload('new');const current=a.state.submitImport();await newStarted.promise
+ oldReply.resolve({data:{jobId:1}});await old
+ assert.equal(a.state.saving.value,true);assert.equal(a.state.uploadOpen.value,true);assert.equal(a.state.upload.requestKey,'new');assert.ok(a.state.upload.file);assert.equal(a.messages.length,0)
+ newReply.resolve({data:{jobId:2}});await current;assert.equal(a.messages.length,1)
+})
+
+test('reactivating the cached order page reloads visible facts without resurrecting the old form',async()=>{
+ let reads=0
+ const a=await component('OrderWorkspace',{listOrders:async()=>{reads++;return{rows:[{orderId:9}],total:1}}})
+ a.state.start();a.state.form.value.receiverName='private';a.deactivate();await a.activate()
+ assert.equal(reads,1);assert.equal(a.state.rows.value[0].orderId,9);assert.equal(a.state.form.value.receiverName,undefined);assert.equal(a.state.open.value,false)
+})
 
 test('readiness rejects stale/blocked checks and changing warehouse invalidates late responses',async()=>{
  const pending=deferred();let writes=0;const {state}=await component('OrderFulfillmentDialog',{orderReadiness:()=>pending.promise,reviewOrder:async()=>writes++})

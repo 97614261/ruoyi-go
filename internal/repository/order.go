@@ -13,6 +13,7 @@ import (
 	"ruoyi-go/pkg/erpctx"
 	"ruoyi-go/pkg/errs"
 	"ruoyi-go/pkg/page"
+	"ruoyi-go/pkg/tenantctx"
 	"ruoyi-go/pkg/types"
 )
 
@@ -40,7 +41,7 @@ func SelectERPOrderPage(ctx context.Context, q model.ERPOrderQuery, pg page.Quer
 		return nil, 0, err
 	}
 	rows := []model.ERPOrderSummary{}
-	err := tx.Select(orderSummaryColumns).Order("order_id DESC").Limit(pg.PageSize).Offset(pg.Offset()).Scan(&rows).Error
+	err := orderPageQuery(DB(ctx), q, pg).Scan(&rows).Error
 	return rows, total, err
 }
 func SelectERPOrderExport(ctx context.Context, q model.ERPOrderQuery, limit int) ([]model.ERPOrderSummary, error) {
@@ -82,11 +83,26 @@ func orderAudit(tx *gorm.DB, o model.ERPOrder, action, key, hash, operator strin
 	b, _ := json.Marshal(map[string]any{"orderId": o.OrderID, "shopId": o.ShopID, "action": action, "fromVersion": from, "version": o.Version})
 	return tx.Create(&model.SysOperLog{Title: "ERP订单", BusinessType: model.BusinessTypeUpdate, Method: "erp.order." + action, RequestMethod: "POST", OperName: operator, OperParam: string(b), JSONResult: `{"code":200}`, OperTime: types.Now()}).Error
 }
+
+// Each branch uses one existing unique key. UNION (not UNION ALL) preserves the
+// original OR's row set when both keys identify the same record. Keeping this
+// as one SELECT also preserves a single read view; do not split it into two
+// independent reads or remove current shop scope for idempotency replays.
+// The derived table is a reviewed server constant: both base reads explicitly
+// constrain tenant_id, and the normal outer tenant and live-shop guards remain.
+const orderCreateCandidateTable = `(SELECT * FROM erp_order WHERE tenant_id=? AND create_request_key=?
+UNION SELECT * FROM erp_order WHERE tenant_id=? AND shop_id=? AND source_order_no=?) AS erp_order`
+
+func orderCreateCandidates(tx *gorm.DB, in model.ERPOrderWrite) *gorm.DB {
+	tid := tenantctx.ID(tx.Statement.Context)
+	return orderScope(tx.Model(&model.ERPOrder{}).Table(orderCreateCandidateTable,
+		tid, in.RequestKey, tid, in.ShopID, in.SourceOrderNo))
+}
 func createOrderLocked(tx *gorm.DB, in model.ERPOrderWrite, source, hash, operator string) (*model.ERPOrderResult, error) {
 	// The current actor and parent shop must already be locked. Idempotency never
 	// bypasses current scope. The fingerprint deliberately survives later edits.
 	var olds []model.ERPOrder
-	if err := orderScope(tx.Model(&model.ERPOrder{})).Where("create_request_key=? OR (shop_id=? AND source_order_no=?)", in.RequestKey, in.ShopID, in.SourceOrderNo).Find(&olds).Error; err != nil {
+	if err := orderCreateCandidates(tx, in).Find(&olds).Error; err != nil {
 		return nil, err
 	}
 	if len(olds) > 0 {

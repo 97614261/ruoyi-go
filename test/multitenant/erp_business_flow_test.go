@@ -27,7 +27,19 @@ func TestERPBusinessFlow(t *testing.T) {
 	runERPBusinessFlow(t, false)
 }
 
+func TestERPBusinessFlowCheckedShipping(t *testing.T) {
+	runERPBusinessFlowMode(t, false, true)
+}
+
+func TestERPBusinessFlowCheckedShippingLostResponses(t *testing.T) {
+	runERPBusinessFlowMode(t, true, true)
+}
+
 func runERPBusinessFlow(t *testing.T, loseResponses bool) {
+	runERPBusinessFlowMode(t, loseResponses, false)
+}
+
+func runERPBusinessFlowMode(t *testing.T, loseResponses, checkedShipping bool) {
 	t.Helper()
 	root := os.Getenv("MT_TEST_ROOT")
 	if root == "" {
@@ -177,6 +189,8 @@ func runERPBusinessFlow(t *testing.T, loseResponses bool) {
 	var firstCollection, lastCollection model.SalesFinCollectionWrite
 	var purchaseReturnID, salesReturnID, firstPaymentID, lastPaymentID, firstCollectionID, lastCollectionID int64
 	var review, ship map[string]any
+	var packing model.PickingCheckInput
+	var packingPath, shipPath string
 	var originalPurchaseLine, originalReceiptLine map[string]any
 	var originalOrder, originalPackage map[string]any
 	var catalogCreate model.CatalogWrite
@@ -338,13 +352,36 @@ func runERPBusinessFlow(t *testing.T, loseResponses bool) {
 		}
 		s.ok(s.req("PUT", fmt.Sprintf("/erp/package/%d/logistics", pkg), a.owner, map[string]any{"version": 1, "requestKey": uuid.NewString(), "carrierCode": "MANUAL", "trackingNo": "FLOW-TRACKING"}))
 		ship = map[string]any{"version": 2, "requestKey": uuid.NewString()}
-		expectLoss("PUT", fmt.Sprintf("/erp/package/%d/ship", pkg), func() {
+		shipPath = fmt.Sprintf("/erp/package/%d/ship", pkg)
+		if checkedShipping {
+			packingPath = fmt.Sprintf("/erp/picking/%d/check", pkg)
+			shipPath = fmt.Sprintf("/erp/picking/%d/ship", pkg)
+			before := inventory()
+			deny(s.req("PUT", shipPath, a.owner, ship))
+			assertInventoryUnchanged(before)
+			sheet := get(fmt.Sprintf("/erp/picking/%d", pkg))
+			items := sheet["items"].([]any)
+			if len(items) != 1 || object(items[0])["scanCode"] != "0001234567890" || number(object(items[0]), "quantity") != 3 {
+				t.Fatal("shared catalog scan code or quantity drifted")
+			}
+			packing = model.PickingCheckInput{ERPActionToken: model.ERPActionToken{Version: id(sheet, "version"), RequestKey: uuid.NewString()}, Scans: []model.PickingScan{{ScanCode: "0001234567890", Quantity: 3}}}
+			expectLoss("PUT", packingPath, func() {
+				if get(fmt.Sprintf("/erp/picking/%d", pkg))["checked"] != true {
+					s.t.Fatal("lost response packing check did not commit")
+				}
+				assertInventoryUnchanged(before)
+			})
+			checked := data(request("PUT", packingPath, packing))
+			assertInventoryUnchanged(before)
+			ship["version"] = id(checked, "packageVersion")
+		}
+		expectLoss("PUT", shipPath, func() {
 			balance(5, 0)
 			if get(fmt.Sprintf("/erp/order/%d", order))["status"] != "SHIPPED" {
 				s.t.Fatal("lost response shipment did not commit")
 			}
 		})
-		s.ok(request("PUT", fmt.Sprintf("/erp/package/%d/ship", pkg), ship))
+		s.ok(request("PUT", shipPath, ship))
 		balance(5, 0)
 		originalOrder = get(fmt.Sprintf("/erp/order/%d", order))
 		originalPackage = get(fmt.Sprintf("/erp/package/%d", pkg))
@@ -412,7 +449,16 @@ func runERPBusinessFlow(t *testing.T, loseResponses bool) {
 		replay(post(fmt.Sprintf("/erp/purchaseReceipt/%d/returns", receipt), purchaseReturn), "returnId", purchaseReturnID)
 		replay(post(fmt.Sprintf("/erp/package/%d/returns", pkg), salesReturn), "returnId", salesReturnID)
 		s.ok(s.req("PUT", fmt.Sprintf("/erp/order/%d/review", order), a.owner, review))
-		s.ok(s.req("PUT", fmt.Sprintf("/erp/package/%d/ship", pkg), a.owner, ship))
+		if checkedShipping {
+			checked := data(s.req("PUT", packingPath, a.owner, packing))
+			if checked["existing"] != true || id(checked, "packageId") != pkg {
+				t.Fatal("original packing result not replayed after return and finance")
+			}
+		}
+		shipped := data(s.req("PUT", shipPath, a.owner, ship))
+		if shipped["existing"] != true || id(shipped, "packageId") != pkg {
+			t.Fatal("original shipment result not replayed after return and finance")
+		}
 		replay(post("/erp/finance/payments", firstPayment), "id", firstPaymentID)
 		replay(post("/erp/finance/payments", lastPayment), "id", lastPaymentID)
 		replay(post("/erp/salesFinance/collections", firstCollection), "id", firstCollectionID)
@@ -475,11 +521,21 @@ func runERPBusinessFlow(t *testing.T, loseResponses bool) {
 				t.Fatalf("completed business facts missing from enablement: %s=%s", key, states[key])
 			}
 		}
-		if loseResponses {
-			if losses != 5 || len(beforeRetry) != 0 {
-				t.Fatal("all five committed-response losses must be exercised")
+		if checkedShipping {
+			shippedRows := rows(fmt.Sprintf("/erp/logistics/shipments?warehouseId=%d&shopId=%d&pageSize=100", warehouse, shop))
+			if len(shippedRows) != 1 || id(object(shippedRows[0]), "packageId") != pkg {
+				t.Fatal("checked shipment missing or duplicated in logistics history")
 			}
-			t.Log("all five lost responses verified committed before original-key retry")
+		}
+		if loseResponses {
+			wantLosses := 5
+			if checkedShipping {
+				wantLosses++
+			}
+			if losses != wantLosses || len(beforeRetry) != 0 {
+				t.Fatal("all committed-response losses must be exercised")
+			}
+			t.Logf("all %d lost responses verified committed before original-key retry", wantLosses)
 		}
 	}) {
 		return

@@ -66,7 +66,7 @@ func replayFulfillment(tx *gorm.DB, o model.ERPOrder, action, key, hash string) 
 	r.Existing = true
 	return &r, nil
 }
-func finishFulfillment(tx *gorm.DB, old model.ERPOrder, o *model.ERPOrder, p *model.ERPPackage, action, key, hash, operator string) (*model.ERPFulfillmentResult, error) {
+func finishFulfillment(tx *gorm.DB, old model.ERPOrder, o *model.ERPOrder, p *model.ERPPackage, action, key, hash, operator string, packingFingerprint ...string) (*model.ERPFulfillmentResult, error) {
 	if old.Version == math.MaxInt64 {
 		return nil, errs.New("订单版本已到上限")
 	}
@@ -85,6 +85,12 @@ func finishFulfillment(tx *gorm.DB, old model.ERPOrder, o *model.ERPOrder, p *mo
 		result.PackageVersion = &p.Version
 	}
 	payload, err := json.Marshal(result)
+	if len(packingFingerprint) > 0 {
+		payload, err = json.Marshal(packingProof{ERPFulfillmentResult: *result, Fingerprint: packingFingerprint[0]})
+		if len(payload) > 500 {
+			return nil, errs.New("复核记录超过存储上限")
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -361,6 +367,10 @@ func ActERPPackage(ctx context.Context, id int64, in model.ERPLogisticsInput, sh
 }
 
 func actERPPackage(ctx context.Context, id int64, in model.ERPLogisticsInput, ship bool, hash, operator string, shippingMethodID int64) (*model.ERPFulfillmentResult, error) {
+	return actERPPackageMode(ctx, id, in, ship, hash, operator, shippingMethodID, false)
+}
+
+func actERPPackageMode(ctx context.Context, id int64, in model.ERPLogisticsInput, ship bool, hash, operator string, shippingMethodID int64, checkedShip bool) (*model.ERPFulfillmentResult, error) {
 	var out *model.ERPFulfillmentResult
 	err := erpError(erpTransaction(ctx, func(tx *gorm.DB) error {
 		if err := lockERPActor(tx); err != nil {
@@ -387,8 +397,16 @@ func actERPPackage(ctx context.Context, id int64, in model.ERPLogisticsInput, sh
 		action := "LOGISTICS"
 		if ship {
 			action = "SHIP"
+			if checkedShip {
+				action = "CHECKED_SHIP"
+			}
 		}
-		replay, err := replayFulfillment(tx, o, action, in.RequestKey, hash)
+		var replay *model.ERPFulfillmentResult
+		if checkedShip {
+			replay, err = replayPicking(tx, o, action, in.RequestKey, hash)
+		} else {
+			replay, err = replayFulfillment(tx, o, action, in.RequestKey, hash)
+		}
 		if err != nil {
 			return err
 		}
@@ -410,6 +428,11 @@ func actERPPackage(ctx context.Context, id int64, in model.ERPLogisticsInput, sh
 			doc, e := lockOrderDocument(tx, o)
 			if e != nil {
 				return e
+			}
+			if checkedShip {
+				if e = requirePackingCheck(tx, p); e != nil {
+					return e
+				}
 			}
 			if e = transitionERPDocumentLocked(tx, &doc, "ship", operator); e != nil {
 				return e

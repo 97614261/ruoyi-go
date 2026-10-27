@@ -18,7 +18,7 @@
       <el-table-column label="操作" align="center" width="200"><template #default="scope"><el-button link type="primary" icon="Edit" @click="handleUpdate(scope.row)" v-hasPermi="['erp:sku:edit']">修改</el-button><el-button link type="primary" icon="Delete" @click="handleDelete(scope.row)" v-hasPermi="['erp:sku:remove']">删除</el-button></template></el-table-column>
     </el-table>
     <pagination v-show="total > 0" :total="total" v-model:page="queryParams.pageNum" v-model:limit="queryParams.pageSize" @pagination="getList" />
-    <el-dialog :title="title" v-model="open" class="erp-dialog" width="min(600px, calc(100vw - 24px))" append-to-body><el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
+    <el-dialog :title="title" v-model="open" class="erp-dialog" width="min(600px, calc(100vw - 24px))" append-to-body @close="closedRequest"><el-alert v-if="pending" title="结果未确认，原内容和版本已固定。可用原内容重试；编码重复或版本冲突时请先查询确认。" type="warning" :closable="false"/><el-form ref="formRef" :disabled="busy||!!pending" :model="form" :rules="rules" label-width="100px">
       <el-form-item label="SKU编码" prop="skuCode"><el-input v-model="form.skuCode" /></el-form-item>
       <el-form-item label="商品名称" prop="productName"><el-input v-model="form.productName" /></el-form-item>
       <el-form-item label="规格" prop="specification"><el-input v-model="form.specification" /></el-form-item>
@@ -30,9 +30,12 @@
 </template>
 
 <script setup name="ErpSku">
+let alive=true,view=0,operation=0,wasInactive=false
+import {onBeforeUnmount,onDeactivated,onActivated} from 'vue'
 import { listErpSku, getErpSku, addErpSku, updateErpSku, delErpSku } from '@/api/erp/sku'
 const { proxy } = getCurrentInstance()
 const formRef = ref()
+const busy=ref(false),error=ref(""),pending=ref(null)
 const loading = ref(false)
 const rows = ref([])
 const total = ref(0)
@@ -49,14 +52,24 @@ const rules = reactive({
   unit: [{ required: true, message: "单位不能为空", trigger: 'blur' }],
   status: [{ required: true, message: "状态不能为空", trigger: 'blur' }],
 })
-async function getList() { loading.value = true; try { const res = await listErpSku(queryParams); rows.value = res.rows; total.value = res.total } finally { loading.value = false } }
+let listSeq=0,detailSeq=0
+async function getList(){if(!alive)return;const seq=++listSeq;loading.value=true;try{const r=await listErpSku({...queryParams});if(alive&&seq===listSeq){rows.value=r.rows;total.value=r.total}}catch(e){if(alive&&seq===listSeq){rows.value=[];total.value=0;if(typeof error!=="undefined")error.value=e.message||"读取失败"}}finally{if(seq===listSeq)loading.value=false}}
 function handleQuery() { queryParams.pageNum = 1; getList() }
 function resetQuery() { proxy.resetForm('queryRef'); handleQuery() }
 function handleSelectionChange(selection) { ids.value = selection.map(item => item.skuId); multiple.value = !selection.length }
-function handleAdd() { form.value = {status:'0',unit:'件',specification:''}; title.value = '新增商品SKU'; open.value = true }
-async function handleUpdate(row) { const res = await getErpSku(row.skuId); form.value = res.data; title.value = '修改商品SKU'; open.value = true }
-async function submitForm() { await formRef.value.validate(); if (form.value.skuId != null) await updateErpSku(form.value); else await addErpSku(form.value); proxy.$modal.msgSuccess('操作成功'); open.value = false; getList() }
-async function handleDelete(row = {}) { const target = row.skuId ?? ids.value; await proxy.$modal.confirm('确认删除选中数据？'); await delErpSku(target); proxy.$modal.msgSuccess('删除成功'); getList() }
+function handleAdd() {if(!alive||busy.value||pending.value&&open.value)return;pending.value=null; form.value = {status:'0',unit:'件',specification:''}; title.value = '新增商品SKU'; open.value = true }
+async function handleUpdate(row,readOnly=false){if(!alive||busy.value)return;const seq=++detailSeq;pending.value=null;try{const r=await getErpSku(row.skuId);if(!alive||seq!==detailSeq)return;form.value=r.data;title.value="修改商品SKU";open.value=true}catch(e){if(alive&&seq===detailSeq&&typeof error!=="undefined")error.value=e.message||"读取失败"}}
+async function submitForm(){
+ if(!alive||busy.value||!open.value)return
+ const owner=view,op=++operation;busy.value=true
+ try{let c=pending.value;if(!c){await formRef.value.validate();if(!alive||owner!==view||op!==operation||!open.value)return;c=JSON.parse(JSON.stringify({id:form.value.skuId,payload:Object.fromEntries(['skuId','skuCode','productName','specification','unit','status','remark','version'].map(k=>[k,form.value[k]]))}));pending.value=c};if(c.id!=null){await updateErpSku(c.payload)}else await addErpSku(c.payload);if(!alive||owner!==view||op!==operation)return;open.value=false;closedRequest();if(typeof ElMessage!=="undefined")ElMessage.success('已保存');else proxy.$modal.msgSuccess('操作成功');await getList()}
+ catch(e){if(alive&&owner===view&&op===operation){if(typeof error!=="undefined")error.value='结果未确认，原内容已固定；请先查询确认。';else throw e}}
+ finally{if(op===operation)busy.value=false}
+}
+async function handleDelete(row={}){if(!alive||busy.value)return;const owner=view,op=++operation,target=JSON.parse(JSON.stringify(row.skuId??ids.value));busy.value=true;try{await proxy.$modal.confirm("确认删除选中数据？被引用的数据不能删除。");if(!alive||owner!==view||op!==operation)return;await delErpSku(target);if(!alive||owner!==view||op!==operation)return;proxy.$modal.msgSuccess("删除成功");await getList()}finally{if(op===operation)busy.value=false}}
 function handleExport() { proxy.download('erp/sku/export', { ...queryParams }, 'sku_' + new Date().getTime() + '.xlsx') }
 getList()
+function closedRequest(){if(open.value)return;++detailSeq;form.value={};pending.value=null}
+function leave(){alive=false;++view;++operation;++listSeq;++detailSeq;busy.value=false;loading.value=false;open.value=false;form.value={};pending.value=null;rows.value=[];total.value=0;if(typeof channels!=="undefined")channels.value=[];if(typeof ids!=="undefined")ids.value=[]}
+onBeforeUnmount(leave);onDeactivated(()=>{wasInactive=true;leave()});onActivated(()=>{if(wasInactive){wasInactive=false;alive=true;return getList()}})
 </script>

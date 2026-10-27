@@ -21,13 +21,13 @@ import {getDocument} from '@/api/erp/workflow'
 import {safeID} from '@/utils/purchasing.mjs'
 const router=useRouter(),route=useRoute(),can=p=>checkPermi([p]),purchaseFilter=ref(''),query=reactive({pageNum:1,pageSize:10,purchaseId:undefined,receiptNo:''}),rows=ref([]),total=ref(0),loading=ref(false),listError=ref(false),opening=ref(false),closing=ref(false),open=ref(false),selected=ref({lines:[]}),mode=ref('receipt')
 let listSeq=0,detailSeq=0,inactive=false
-async function load(){const t=++listSeq;loading.value=true;listError.value=false;try{const r=await listPurchaseReceipts({...query});if(t===listSeq){rows.value=r.rows;total.value=r.total}}catch{if(t===listSeq){rows.value=[];total.value=0;listError.value=true}}finally{if(t===listSeq)loading.value=false}}
-function search(){const id=safeID(purchaseFilter.value);if(purchaseFilter.value&&!id){ElMessage.warning('采购ID须为有效正整数');return};query.purchaseId=id;query.pageNum=1;return load()}
-async function show(row,next){if(opening.value||closing.value||open.value||!can(next==='voucher'?'erp:receipt:query':'erp:purchaseReceipt:query'))return;const t=++detailSeq;opening.value=true;try{const r=await(next==='voucher'?getDocument('receipt',row.stockDocumentId):getPurchaseReceipt(row.receiptId));if(t!==detailSeq)return;selected.value=r.data;mode.value=next;open.value=true}finally{if(t===detailSeq)opening.value=false}}
+async function load(){if(inactive)return;const t=++listSeq;loading.value=true;listError.value=false;try{const r=await listPurchaseReceipts({...query});if(t===listSeq){rows.value=r.rows;total.value=r.total}}catch{if(t===listSeq){rows.value=[];total.value=0;listError.value=true}}finally{if(t===listSeq)loading.value=false}}
+function search(){if(inactive)return;const id=safeID(purchaseFilter.value);if(purchaseFilter.value&&!id){ElMessage.warning('采购ID须为有效正整数');return};query.purchaseId=id;query.pageNum=1;return load()}
+async function show(row,next){if(inactive)return;if(opening.value||closing.value||open.value||!can(next==='voucher'?'erp:receipt:query':'erp:purchaseReceipt:query'))return;const t=++detailSeq;opening.value=true;try{const r=await(next==='voucher'?getDocument('receipt',row.stockDocumentId):getPurchaseReceipt(row.receiptId));if(t!==detailSeq)return;selected.value=r.data;mode.value=next;open.value=true}finally{if(t===detailSeq)opening.value=false}}
 function closed(){if(open.value)return;closing.value=true;++detailSeq;opening.value=false;selected.value={lines:[]}}
 function closeDialog(){closing.value=true;open.value=false;closed()}function beforeClose(done){closeDialog();done()}
 function clear(){++listSeq;++detailSeq;open.value=false;selected.value={lines:[]};rows.value=[];total.value=0;loading.value=false;opening.value=false}
-function link(){const id=safeID(route.query.purchaseId);purchaseFilter.value=id?String(id):'';return search()}watch(()=>route.query.purchaseId,link)
-onBeforeUnmount(clear);onDeactivated(()=>{inactive=true;clear()});onActivated(()=>{if(inactive){inactive=false;closing.value=false;if(can('erp:purchaseReceipt:list'))return link()}})
+function link(){if(inactive)return;const id=safeID(route.query.purchaseId);purchaseFilter.value=id?String(id):'';return search()}watch(()=>route.query.purchaseId,link)
+onBeforeUnmount(()=>{inactive=true;clear()});onDeactivated(()=>{inactive=true;clear()});onActivated(()=>{if(inactive){inactive=false;closing.value=false;if(can('erp:purchaseReceipt:list'))return link()}})
 if(can('erp:purchaseReceipt:list'))link()
 </script>

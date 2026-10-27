@@ -148,6 +148,134 @@ func TestERPOrders(t *testing.T) {
 			t.Fatal("phase5 changed fulfillment")
 		}
 	})
+	t.Run("create_key_source_match_sets_live_scope_and_unique_races", func(t *testing.T) {
+		prior := s.t
+		s.t = t
+		defer func() { s.t = prior }()
+		expectRejected := func(v map[string]any) {
+			t.Helper()
+			if v["code"] == float64(200) || v["data"] != nil {
+				t.Fatal("conflicting or unauthorized create returned data")
+			}
+		}
+		made := func(body map[string]any) int64 {
+			t.Helper()
+			v := s.req("POST", "/erp/order", a.owner, body)
+			s.ok(v)
+			return int64(v["data"].(map[string]any)["orderId"].(float64))
+		}
+		first := input(shopA, "MATCH-SOURCE-A", "match-request-a")
+		second := input(shopA, "MATCH-SOURCE-B", "match-request-b")
+		aid, bid := made(first), made(second)
+		if aid == bid {
+			t.Fatal("distinct keys/sources did not create distinct orders")
+		}
+		replay := s.req("POST", "/erp/order", a.owner, first)
+		s.ok(replay)
+		if replay["data"].(map[string]any)["existing"] != true || int64(replay["data"].(map[string]any)["orderId"].(float64)) != aid {
+			t.Fatal("two conditions matching one row were not deduplicated")
+		}
+		expectRejected(s.req("POST", "/erp/order", a.owner, input(shopA, "MATCH-ABSENT", "match-request-a")))
+		sourceReplay := s.req("POST", "/erp/order", a.owner, input(shopA, "MATCH-SOURCE-A", "match-absent-key"))
+		s.ok(sourceReplay)
+		if sourceReplay["data"].(map[string]any)["existing"] != true || int64(sourceReplay["data"].(map[string]any)["orderId"].(float64)) != aid {
+			t.Fatal("identical source/content did not preserve original replay with an alternate request key")
+		}
+		sourceChanged := input(shopA, "MATCH-SOURCE-A", "match-new-content-key")
+		sourceChanged["receiverName"] = "different source payload"
+		expectRejected(s.req("POST", "/erp/order", a.owner, sourceChanged))
+		expectRejected(s.req("POST", "/erp/order", a.owner, input(shopA, "MATCH-SOURCE-B", "match-request-a")))
+		changed := input(shopA, "MATCH-SOURCE-A", "match-request-a")
+		changed["receiverName"] = "changed fingerprint"
+		expectRejected(s.req("POST", "/erp/order", a.owner, changed))
+		otherShop := shop(a, "MATCH-SECOND")
+		hidden := input(otherShop, "MATCH-SOURCE-A", "match-hidden-shop")
+		made(hidden)
+		// Identical identifiers in another tenant must neither block nor replay A.
+		foreign := s.req("POST", "/erp/order", b.owner, input(shopB, "MATCH-SOURCE-A", "match-request-a"))
+		s.ok(foreign)
+		if int64(foreign["data"].(map[string]any)["orderId"].(float64)) == aid {
+			t.Fatal("foreign tenant key collision leaked a result")
+		}
+		s.ok(s.req("POST", "/system/role", a.owner, map[string]any{"roleName": "查重等价员工", "roleKey": "creatematches", "roleSort": 1, "status": "0", "dataScope": "1", "menuIds": []int64{6000, 7100, 7300, 7301, 7302}}))
+		roleList := s.req("GET", "/system/role/list?roleKey=creatematches", a.owner, nil)
+		s.ok(roleList)
+		rid := roleList["rows"].([]any)[0].(map[string]any)["roleId"]
+		s.ok(s.req("POST", "/system/user", a.owner, map[string]any{"userName": "creatematches", "nickName": "查重等价员工", "password": operationsPassword, "status": "0", "roleIds": []any{rid}}))
+		users := s.req("GET", "/system/user/list?userName=creatematches", a.owner, nil)
+		s.ok(users)
+		uid := int64(users["rows"].([]any)[0].(map[string]any)["userId"].(float64))
+		employee := s.loginAs(a.code, "creatematches", operationsPassword)
+		defer s.req("POST", "/logout", employee, nil)
+		grant := func(ids []int64) {
+			path := fmt.Sprintf("/erp/shop/access/%d", uid)
+			v := s.req("GET", path, a.owner, nil)
+			s.ok(v)
+			s.ok(s.req("PUT", path, a.owner, map[string]any{"version": v["data"].(map[string]any)["version"], "shopIds": ids}))
+		}
+		grant([]int64{shopA})
+		defer grant([]int64{})
+		s.ok(s.req("GET", fmt.Sprintf("/erp/order/%d", aid), employee, nil))
+		// An invisible key in the same tenant must still fail its unique insert,
+		// without revealing hidden metadata or leaving a partially created order.
+		expectRejected(s.req("POST", "/erp/order", employee, input(shopA, "MATCH-NOT-CREATED", "match-hidden-shop")))
+		check := s.req("GET", "/erp/order/list?sourceOrderNo=MATCH-NOT-CREATED", a.owner, nil)
+		s.ok(check)
+		if check["total"] != float64(0) {
+			t.Fatal("hidden-key conflict left an order")
+		}
+		grant([]int64{})
+		expectRejected(s.req("POST", "/erp/order", employee, first))
+		for _, kind := range []string{"same_key_same_source", "same_source_different_keys", "same_source_different_content", "same_key_different_sources"} {
+			results := parallelJSON(s, 6, func(i int) (string, string, string, any) {
+				key, source := "match-race-"+kind, "MATCH-RACE-"+kind
+				if kind == "same_source_different_keys" || kind == "same_source_different_content" {
+					key += fmt.Sprint(i)
+				}
+				if kind == "same_key_different_sources" {
+					source += fmt.Sprint(i)
+				}
+				body := input(shopA, source, key)
+				if kind == "same_source_different_content" {
+					body["receiverName"] = fmt.Sprintf("race-content-%d", i)
+				}
+				return "POST", "/erp/order", a.owner, body
+			})
+			winners := 0
+			for _, r := range results {
+				if r.err != nil {
+					t.Fatal(r.err)
+				}
+				if r.code == 200 {
+					winners++
+				}
+			}
+			want := 1
+			if kind == "same_key_same_source" || kind == "same_source_different_keys" {
+				want = 6
+			}
+			if winners != want {
+				t.Fatalf("%s successes=%d want=%d", kind, winners, want)
+			}
+			ctx, cancel := context.WithTimeout(ctxFor(a), 10*time.Second)
+			var rows []model.ERPOrder
+			if err := repository.DB(ctx).Where("source_order_no LIKE ?", "MATCH-RACE-"+kind+"%").Find(&rows).Error; err != nil {
+				cancel()
+				t.Fatal(err)
+			}
+			if len(rows) != 1 {
+				cancel()
+				t.Fatal("race persisted multiple orders", kind)
+			}
+			var events, lines int64
+			e1 := repository.DB(ctx).Model(&model.ERPOrderEvent{}).Where("order_id=? AND action='CREATE'", rows[0].OrderID).Count(&events).Error
+			e2 := repository.DB(ctx).Model(&model.ERPOrderLine{}).Where("order_id=?", rows[0].OrderID).Count(&lines).Error
+			cancel()
+			if e1 != nil || e2 != nil || events != 1 || lines != 1 {
+				t.Fatal("race duplicated audit or lines", kind)
+			}
+		}
+	})
 	t.Run("tenant_isolation_and_invalid_json", func(t *testing.T) {
 		deny(s.req("GET", fmt.Sprintf("/erp/order/%d", orderID), b.owner, nil))
 		deny(s.req("GET", "/erp/order/list", platform, nil))
@@ -410,4 +538,6 @@ func TestERPOrders(t *testing.T) {
 			t.Fatal("parser error leaked raw input")
 		}
 	})
+	t.Run("read_pages_counts_projection_and_live_scope", func(t *testing.T) { checkOrderReadPages(t, s, platform) })
+
 }

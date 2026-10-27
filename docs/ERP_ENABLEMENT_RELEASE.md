@@ -1,5 +1,7 @@
 # 本地ERP版本整理清单
 
+> 2026-10-26版本导航：下文是启用模块收口时的整理快照。用户随后批准将245个已验文件本地提交为`a71b0e6`，因此下文“未执行commit/工作区包含前轮模块”不再描述当前Git状态；历史分组与排除规则保留。新拣货源码尚未提交，见[验收](./ERP_PICKING_ACCEPTANCE.md)。两批均未推送。
+
 当前可用模块见[蓝图](./ERP_BLUEPRINT.md)，新企业操作见[指南](./ERP_GETTING_STARTED.md)，本轮证据见[验收](./ERP_ENABLEMENT_ACCEPTANCE.md)。
 本轮未执行git add/commit/push。工作区包含此前多轮未提交模块，不能只提交新启用页面而遗漏其依赖。
 

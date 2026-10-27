@@ -179,6 +179,7 @@ func erpMenus() []model.SysMenu {
 		{9300, "shipment", "发货记录", []string{"export"}},
 		{9400, "overview", "经营概览", nil},
 		{9500, "setup", "企业启用", nil},
+		{9600, "picking", "拣货与打包", []string{"query", "check", "ship"}},
 	} {
 		m := base
 		m.MenuID = spec.id
