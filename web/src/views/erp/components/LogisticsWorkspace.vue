@@ -3,8 +3,13 @@
   <header class="logistics-head"><h2>物流设置</h2><span>企业共享档案；停用阻止新选择，已有包裹沿原快照保留。</span></header>
   <el-alert title="这里只维护手工发货使用的物流公司和配送方式，不连接承运商、不申请面单或扣运费。" type="info" :closable="false" class="mb8" />
   <el-tabs v-model="tab" @tab-change="changed"><el-tab-pane label="物流公司" name="carrier" :disabled="busy||open"/><el-tab-pane label="配送方式" name="method" :disabled="busy||open"/></el-tabs>
-  <el-form inline size="small" @submit.prevent="search"><el-form-item label="编码"><el-input v-model="query.code" maxlength="64" clearable/></el-form-item><el-form-item label="名称"><el-input v-model="query.name" maxlength="120" clearable/></el-form-item><el-form-item label="状态"><el-select v-model="query.status" clearable style="width:100px"><el-option label="启用" value="0"/><el-option label="停用" value="1"/></el-select></el-form-item><el-button @click="search" :disabled="busy">查询</el-button><el-button type="primary" @click="start" v-hasPermi="['erp:logistics:add']" :disabled="busy">新增{{isMethod?'配送方式':'物流公司'}}</el-button></el-form>
-  <el-table :data="rows" size="small" v-loading="loading"><el-table-column prop="code" label="编码" min-width="120"/><el-table-column prop="name" label="名称" min-width="160"/><el-table-column v-if="isMethod" prop="carrierName" label="物流公司" min-width="150"/><el-table-column label="状态" width="75"><template #default="s">{{s.row.status==='0'?'启用':'停用'}}</template></el-table-column><el-table-column prop="version" label="版本" width="70"/><el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip/><el-table-column label="操作" width="130"><template #default="s"><el-button link @click="show(s.row,false)" v-hasPermi="['erp:logistics:query']" :disabled="busy">详情</el-button><el-button link type="primary" @click="show(s.row,true)" v-hasPermi="['erp:logistics:edit']" :disabled="busy||!checkPermi(['erp:logistics:query'])">编辑</el-button></template></el-table-column></el-table>
+  <ERPQueryBar :model="query" :loading="loading" :disabled="busy" @search="search" @reset="reset">
+   <el-form-item label="编码"><el-input v-model="query.code" maxlength="64" clearable/></el-form-item>
+   <el-form-item label="名称"><el-input v-model="query.name" maxlength="120" clearable/></el-form-item>
+   <el-form-item label="状态"><el-select v-model="query.status" clearable ><el-option label="启用" value="0"/><el-option label="停用" value="1"/></el-select></el-form-item>
+   <template #toolbar><el-button type="primary" @click="start" v-hasPermi="['erp:logistics:add']" :disabled="busy">新增{{isMethod?'配送方式':'物流公司'}}</el-button></template>
+  </ERPQueryBar>
+  <el-table :data="rows" v-loading="loading"><el-table-column prop="code" label="编码" min-width="120"/><el-table-column prop="name" label="名称" min-width="160"/><el-table-column v-if="isMethod" prop="carrierName" label="物流公司" min-width="150"/><el-table-column label="状态" width="75"><template #default="s">{{s.row.status==='0'?'启用':'停用'}}</template></el-table-column><el-table-column prop="version" label="版本" width="70"/><el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip/><el-table-column label="操作" width="130"><template #default="s"><el-button link @click="show(s.row,false)" v-hasPermi="['erp:logistics:query']" :disabled="busy">详情</el-button><el-button link type="primary" @click="show(s.row,true)" v-hasPermi="['erp:logistics:edit']" :disabled="busy||!checkPermi(['erp:logistics:query'])">编辑</el-button></template></el-table-column></el-table>
   <pagination v-show="total>0" :total="total" v-model:page="query.pageNum" v-model:limit="query.pageSize" @pagination="load"/>
   <el-dialog v-model="open" :title="(form.id?'物流档案':'新增档案')+(editable?'':' · 只读')" class="erp-dialog" width="min(620px, calc(100vw - 24px))" :close-on-click-modal="false" :show-close="!saving" :close-on-press-escape="!saving" @close="closed">
    <el-alert v-if="error" :title="error" type="warning" :closable="false" class="mb8"/>
@@ -19,6 +24,9 @@
  </div>
 </template>
 <script setup>
+import ERPQueryBar from './ERPQueryBar.vue'
+import { resetERPQuery } from '@/utils/erp-query.mjs'
+
 import { ref,reactive,computed,onMounted,onBeforeUnmount,onDeactivated,onActivated } from 'vue'
 import { ElMessage } from 'element-plus'
 import { checkPermi } from '@/utils/permission'
@@ -38,5 +46,6 @@ async function submit(){if(!active)return;if(saving.value||!open.value||!editabl
 function closed(){if(open.value)return;clear()}
 function deactivate(){active=false;loading.value=false;carrierLoading.value=false;++listSequence;clear();rows.value=[];total.value=0}
 onMounted(load);onBeforeUnmount(deactivate);onDeactivated(()=>{wasDeactivated=true;deactivate()});onActivated(()=>{if(wasDeactivated){wasDeactivated=false,active=true;load()}})
+function reset(){resetERPQuery(query,{pageNum:1,pageSize:20,code:'',name:'',status:''});return search()}
 </script>
 <style scoped>.logistics-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}.logistics-head h2{font-size:18px;margin:0}.logistics-head span{font-size:12px;color:var(--el-text-color-secondary)}</style>

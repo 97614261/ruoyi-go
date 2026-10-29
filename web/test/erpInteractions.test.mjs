@@ -1,3 +1,4 @@
+import { resetERPQuery } from '../src/utils/erp-query.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -22,7 +23,7 @@ async function component(name, overrides = {}, props = {}) {
   const compiled = compileScript(descriptor, { id: `test-${name}` }).content
     .replace(/^import\s[^\n]*\n/gm, '').replace('export default', 'const component =')
   const messages = [], prompts = [], lifecycle = { deactivate: [], unmount: [], activate: [] }
-  const stubs = {
+  const stubs = { ERPQueryBar:{}, resetERPQuery,
     ref, reactive, computed,watch, onMounted() {},onBeforeUnmount(fn){lifecycle.unmount.push(fn)},onDeactivated(fn){lifecycle.deactivate.push(fn)},onActivated(fn){lifecycle.activate.push(fn)}, ReferenceSelect: {}, LogisticsMethodSelect:{},
     useRouter: () => ({ push() {} }),useRoute:()=>({query:{}}), saveAs() {}, download: async()=>{}, FormData,
     FulfillmentBatchDialog:{},OrderReadinessPanel:{},orderWorkbench:async()=>({data:{}}),orderReadiness:async()=>({data:{ready:true,version:1,issues:[],stocks:[]}}),

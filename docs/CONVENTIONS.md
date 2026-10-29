@@ -1105,3 +1105,32 @@ ERP接口增删或调整授权时，同步审查 `test/permissionmatrix/routes.t
 远程选择器若在查询前清空选项，不可再用菜单的visible-change触发同一查询：空选项、loading和重新挂载选项都会影响远程菜单可见性，可能形成重复请求/闪烁循环。优先由真实输入获焦、主动搜索或业务弹窗准备阶段加载，绑定对应loading；仅当前请求可更新选项/结束loading，离页、关闭或撤权时清空并作废迟到响应。仅加loading不是消除循环的充分条件，必须实际页面复验。财务账户及销售财务店铺选择器遵循此规则。
 
 可靠性正式入口是`scripts/verify-erp-reliability.ps1`，默认只预览，显式`-Execute`才写新测试企业。quick只验入口/短业务链；standard持续观察；私有脚本不作为唯一复现入口。用法和本地限制见[ERP_RELIABILITY](./ERP_RELIABILITY.md)。
+
+## ERP导航展示分类
+
+ERP业务分类由自有web的`erp-navigation.mjs`维护，只消费后端已经授权的路由；不得通过补齐类别页面、客户端静态注册业务路由或自动改授权来改善菜单。实际路由注册和页面跳转继续使用原URL/组件，展示容器只作唯一侧栏索引和不可点击面包屑。未知ERP扩展页保留入口，不静默丢弃；类别无可见页面时隐藏。新增ERP页面同步登记导航分类，见[ERP_NAVIGATION](./ERP_NAVIGATION.md)。
+
+## ERP控件尺寸与搜索区
+
+自有web的ERP表单、按钮、表格和标签继承系统size；根ElConfigProvider读取appStore.size。不得在业务页写死small或通过单元格padding/line-height强制模拟小尺寸。图像、弹窗宽度和打印纸张尺寸不属于控件size。
+
+列表筛选统一使用ERPQueryBar：字段在默认slot，查询仅走原生form submit，重置调用页面原处理器；新增、导出等业务按钮放toolbar slot或表单外。禁止再为同一输入绑定keyup.enter查询，避免重复提交。选值与清空只更新条件，点击查询/回车后应用；分页和业务快捷筛选沿原入口。布局随容器换行，不以固定控件高度压缩。
+
+重置清除可见及链接带入的隐藏筛选，回到第一页并保留pageSize；日期、文本ID等独立ref一并清除。保留列表默认状态、当前业务页签及待确认的原请求，不能用重置筛选清除写入锁、内容或请求键。拣货待确认期间禁止查询/重置；财务来源搜索与按钮查询必须一致地回到第一页。验证与边界见[ERP表单与搜索复核](./ERP_FORMS_REVIEW_2026-10-28.md)。
+
+## 全局业务弹窗窗口控制
+
+自有web默认使用模板`<el-dialog>`，由dialog-windows插件统一解析到WindowDialog；不用逐页导入或实现最大/最小逻辑。根App保留DialogWindowDock，普通确认提示ElMessageBox与抽屉不在此封装范围。直接导入element-plus的ElDialog属于原生专用入口，不获得窗口控制；新业务页遵循模板默认入口。
+
+最小化仅改变视觉状态，v-model仍为true，不触发before-close/close/closed，不销毁或重建表单；从底部栏恢复原状态。原生Dialog暂时隐藏来释放遮罩、焦点和滚动锁，不能只用CSS藏正文。真正关闭才按原destroy-on-close处理，并只通知一轮关闭事件。离页/卸载必须清掉恢复栏入口，不把最小化当作跨页草稿保存。
+
+最大化覆盖整个视口，正文内部滚动，标题及页脚保持可达；继承系统size、主题和原宽度。show-close=false时默认禁用最小/最大操作；额外保存锁用window-controls-disabled。默认挂载body，特殊布局可显式append-to-body=false；自有ERP的erp-dialog响应式规则继续保留。
+
+before-close保持原取消写法：不调用done也可以取消；返回Promise时在其结束后释放额外的关闭尝试锁。不得让取消/异常导致永久锁定，旧异步回调不能关闭恢复后或新打开的窗口。用法、可选项、测试入口及边界见[全局弹窗](./GLOBAL_DIALOG.md)。
+
+
+## 全局弹窗拖拽与富文本加载
+
+模板el-dialog默认标题栏可鼠标拖拽，沿原生视口限制；显式:draggable="false"可按窗关闭，最大化由原生禁拖。动作区不把mousedown冒泡给拖动手柄。仅真正新开时重置位置，最小化恢复不复位或重建表单。拖拽与window-controls开关独立，确认提示/抽屉不纳入；见[全局弹窗](./GLOBAL_DIALOG.md)。
+
+全局Editor注册必须从components/Editor/async.mjs进入，不在main.js静态导入Editor/index.vue或Quill；仅挂载使用Editor的页面时加载实现。修改注册入口须检查生产入口的静态依赖图，不得把压缩包大小变化等同于首屏耗时或全站总下载减少。原编辑器的模型和上传规则不由异步入口重写；加载状态与有界失败在异步入口处理。

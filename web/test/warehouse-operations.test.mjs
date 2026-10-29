@@ -1,3 +1,4 @@
+import { resetERPQuery } from '../src/utils/erp-query.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
@@ -9,7 +10,7 @@ import {safeID,immutablePayload} from '../src/utils/purchasing.mjs'
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return{promise,resolve,reject}}
 async function setup(name,overrides={}){
  const source=await readFile(new URL(`../src/views/erp/components/${name}.vue`,import.meta.url),'utf8'),{descriptor}=parse(source),code=compileScript(descriptor,{id:'w7'}).content.replace(/^import\s[^\n]*\n/gm,'').replace('export default','const component=')
- const hooks=[],messages=[];const stubs={ref,reactive,computed,watch(){},onBeforeUnmount:f=>hooks.push(f),onDeactivated:f=>hooks.push(f),onActivated(){},useRoute:()=>({query:{}}),useRouter:()=>({push(){}}),checkPermi:()=>true,crypto:{randomUUID:()=> 'warehouse-fixed-key'},ElMessage:{success:x=>messages.push(x),warning(){}},transferPayload,transferStatuses,thresholdLabel,sourceType,safeID,immutablePayload,eventLabels:{},listTransfers:async()=>({rows:[],total:0}),listStock:async()=>({rows:[],total:0}),listLedger:async()=>({rows:[],total:0}),...overrides}
+ const hooks=[],messages=[];const stubs={ ERPQueryBar:{}, resetERPQuery,ref,reactive,computed,watch(){},onBeforeUnmount:f=>hooks.push(f),onDeactivated:f=>hooks.push(f),onActivated(){},useRoute:()=>({query:{}}),useRouter:()=>({push(){}}),checkPermi:()=>true,crypto:{randomUUID:()=> 'warehouse-fixed-key'},ElMessage:{success:x=>messages.push(x),warning(){}},transferPayload,transferStatuses,thresholdLabel,sourceType,safeID,immutablePayload,eventLabels:{},listTransfers:async()=>({rows:[],total:0}),listStock:async()=>({rows:[],total:0}),listLedger:async()=>({rows:[],total:0}),...overrides}
  stubs.ReferenceSelect={}
  const component=vm.runInNewContext(`${code}\ncomponent`,stubs);return{state:component.setup({ledger:false},{expose(){},emit(){}}),hooks,messages,source}
 }

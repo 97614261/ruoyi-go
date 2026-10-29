@@ -3,7 +3,7 @@
   <el-alert :title="mode==='review'?'审核会固定SKU配对快照，按内部SKU汇总预占库存并创建一个包裹，任何一步失败都会整体回滚。':'待审核取消不动库存；已审核未发货取消会同时释放预占并取消包裹。已发货不可取消。'" type="warning" :closable="false"/>
   <el-alert v-if="pending" title="结果未确认，原请求内容与版本已固定。可用原请求重试；关闭后请先查询订单状态。" type="warning" :closable="false"/>
   <p>订单 #{{target?.orderId}} · v{{target?.version}}</p>
-  <el-form label-width="95px" size="small" :disabled="busy||!!pending"><el-form-item v-if="mode==='review'" label="发货仓库"><ReferenceSelect kind="warehouse" v-model="form.warehouseId" style="width:100%"/></el-form-item><el-form-item v-else label="取消原因"><el-input v-model="form.reason" type="textarea" maxlength="500" show-word-limit placeholder="必须填写原因"/></el-form-item></el-form>
+  <el-form label-width="95px" :disabled="busy||!!pending"><el-form-item v-if="mode==='review'" label="发货仓库"><ReferenceSelect kind="warehouse" v-model="form.warehouseId" style="width:100%"/></el-form-item><el-form-item v-else label="取消原因"><el-input v-model="form.reason" type="textarea" maxlength="500" show-word-limit placeholder="必须填写原因"/></el-form-item></el-form>
   <OrderReadinessPanel :result="checkResult"/>
   <template #footer><el-button @click="open=false" :disabled="busy">关闭</el-button><el-button v-if="mode==='review'" @click="check" :loading="checking" :disabled="busy||!!pending">检查配对 / 库存</el-button><el-button type="primary" @click="submit" :loading="saving" :disabled="checking||(mode==='review'&&checkResult&&!checkResult.ready)">{{pending?'原请求重试':mode==='review'?'审核并预占':'确认取消'}}</el-button></template>
  </el-dialog>

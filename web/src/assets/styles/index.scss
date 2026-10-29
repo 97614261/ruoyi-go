@@ -5,6 +5,7 @@
 @use './btn.scss';
 @use './ruoyi.scss';
 @use './erp-dialog.scss';
+@use './dialog-windows.scss';
 // 背景图主题，必须排在最后：它覆盖上面几个文件里的 Element Plus 表面变量
 @use './background.scss';
 

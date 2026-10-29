@@ -1,10 +1,16 @@
 <template>
-  <router-view />
+  <el-config-provider :size="appStore.size">
+    <router-view />
+    <DialogWindowDock />
+  </el-config-provider>
 </template>
 
 <script setup>
+import useAppStore from '@/store/modules/app'
 import useSettingsStore from '@/store/modules/settings'
 import { handleThemeStyle } from '@/utils/theme'
+
+const appStore = useAppStore()
 
 onMounted(() => {
   nextTick(() => {

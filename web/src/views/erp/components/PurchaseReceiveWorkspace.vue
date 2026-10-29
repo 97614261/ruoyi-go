@@ -1,20 +1,27 @@
 <template>
  <div class="app-container">
   <el-alert title="收货确认会立即增加实物库存，不改变预占。采购收货凭据不可直接撤销；需退货请使用独立采购退货作业，本页不展示价格。" type="warning" :closable="false" class="mb8"/>
-  <el-form inline size="small" @submit.prevent="search"><el-form-item label="采购单号"><el-input v-model="query.purchaseNo" clearable placeholder="完整采购单号"/></el-form-item><el-form-item v-if="can('erp:warehouse:list')" label="仓库"><PurchasingReferenceSelect kind="warehouse" v-model="query.warehouseId" style="width:180px"/></el-form-item><el-form-item><el-button @click="search">查询可收货采购</el-button><el-button v-if="can('erp:purchaseReceipt:list')" @click="router.push('/erp/purchaseReceipt')">收货记录</el-button></el-form-item></el-form>
+  <ERPQueryBar :model="query" :loading="loading"  @search="search" @reset="reset">
+   <el-form-item label="采购单号"><el-input v-model="query.purchaseNo" clearable placeholder="完整采购单号"/></el-form-item>
+   <el-form-item v-if="can('erp:warehouse:list')" label="仓库"><PurchasingReferenceSelect kind="warehouse" v-model="query.warehouseId" /></el-form-item>
+   <template #toolbar><el-button v-if="can('erp:purchaseReceipt:list')" @click="router.push('/erp/purchaseReceipt')">收货记录</el-button></template>
+  </ERPQueryBar>
   <el-alert v-if="listError" title="可收货列表读取失败，不是零条数据。" type="error" :closable="false"/>
   <el-alert v-if="lastResult" :title="'已入库：收货 #'+lastResult.receiptId+'，库存凭据 #'+lastResult.stockDocumentId+'，采购v'+lastResult.version+' · '+purchaseStates[lastResult.status]" type="success" :closable="true" @close="lastResult=null"/>
-  <el-table :data="rows" size="small" v-loading="loading"><el-table-column prop="purchaseNo" label="采购单号" min-width="240" show-overflow-tooltip/><el-table-column prop="supplierName" label="供应商" min-width="130"/><el-table-column prop="warehouseName" label="到货仓库" min-width="120"/><el-table-column label="状态" width="110"><template #default="{row}">{{purchaseStates[row.status]}}</template></el-table-column><el-table-column label="已收/采购" width="120"><template #default="{row}">{{row.receivedQuantity}} / {{row.orderedQuantity}}</template></el-table-column><el-table-column label="操作" width="120" fixed="right"><template #default="{row}"><el-button link type="primary" :disabled="busy||opening||closing" @click="start(row.purchaseId)">登记到货</el-button></template></el-table-column></el-table>
+  <el-table :data="rows" v-loading="loading"><el-table-column prop="purchaseNo" label="采购单号" min-width="240" show-overflow-tooltip/><el-table-column prop="supplierName" label="供应商" min-width="130"/><el-table-column prop="warehouseName" label="到货仓库" min-width="120"/><el-table-column label="状态" width="110"><template #default="{row}">{{purchaseStates[row.status]}}</template></el-table-column><el-table-column label="已收/采购" width="120"><template #default="{row}">{{row.receivedQuantity}} / {{row.orderedQuantity}}</template></el-table-column><el-table-column label="操作" width="120" fixed="right"><template #default="{row}"><el-button link type="primary" :disabled="busy||opening||closing" @click="start(row.purchaseId)">登记到货</el-button></template></el-table-column></el-table>
   <pagination v-show="!listError&&total>0" :total="total" v-model:page="query.pageNum" v-model:limit="query.pageSize" @pagination="load"/>
   <el-dialog v-model="open" title="登记本次到货 · 确认即入库" class="erp-dialog" width="min(900px, calc(100vw - 24px))" :close-on-click-modal="false" :show-close="!busy" :close-on-press-escape="!busy" :before-close="beforeClose" @close="closed" @closed="closing=false">
    <el-alert v-if="error" :title="error" type="warning" :closable="false" class="mb8"/><p>{{form.purchaseNo}} · {{form.supplierName}} → {{form.warehouseName}} · v{{form.version}}</p>
-   <el-table :data="form.lines" size="small"><el-table-column prop="skuCode" label="SKU" min-width="120"/><el-table-column prop="productName" label="商品快照" min-width="180"/><el-table-column prop="unit" label="单位" width="65"/><el-table-column prop="orderedQuantity" label="采购" width="80"/><el-table-column prop="receivedQuantity" label="已收" width="80"/><el-table-column label="余量" width="85"><template #default="{row}">{{row.orderedQuantity-row.receivedQuantity}}</template></el-table-column><el-table-column label="本次数量（0不提交）" width="190"><template #default="{row}"><el-input-number v-model="row.quantity" :min="0" :max="row.orderedQuantity-row.receivedQuantity" :precision="0" :disabled="busy||!!pending" style="width:160px"/></template></el-table-column></el-table>
+   <el-table :data="form.lines"><el-table-column prop="skuCode" label="SKU" min-width="120"/><el-table-column prop="productName" label="商品快照" min-width="180"/><el-table-column prop="unit" label="单位" width="65"/><el-table-column prop="orderedQuantity" label="采购" width="80"/><el-table-column prop="receivedQuantity" label="已收" width="80"/><el-table-column label="余量" width="85"><template #default="{row}">{{row.orderedQuantity-row.receivedQuantity}}</template></el-table-column><el-table-column label="本次数量（0不提交）" width="190"><template #default="{row}"><el-input-number v-model="row.quantity" :min="0" :max="row.orderedQuantity-row.receivedQuantity" :precision="0" :disabled="busy||!!pending" style="width:160px"/></template></el-table-column></el-table>
    <p>确认后将立即入库；不可从手工凭据撤销；退货请使用独立采购退货作业。请核对实物数量，不要把余量自动当到货。</p>
    <template #footer><el-button :disabled="busy" @click="closeDialog">关闭 / 放弃本次重试</el-button><el-button type="primary" :loading="busy" @click="submit">{{pending?'沿用原请求重试':'确认本次到货并入库'}}</el-button></template>
   </el-dialog>
  </div>
 </template>
 <script setup name="PurchaseReceiveWorkspace">
+import ERPQueryBar from './ERPQueryBar.vue'
+import { resetERPQuery } from '@/utils/erp-query.mjs'
+
 import {ref,reactive,watch,onBeforeUnmount,onDeactivated,onActivated} from 'vue'
 import {useRoute,useRouter} from 'vue-router'
 import {ElMessage} from 'element-plus'
@@ -36,4 +43,5 @@ function clear(){busy.value=false;++viewSeq;++listSeq;++detailSeq;open.value=fal
 function openLink(){if(inactive)return;const id=safeID(route.query.purchaseId);if(id)return start(id)}watch(()=>route.query.purchaseId,openLink)
 onBeforeUnmount(()=>{inactive=true;clear()});onDeactivated(()=>{inactive=true;clear()});onActivated(()=>{if(inactive){inactive=false;closing.value=false;const pendingLoad=can('erp:purchase:receive')?load():undefined;openLink();return pendingLoad}})
 if(can('erp:purchase:receive'))load();openLink()
+function reset(){resetERPQuery(query,{pageNum:1,pageSize:10,purchaseNo:'',warehouseId:undefined});return search()}
 </script>

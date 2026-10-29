@@ -1,20 +1,19 @@
 <template>
  <div class="app-container">
   <el-alert title="一行代表一个店铺可售变种，可配对一个内部SKU。这里只维护商品配对，不会拉取平台商品或产生订单、库存。停用和解绑保留历史。" type="info" :closable="false" class="mb8"/>
-  <el-form inline size="small" @submit.prevent="search">
-   <el-form-item label="店铺"><el-select v-model="query.shopId" clearable filterable remote :remote-method="findShops" @visible-change="v=>v&&findShops('')" placeholder="搜索已授权店铺" style="width:190px"><el-option v-for="s in shops" :key="s.shopId" :value="s.shopId" :label="s.shopCode+' · '+s.shopName"/></el-select></el-form-item>
-   <el-form-item label="店铺SKU"><el-input v-model="query.shopItemCode" clearable maxlength="128" @keyup.enter="search"/></el-form-item>
-   <el-form-item label="标题"><el-input v-model="query.title" clearable maxlength="200" @keyup.enter="search"/></el-form-item>
-   <el-form-item label="配对"><el-select v-model="query.mappingState" clearable style="width:110px"><el-option label="已配对" value="MAPPED"/><el-option label="未配对" value="UNMAPPED"/></el-select></el-form-item>
-   <el-form-item label="状态"><el-select v-model="query.status" clearable style="width:100px"><el-option label="启用" value="0"/><el-option label="停用" value="1"/></el-select></el-form-item>
-   <el-form-item><el-button @click="search">查询</el-button><el-button @click="reset">重置</el-button></el-form-item>
-  </el-form>
-  <el-button type="primary" size="small" class="mb8" @click="start" :disabled="busy" v-hasPermi="['erp:shopItem:add']">新增店铺商品</el-button>
-  <el-table :data="rows" size="small" v-loading="loading">
-   <el-table-column label="店铺" min-width="130" show-overflow-tooltip><template #default="{row}">{{row.shopCode}} · {{row.shopName}}<el-tag v-if="row.shopStatus==='1'" type="info" size="small">店铺停用</el-tag></template></el-table-column>
+  <ERPQueryBar :model="query" :loading="loading"  @search="search" @reset="reset">
+   <el-form-item label="店铺"><el-select v-model="query.shopId" clearable filterable remote :remote-method="findShops" @visible-change="v=>v&&findShops('')" placeholder="搜索已授权店铺" ><el-option v-for="s in shops" :key="s.shopId" :value="s.shopId" :label="s.shopCode+' · '+s.shopName"/></el-select></el-form-item>
+   <el-form-item label="店铺SKU"><el-input v-model="query.shopItemCode" clearable maxlength="128" /></el-form-item>
+   <el-form-item label="标题"><el-input v-model="query.title" clearable maxlength="200" /></el-form-item>
+   <el-form-item label="配对"><el-select v-model="query.mappingState" clearable ><el-option label="已配对" value="MAPPED"/><el-option label="未配对" value="UNMAPPED"/></el-select></el-form-item>
+   <el-form-item label="状态"><el-select v-model="query.status" clearable ><el-option label="启用" value="0"/><el-option label="停用" value="1"/></el-select></el-form-item>
+  </ERPQueryBar>
+  <el-button type="primary" class="mb8" @click="start" :disabled="busy" v-hasPermi="['erp:shopItem:add']">新增店铺商品</el-button>
+  <el-table :data="rows" v-loading="loading">
+   <el-table-column label="店铺" min-width="130" show-overflow-tooltip><template #default="{row}">{{row.shopCode}} · {{row.shopName}}<el-tag v-if="row.shopStatus==='1'" type="info">店铺停用</el-tag></template></el-table-column>
    <el-table-column label="店铺SKU" prop="shopItemCode" min-width="130" show-overflow-tooltip/>
    <el-table-column label="商品标题" prop="title" min-width="170" show-overflow-tooltip/>
-   <el-table-column label="内部SKU" min-width="150" show-overflow-tooltip><template #default="{row}"><span v-if="row.mappingStatus==='0'">{{row.skuCode}} · {{row.productName}} <el-tag v-if="row.skuStatus==='1'" type="danger" size="small">SKU停用</el-tag></span><span v-else>未配对{{row.mappingId?'（已解绑）':''}}</span></template></el-table-column>
+   <el-table-column label="内部SKU" min-width="150" show-overflow-tooltip><template #default="{row}"><span v-if="row.mappingStatus==='0'">{{row.skuCode}} · {{row.productName}} <el-tag v-if="row.skuStatus==='1'" type="danger">SKU停用</el-tag></span><span v-else>未配对{{row.mappingId?'（已解绑）':''}}</span></template></el-table-column>
    <el-table-column label="状态" width="80"><template #default="{row}">{{row.status==='0'?'启用':'停用'}}</template></el-table-column>
    <el-table-column label="版本" prop="version" width="65"/>
    <el-table-column label="操作" width="240"><template #default="{row}">
@@ -26,7 +25,7 @@
   </el-table>
   <pagination v-show="total>0" :total="total" v-model:page="query.pageNum" v-model:limit="query.pageSize" @pagination="load"/>
   <el-dialog v-model="open" :title="readOnly?'店铺商品详情':form.itemId?'修改店铺商品':'新增店铺商品'" class="erp-dialog" width="min(660px, calc(100vw - 24px))" :close-on-click-modal="false" :show-close="!saving" :close-on-press-escape="!saving" @close="closeItem">
-   <el-form ref="formRef" :model="form" :rules="rules" label-width="110px" size="small" :disabled="saving||readOnly||!!itemPending">
+   <el-form ref="formRef" :model="form" :rules="rules" label-width="110px" :disabled="saving||readOnly||!!itemPending">
     <el-form-item label="店铺" prop="shopId"><el-select v-model="form.shopId" :disabled="!!form.itemId" filterable remote :remote-method="findShops" @visible-change="v=>v&&findShops('')" style="width:100%"><el-option v-if="form.itemId" :key="form.shopId" :value="form.shopId" :label="form.shopCode+' · '+form.shopName"/><template v-else><el-option v-for="s in shops" :key="s.shopId" :value="s.shopId" :label="s.shopCode+' · '+s.shopName" :disabled="s.status!=='0'"/></template></el-select></el-form-item>
     <el-form-item label="店铺SKU编码" prop="shopItemCode"><el-input v-model="form.shopItemCode" maxlength="128" placeholder="作为文本保留前导零，不含首尾空白"/></el-form-item>
     <el-form-item label="外部商品ID"><el-input v-model="form.externalProductId" maxlength="128" placeholder="可选，未接平台API"/></el-form-item>
@@ -41,7 +40,7 @@
   <el-alert v-if="mappingPending||itemPending" title="上次结果未确认，重试固定原目标/内容/版本；请先查记录，版本冲突不能视为未提交。" type="warning" :closable="false"/><el-dialog v-model="mappingOpen" title="配对内部 SKU" class="erp-dialog" width="min(600px, calc(100vw - 24px))" :close-on-click-modal="false" :show-close="!saving" :close-on-press-escape="!saving" @close="closeMapping">
    <el-alert title="商品版本控制编辑、配对和解绑。版本冲突请关闭后重新打开；未结束订单引用会阻止改配对，已解绑行不物理删除。" type="warning" :closable="false"/>
    <p>{{mapping.item?.shopName}} / {{mapping.item?.shopItemCode}} · 商品版本 v{{mapping.item?.version}}，配对版本 v{{mapping.item?.mappingVersion||'—'}}</p>
-   <el-form label-width="100px" size="small" :disabled="saving">
+   <el-form label-width="100px" :disabled="saving">
     <el-form-item label="内部SKU"><el-select v-model="mapping.skuId" filterable remote :remote-method="findSkus" @visible-change="v=>v&&findSkus('')" placeholder="搜索内部SKU商品名称（最多100条）" style="width:100%"><el-option v-for="s in skus" :key="s.skuId" :value="s.skuId" :label="s.skuCode+' · '+s.productName+' / '+s.unit" :disabled="s.status!=='0'"/></el-select></el-form-item>
     <el-form-item label="配对备注"><el-input v-model="mapping.remark" maxlength="500" type="textarea"/></el-form-item>
    </el-form>
@@ -50,6 +49,9 @@
  </div>
 </template>
 <script setup>
+import ERPQueryBar from './ERPQueryBar.vue'
+import { resetERPQuery } from '@/utils/erp-query.mjs'
+
 import { ref, reactive, computed, onMounted,watch,onBeforeUnmount,onDeactivated,onActivated } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -66,7 +68,7 @@ const mappingPending=ref(null),itemPending=ref(null)
 let listSequence=0,detailSequence=0,shopSequence=0,skuSequence=0,view=0,operation=0,alive=true,wasInactive=false
 async function load(){if(!alive)return;const ticket=++listSequence;loading.value=true;try{const r=await listShopItems({...query});if(alive&&ticket===listSequence){rows.value=r.rows;total.value=r.total}}catch(e){if(alive&&ticket===listSequence){rows.value=[];total.value=0;throw e}}finally{if(ticket===listSequence)loading.value=false}}
 function search(){query.pageNum=1;return load()}
-function reset(){Object.assign(query,{shopId:undefined,shopItemCode:'',title:'',status:'',mappingState:''});return search()}
+function reset(){resetERPQuery(query,{pageNum:1,pageSize:10,shopId:undefined,shopItemCode:'',title:'',status:'',mappingState:''});return search()}
 async function findShops(shopName){if(!alive)return;if(!checkPermi(['erp:shop:list'])){ElMessage.warning('店铺选择器需要店铺列表权限');return}const ticket=++shopSequence;const r=await listErpShop({shopName,pageNum:1,pageSize:100});if(ticket===shopSequence)shops.value=r.rows}
 async function findSkus(productName){if(!alive)return;if(!checkPermi(['erp:sku:list'])){ElMessage.warning('SKU选择器需要SKU列表权限');return}const ticket=++skuSequence;const r=await listErpSku({productName,pageNum:1,pageSize:100});if(ticket===skuSequence&&mappingOpen.value){const current=mapping.value.item;skus.value=r.rows;if(current?.skuId&&!skus.value.some(s=>s.skuId===current.skuId))skus.value.unshift({skuId:current.skuId,skuCode:current.skuCode,productName:current.productName,unit:current.unit,status:current.skuStatus})}}
 function start(){if(!alive||busy.value||itemPending.value&&open.value)return;itemPending.value=null;if(busy.value)return;++detailSequence;form.value={shopId:query.shopId,shopItemCode:'',externalProductId:'',externalVariantId:'',title:'',status:'0',remark:''};readOnly.value=false;open.value=true;formRef.value?.clearValidate()}

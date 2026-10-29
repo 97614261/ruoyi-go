@@ -1,3 +1,4 @@
+import { resetERPQuery } from '../src/utils/erp-query.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
@@ -9,7 +10,7 @@ import {safeID,immutablePayload} from '../src/utils/purchasing.mjs'
 const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve=a;reject=b});return{promise,resolve,reject}}
 async function setup(kind='account',overrides={}){
  const source=await readFile(new URL('../src/views/erp/components/SalesFinanceWorkspace.vue',import.meta.url),'utf8'),{descriptor}=parse(source),code=compileScript(descriptor,{id:'salesFinance'}).content.replace(/^import\s[^\n]*\n/gm,'').replace('export default','const component=')
- const hooks=[],messages=[],stubs={ref,reactive,computed,onBeforeUnmount:f=>hooks.push(f),onDeactivated:f=>hooks.push(f),onActivated(){},watch(){},useRoute:()=>({query:{}}),useRouter:()=>({push(){}}),checkPermi:()=>true,crypto:{randomUUID:()=> 'salesFinance-fixed-key'},ElMessage:{success:x=>messages.push(x)},ReferenceSelect:{},salesFinanceList:async()=>({rows:[],total:0}),salesFinanceGet:async()=>({data:{}}),salesFinanceReturns:async()=>({rows:[],total:0}),salesFinanceWrite:async()=>({data:{id:1,kind:'account',version:1,status:'0'}}),...salesFinance,safeID,immutablePayload,...overrides}
+ const hooks=[],messages=[],stubs={ ERPQueryBar:{}, resetERPQuery,ref,reactive,computed,onBeforeUnmount:f=>hooks.push(f),onDeactivated:f=>hooks.push(f),onActivated(){},watch(){},useRoute:()=>({query:{}}),useRouter:()=>({push(){}}),checkPermi:()=>true,crypto:{randomUUID:()=> 'salesFinance-fixed-key'},ElMessage:{success:x=>messages.push(x)},ReferenceSelect:{},salesFinanceList:async()=>({rows:[],total:0}),salesFinanceGet:async()=>({data:{}}),salesFinanceReturns:async()=>({rows:[],total:0}),salesFinanceWrite:async()=>({data:{id:1,kind:'account',version:1,status:'0'}}),...salesFinance,safeID,immutablePayload,...overrides}
  const c=vm.runInNewContext(`${code}\ncomponent`,stubs);return{state:c.setup({kind},{expose(){},emit(){}}),hooks,messages,source}
 }
 const account=()=>({requestKey:'account-test-key',accountCode:'A',accountName:'记账账户',accountType:'BANK',currency:'cny',status:'0',remark:''})
@@ -26,4 +27,18 @@ test('sales finance shop search uses scoped shop API, not warehouse fallback; fa
 test('overview currency link selects the correct financial list and rejects forged values before request',async()=>{
  const calls=[];const a=await setup('receivable',{useRoute:()=>({query:{currency:'USD'}}),salesFinanceList:async(k,q)=>{calls.push({...q});return{rows:[],total:0}}});await Promise.resolve();assert.equal(a.state.query.currency,'USD');assert.equal(calls[0].currency,'USD')
  let reads=0;const b=await setup('receivable',{useRoute:()=>({query:{currency:['USD','CNY']}}),salesFinanceList:async()=>{reads++;return{rows:[],total:0}}});assert.equal(reads,0);assert.equal(b.state.listError.value,true);assert.equal(b.state.rows.value.length,0)
+})
+
+
+test('source search returns to page one; reset clears code and retains page length under write locks',async()=>{
+ const calls=[]
+ const {state:s}=await setup('receivable',{salesFinanceList:async(kind,params)=>{calls.push({kind,params});return{rows:[],total:0}}})
+ await Promise.resolve()
+ s.open.value=true;s.mode.value='sources';s.sourceQuery.pageNum=5;s.sourceQuery.pageSize=50;s.sourceQuery.code='OLD'
+ await s.searchSources()
+ assert.equal(calls.at(-1).kind,'source');assert.equal(calls.at(-1).params.pageNum,1);assert.equal(calls.at(-1).params.code,'OLD')
+ await s.resetSources()
+ assert.equal(calls.at(-1).params.code,undefined);assert.equal(calls.at(-1).params.pageSize,50)
+ s.busy.value=true;s.sourceQuery.pageNum=4;s.sourceQuery.code='LOCKED';const count=calls.length
+ s.resetSources();s.searchSources();assert.equal(calls.length,count);assert.equal(s.sourceQuery.code,'LOCKED');assert.equal(s.sourceQuery.pageNum,4)
 })

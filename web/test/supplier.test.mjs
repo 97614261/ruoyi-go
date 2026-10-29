@@ -1,3 +1,4 @@
+import { resetERPQuery } from '../src/utils/erp-query.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import vm from 'node:vm'
@@ -9,7 +10,7 @@ async function setup(overrides={}){
  const source=await readFile(new URL('../src/views/erp/components/SupplierWorkspace.vue',import.meta.url),'utf8')
  const {descriptor}=parse(source),code=compileScript(descriptor,{id:'supplier'}).content.replace(/^import\s[^\n]*\n/gm,'').replace('export default','const component =')
  const hooks=[],messages=[],activated=[]
- const stubs={ref,reactive,computed,onBeforeUnmount:f=>hooks.push(f),onDeactivated:f=>hooks.push(f),onActivated:f=>activated.push(f),checkPermi:()=>true,ElMessage:{success:x=>messages.push(x)},listSuppliers:async()=>({rows:[],total:0}),getSupplier:async()=>({data:{supplierId:1,version:1,supplierCode:'A',supplierName:'test',phone:'private'}}),addSupplier:async()=>{},editSupplier:async()=>{},...overrides}
+ const stubs={ ERPQueryBar:{}, resetERPQuery,ref,reactive,computed,onBeforeUnmount:f=>hooks.push(f),onDeactivated:f=>hooks.push(f),onActivated:f=>activated.push(f),checkPermi:()=>true,ElMessage:{success:x=>messages.push(x)},listSuppliers:async()=>({rows:[],total:0}),getSupplier:async()=>({data:{supplierId:1,version:1,supplierCode:'A',supplierName:'test',phone:'private'}}),addSupplier:async()=>{},editSupplier:async()=>{},...overrides}
  const definition=vm.runInNewContext(`${code}\ncomponent`,stubs)
  const state=definition.setup({}, {expose(){}});return {state,hooks,messages,source,activated}
 }

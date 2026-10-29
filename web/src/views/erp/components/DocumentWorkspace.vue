@@ -1,13 +1,13 @@
 <template>
  <div class="app-container">
   <el-alert :title="notice" type="info" :closable="false" class="mb12"/>
-  <el-form inline size="small" @submit.prevent="search">
+  <ERPQueryBar :model="query" :loading="loading"  @search="search" @reset="reset">
    <el-form-item label="单号"><el-input v-model="query.documentNo" clearable placeholder="完整单号"/></el-form-item>
-   <el-form-item label="仓库"><ReferenceSelect kind="warehouse" v-model="query.warehouseId" style="width:220px"/></el-form-item>
-   <el-form-item label="状态"><el-select v-model="query.status" clearable style="width:130px"><el-option v-for="status in statuses" :key="status" :label="label(status)" :value="status"/></el-select></el-form-item>
-   <el-form-item><el-button type="primary" @click="search">查询</el-button><el-button @click="start" v-hasPermi="[`erp:${type}:add`]">新建草稿</el-button></el-form-item>
-  </el-form>
-  <el-table :data="rows" v-loading="loading" size="small">
+   <el-form-item label="仓库"><ReferenceSelect kind="warehouse" v-model="query.warehouseId" /></el-form-item>
+   <el-form-item label="状态"><el-select v-model="query.status" clearable ><el-option v-for="status in statuses" :key="status" :label="label(status)" :value="status"/></el-select></el-form-item>
+   <template #toolbar><el-button @click="start" v-hasPermi="[`erp:${type}:add`]">新建草稿</el-button></template>
+  </ERPQueryBar>
+  <el-table :data="rows" v-loading="loading">
    <el-table-column label="单号" prop="documentNo" min-width="280" show-overflow-tooltip/><el-table-column label="仓库" prop="warehouseName" min-width="120"/>
    <el-table-column label="状态" width="100"><template #default="{row}"><el-tag>{{label(row.status)}}</el-tag></template></el-table-column>
    <el-table-column label="类型" width="80" v-if="correction"><template #default="{row}">{{row.reversal?'整单冲销':'退货'}}</template></el-table-column>
@@ -28,7 +28,7 @@
     </template>
     <el-form-item label="仓库" required><span v-if="correction">{{form.warehouseName||'请先选择原单'}}</span><ReferenceSelect v-else kind="warehouse" v-model="form.warehouseId" :disabled="saving||!!pending"/></el-form-item>
    </el-form>
-   <el-table :data="form.lines" size="small">
+   <el-table :data="form.lines">
     <el-table-column label="商品" min-width="300"><template #default="{row}"><span v-if="correction">{{row.skuCode}} · {{row.productName}}</span><ReferenceSelect v-else v-model="row.skuId" :disabled="saving||!!pending"/></template></el-table-column>
     <el-table-column :label="kind==='COUNT'?'实盘数量（可为0）':'数量（整数）'" width="200"><template #default="{row}"><el-input-number v-if="kind==='COUNT'" v-model="row.countedQuantity" :disabled="saving||!!pending" :min="0" :max="1000000000" :precision="0"/><el-input-number v-else v-model="row.quantity" :disabled="saving||!!pending||form.reversal" :min="1" :max="1000000000" :precision="0"/></template></el-table-column>
     <el-table-column v-if="!form.reversal" width="75"><template #default="{$index}"><el-button link type="danger" @click="form.lines.splice($index,1)" :disabled="saving||!!pending">移除</el-button></template></el-table-column>
@@ -40,12 +40,15 @@
   <el-dialog v-model="detailOpen" title="单据明细快照" width="min(900px, calc(100vw - 32px))" class="erp-document-dialog erp-dialog" align-center>
    <p>{{selected.documentNo}} · {{selected.warehouseName}} · {{label(selected.status)}} · v{{selected.version}}</p>
    <p v-if="selected.sourceDocumentId">关联原单 ID：{{selected.sourceDocumentId}} · {{selected.reversal?'整单冲销':'退货'}}</p>
-   <el-table :data="selected.lines" size="small"><el-table-column label="SKU编码" prop="skuCode"/><el-table-column label="商品" prop="productName"/><el-table-column label="规格" prop="specification"/><el-table-column label="单位" prop="unit" width="60"/><el-table-column :label="kind==='COUNT'?'实盘':'数量'" prop="quantity" width="100"/><template v-if="kind==='COUNT'"><el-table-column label="账面快照" prop="expectedOnHand" width="100"/><el-table-column label="预占快照" prop="expectedReserved" width="100"/><el-table-column label="差异" width="100"><template #default="{row}">{{row.quantity-row.expectedOnHand}}</template></el-table-column></template></el-table>
+   <el-table :data="selected.lines"><el-table-column label="SKU编码" prop="skuCode"/><el-table-column label="商品" prop="productName"/><el-table-column label="规格" prop="specification"/><el-table-column label="单位" prop="unit" width="60"/><el-table-column :label="kind==='COUNT'?'实盘':'数量'" prop="quantity" width="100"/><template v-if="kind==='COUNT'"><el-table-column label="账面快照" prop="expectedOnHand" width="100"/><el-table-column label="预占快照" prop="expectedReserved" width="100"/><el-table-column label="差异" width="100"><template #default="{row}">{{row.quantity-row.expectedOnHand}}</template></el-table-column></template></el-table>
    <p>{{selected.remark}}</p>
   </el-dialog>
  </div>
 </template>
 <script setup>
+import ERPQueryBar from './ERPQueryBar.vue'
+import { resetERPQuery } from '@/utils/erp-query.mjs'
+
 import {ref,reactive,computed,onMounted,onBeforeUnmount,onDeactivated,onActivated} from 'vue'
 import {ElMessage,ElMessageBox} from 'element-plus'
 import {listDocuments,getDocument,createDocument,editDocument,actOnDocument} from '@/api/erp/workflow'
@@ -79,6 +82,7 @@ onMounted(load)
 function leave(){pending.value=null;alive=false;++view;++operation;++listSeq;++detailSeq;++sourceSequence;loading.value=false;saving.value=false;working.value=false;open.value=false;detailOpen.value=false;rows.value=[];total.value=0;form.value={lines:[]};selected.value={};sources.value=[];sourceLines.value=[];sourceLoading.value=false}
 onBeforeUnmount(leave);onDeactivated(()=>{wasInactive=true;leave()});onActivated(()=>{if(wasInactive){wasInactive=false;alive=true;return load()}})
 function closeDraft(){if(open.value)return;++detailSeq;++sourceSequence;pending.value=null;form.value={lines:[]};sources.value=[];sourceLines.value=[]}
+function reset(){resetERPQuery(query,{pageNum:1,pageSize:10,status:'',documentNo:''});return search()}
 </script>
 <style scoped>.mt12{margin-top:12px}.mb12{margin-bottom:12px}</style>
 <!-- Dialog content can be teleported: limit these global rules to ERP document dialogs. -->

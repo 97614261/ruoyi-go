@@ -1,14 +1,13 @@
 <template>
  <div class="app-container">
   <el-alert title="店铺仅登记企业经营资料，不代表平台已授权。所有者维护资料，员工只查看已授权店铺；停用保留历史，不提供删除。" type="info" :closable="false" class="mb8"/>
-  <el-form inline size="small" @submit.prevent="search">
-   <el-form-item label="编码"><el-input v-model="query.shopCode" clearable maxlength="64" @keyup.enter="search"/></el-form-item>
-   <el-form-item label="名称"><el-input v-model="query.shopName" clearable maxlength="120" @keyup.enter="search"/></el-form-item>
-   <el-form-item label="状态"><el-select v-model="query.status" clearable style="width:100px"><el-option label="启用" value="0"/><el-option label="停用" value="1"/></el-select></el-form-item>
-   <el-form-item><el-button @click="search">查询</el-button><el-button @click="reset">重置</el-button></el-form-item>
-  </el-form>
-  <div class="mb8"><el-button v-if="owner" type="primary" size="small" @click="start" v-hasPermi="['erp:shop:add']" :disabled="saving||detailLoading">新增店铺</el-button> <ShopAccess/></div>
-  <el-table :data="rows" v-loading="loading" size="small">
+  <ERPQueryBar :model="query" :loading="loading"  @search="search" @reset="reset">
+   <el-form-item label="编码"><el-input v-model="query.shopCode" clearable maxlength="64" /></el-form-item>
+   <el-form-item label="名称"><el-input v-model="query.shopName" clearable maxlength="120" /></el-form-item>
+   <el-form-item label="状态"><el-select v-model="query.status" clearable ><el-option label="启用" value="0"/><el-option label="停用" value="1"/></el-select></el-form-item>
+  </ERPQueryBar>
+  <div class="mb8"><el-button v-if="owner" type="primary" @click="start" v-hasPermi="['erp:shop:add']" :disabled="saving||detailLoading">新增店铺</el-button> <ShopAccess/></div>
+  <el-table :data="rows" v-loading="loading">
    <el-table-column label="编码" prop="shopCode" min-width="130" show-overflow-tooltip/>
    <el-table-column label="店铺" prop="shopName" min-width="160" show-overflow-tooltip/>
    <el-table-column label="渠道" prop="channelCode" width="130"/>
@@ -20,7 +19,7 @@
   </el-table>
   <pagination v-show="total>0" :total="total" v-model:page="query.pageNum" v-model:limit="query.pageSize" @pagination="load"/>
   <el-dialog v-model="open" :title="readonly?'店铺详情':form.shopId?'修改店铺':'新增店铺'" class="erp-dialog" width="min(620px, calc(100vw - 24px))" :close-on-click-modal="false" :close-on-press-escape="!saving" :show-close="!saving" @close="closed">
-   <el-alert v-if="pending" title="结果未确认，原内容和版本已固定。可用原内容重试；编码重复或版本冲突时请先查询确认。" type="warning" :closable="false"/><el-form ref="formRef" :model="form" :rules="rules" label-width="90px" size="small" :disabled="saving||readonly||!!pending">
+   <el-alert v-if="pending" title="结果未确认，原内容和版本已固定。可用原内容重试；编码重复或版本冲突时请先查询确认。" type="warning" :closable="false"/><el-form ref="formRef" :model="form" :rules="rules" label-width="90px" :disabled="saving||readonly||!!pending">
     <el-form-item label="店铺编码" prop="shopCode"><el-input v-model="form.shopCode" maxlength="64" placeholder="企业内唯一，字母数字及._-"/></el-form-item>
     <el-form-item label="店铺名称" prop="shopName"><el-input v-model="form.shopName" maxlength="120"/></el-form-item>
     <el-form-item label="渠道" prop="channelCode"><el-select v-if="channels.length" v-model="form.channelCode"><el-option v-for="c in channels" :key="c.channelCode" :value="c.channelCode" :label="c.channelName+'（未接API）'"/></el-select><el-input v-else v-model="form.channelCode" maxlength="32" placeholder="渠道目录编码，如 MANUAL"/></el-form-item>
@@ -35,6 +34,9 @@
  </div>
 </template>
 <script setup name="ErpShop">
+import ERPQueryBar from '../components/ERPQueryBar.vue'
+import { resetERPQuery } from '@/utils/erp-query.mjs'
+
 let alive=true,view=0,operation=0,wasInactive=false
 import {onBeforeUnmount,onDeactivated,onActivated} from 'vue'
 import { ref, reactive, computed } from 'vue'
@@ -51,7 +53,7 @@ let listSequence=0,detailSequence=0
 const pending=ref(null)
 async function load(){if(!alive)return;const seq=++listSequence;loading.value=true;try{const r=await listErpShop({...query});if(alive&&seq===listSequence){rows.value=r.rows;total.value=r.total}}catch(e){if(alive&&seq===listSequence){rows.value=[];total.value=0;if(typeof error!=="undefined")error.value=e.message||"读取失败"}}finally{if(seq===listSequence)loading.value=false}}
 function search(){query.pageNum=1;return load()}
-function reset(){Object.assign(query,{shopCode:'',shopName:'',status:''});return search()}
+function reset(){resetERPQuery(query,{pageNum:1,pageSize:10,shopCode:'',shopName:'',status:''});return search()}
 function start(){if(!alive||saving.value||detailLoading.value||pending.value&&open.value)return;pending.value=null;if(saving.value||detailLoading.value)return;++detailSequence;form.value={shopCode:'',shopName:'',channelCode:'MANUAL',siteCode:'GLOBAL',currency:'CNY',status:'0',remark:''};readonly.value=false;open.value=true;formRef.value?.clearValidate()}
 async function edit(row,readOnly=false){if(!alive||saving.value||detailLoading.value)return;const seq=++detailSequence;detailLoading.value=true;pending.value=null;try{const r=await getErpShop(row.shopId);if(!alive||seq!==detailSequence)return;form.value=r.data;readonly.value=!!readOnly;formRef.value?.clearValidate?.();open.value=true}finally{if(seq===detailSequence)detailLoading.value=false}}
 // Invalidate at close-start, not after animation: a delayed `closed` event

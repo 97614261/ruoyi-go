@@ -1,11 +1,11 @@
 <template>
  <div class="app-container overview">
-  <header class="overview-head"><div><h2>经营概览</h2><p>只统计你当前可见的业务；各区域独立更新。</p></div><el-button size="small" @click="refresh">刷新全部</el-button></header>
+  <header class="overview-head"><div><h2>经营概览</h2><p>只统计你当前可见的业务；各区域独立更新。</p></div><el-button @click="refresh">刷新全部</el-button></header>
   <el-alert title="待办和未核销金额为当前状态；今日/近7日按上海自然日统计本地已发货包裹。金额不等于银行余额或利润。" type="info" :closable="false" class="mb8"/>
   <el-empty v-if="!visible.length" description="暂未开通可查看的业务区域，请联系企业管理员"/>
   <div class="overview-grid">
    <section v-for="s in visible" :key="s.key" class="overview-section" :class="{'overview-money':s.money}">
-    <header><h3>{{s.name}}</h3><el-button link size="small" @click="loadOne(s.key)" :disabled="states[s.key].loading">刷新</el-button></header>
+    <header><h3>{{s.name}}</h3><el-button link @click="loadOne(s.key)" :disabled="states[s.key].loading">刷新</el-button></header>
     <p v-if="states[s.key].loading" role="status">读取中…</p>
     <el-alert v-else-if="states[s.key].error" title="读取失败或权限已变化，请刷新重试；此处不是业务零值。" type="error" :closable="false"/>
     <p v-else-if="states[s.key].data&&!states[s.key].data.available" class="overview-muted">该业务模块尚未安装</p>
@@ -15,7 +15,7 @@
      <div v-else-if="s.key==='stocks'" class="overview-metrics"><button @click="go(s.key,'withStock')"><strong>{{count(states[s.key].data.counts.withStock)}}</strong>有实物记录</button><button @click="go(s.key,'withReserved')"><strong>{{count(states[s.key].data.counts.withReserved)}}</strong>存在预占记录</button><button v-if="states[s.key].data.counts.low!==null" @click="go(s.key,'low')"><strong>{{count(states[s.key].data.counts.low)}}</strong>低库存记录</button><span v-else class="overview-muted">未安装库存预警</span></div>
      <div v-else-if="s.key==='purchases'" class="overview-metrics"><button @click="go(s.key,'awaitingReceipt')"><strong>{{count(states[s.key].data.awaitingReceipt)}}</strong>尚待收货采购单</button></div>
      <template v-else-if="s.money">
-      <el-table :data="states[s.key].data.rows" size="small"><el-table-column prop="currency" label="币种" width="80"/><el-table-column prop="dueAmount" :label="s.key==='payables'?'待付':'待收'" min-width="160"/><el-table-column prop="excessAmount" :label="s.key==='payables'?'超付':'超收'" min-width="160"/><el-table-column label="账单" width="90"><template #default="{row}"><el-button link @click="go(s.key,'money',row.currency)">{{count(row.documents)}} 单</el-button></template></el-table-column></el-table>
+      <el-table :data="states[s.key].data.rows"><el-table-column prop="currency" label="币种" width="80"/><el-table-column prop="dueAmount" :label="s.key==='payables'?'待付':'待收'" min-width="160"/><el-table-column prop="excessAmount" :label="s.key==='payables'?'超付':'超收'" min-width="160"/><el-table-column label="账单" width="90"><template #default="{row}"><el-button link @click="go(s.key,'money',row.currency)">{{count(row.documents)}} 单</el-button></template></el-table-column></el-table>
       <pagination v-if="states[s.key].data.total>0" :total="states[s.key].data.total" v-model:page="pages[s.key]" :limit="10" :page-sizes="[10]" @pagination="loadOne(s.key)"/>
      </template>
      <p v-if="s.key==='stocks'" class="overview-muted">一条记录＝一个仓库＋SKU，不混加不同商品的数量。</p>

@@ -1,3 +1,4 @@
+import { resetERPQuery } from '../src/utils/erp-query.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
@@ -9,7 +10,7 @@ const deferred=()=>{let resolve,reject;const promise=new Promise((a,b)=>{resolve
 async function setup(category=false,overrides={}){
  const source=await readFile(new URL('../src/views/erp/components/CatalogWorkspace.vue',import.meta.url),'utf8')
  const {descriptor}=parse(source),code=compileScript(descriptor,{id:'catalog'}).content.replace(/^import\s[^\n]*\n/gm,'').replaceAll('import.meta.env.VITE_APP_BASE_API',"'/'").replace('export default','const component=')
- const hooks=[],mounted=[],stubs={ref,reactive,onMounted:f=>mounted.push(f),onBeforeUnmount:f=>hooks.push(f),onDeactivated:f=>hooks.push(f),onActivated(){},getCurrentInstance:()=>({proxy:{$modal:{msgSuccess(){}},download(){}}}),hasPermi:()=>true,saveAs(){},catalogList:async()=>({rows:[],total:0}),catalogGet:async()=>({data:{}}),catalogWrite:async()=>({data:{rows:1}}),catalogUpload:async()=>({data:{storageKey:'/profile/tenants/1/catalog/a.png'}}),catalogImport:async()=>({data:{rows:1}}),catalogTemplate:async()=>({type:'xlsx'}),listErpSku:async()=>({rows:[]}),...util,catalogRequestKey:()=> 'catalog-fixed-key',...overrides}
+ const hooks=[],mounted=[],stubs={ ERPQueryBar:{}, resetERPQuery,ref,reactive,onMounted:f=>mounted.push(f),onBeforeUnmount:f=>hooks.push(f),onDeactivated:f=>hooks.push(f),onActivated(){},getCurrentInstance:()=>({proxy:{$modal:{msgSuccess(){}},download(){}}}),hasPermi:()=>true,saveAs(){},catalogList:async()=>({rows:[],total:0}),catalogGet:async()=>({data:{}}),catalogWrite:async()=>({data:{rows:1}}),catalogUpload:async()=>({data:{storageKey:'/profile/tenants/1/catalog/a.png'}}),catalogImport:async()=>({data:{rows:1}}),catalogTemplate:async()=>({type:'xlsx'}),listErpSku:async()=>({rows:[]}),...util,catalogRequestKey:()=> 'catalog-fixed-key',...overrides}
  const c=vm.runInNewContext(code+'\ncomponent',stubs);return{state:c.setup({category},{expose(){}}),hooks,mounted,source}
 }
 const form=()=>({requestKey:'catalog-key',productCode:'P',productName:'学习',variants:[{...util.blankVariant(),skuCode:'S',barcode:'00123',weightGrams:'12'}],images:[]})

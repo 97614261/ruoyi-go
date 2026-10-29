@@ -1,18 +1,18 @@
 <template>
  <div class="app-container">
   <el-alert title="采购财务登记账：不执行银行转账，不代表银行余额或完整会计账。应付按已收货批次人工登记；退货需另登记抵减，超付不等于已退款。" type="info" :closable="false" class="mb8"/>
-  <el-form inline size="small" @submit.prevent="search">
+  <ERPQueryBar :model="query" :loading="loading"  @search="search" @reset="reset">
    <el-form-item v-if="kind!=='statement'" label="完整编码/单号"><el-input v-model="query.code" clearable/></el-form-item>
-   <el-form-item label="币种"><el-input v-model="query.currency" maxlength="3" placeholder="如 CNY" style="width:90px" clearable/></el-form-item>
-   <el-form-item v-if="kind!=='account'" label="仓库"><ReferenceSelect v-if="kind!=='payment'" kind="warehouse" v-model="query.warehouseId" style="width:190px"/><span v-else>仅展示有全部仓库范围的付款</span></el-form-item>
-   <el-form-item v-if="kind==='account'||kind==='payment'" label="状态"><el-select v-model="query.status" clearable style="width:120px"><template v-if="kind==='account'"><el-option label="启用" value="0"/><el-option label="停用" value="1"/></template><template v-else><el-option label="已登记" value="POSTED"/><el-option label="已冲销" value="REVERSED"/></template></el-select></el-form-item>
-   <el-form-item><el-button @click="search">查询</el-button><el-button v-if="kind==='account'&&can('erp:financeAccount:add')" type="primary" :disabled="busy||opening||closing" @click="startAccount">新增账户</el-button><el-button v-if="kind==='payable'&&can('erp:payable:add')" type="primary" :disabled="busy||opening||closing" @click="startSources">从收货登记应付</el-button><el-button v-if="kind==='payable'&&can('erp:payment:add')" :disabled="busy||opening||closing||!selected.length" type="success" @click="startPayment">付款登记（本页已选{{selected.length}}）</el-button><el-button v-if="kind==='payment'&&can('erp:payable:list')" @click="router.push('/erp/payable')">去应付页选择核销并付款</el-button><el-button v-if="['payable','statement'].includes(kind)&&can('erp:'+(kind==='payable'?'payable':'financeStatement')+':export')" @click="exportRows">导出当前筛选</el-button></el-form-item>
-  </el-form>
+   <el-form-item label="币种"><el-input v-model="query.currency" maxlength="3" placeholder="如 CNY"  clearable/></el-form-item>
+   <el-form-item v-if="kind!=='account'" label="仓库"><ReferenceSelect v-if="kind!=='payment'" kind="warehouse" v-model="query.warehouseId" /><span v-else>仅展示有全部仓库范围的付款</span></el-form-item>
+   <el-form-item v-if="kind==='account'||kind==='payment'" label="状态"><el-select v-model="query.status" clearable ><template v-if="kind==='account'"><el-option label="启用" value="0"/><el-option label="停用" value="1"/></template><template v-else><el-option label="已登记" value="POSTED"/><el-option label="已冲销" value="REVERSED"/></template></el-select></el-form-item>
+   <template #toolbar><el-button v-if="kind==='account'&&can('erp:financeAccount:add')" type="primary" :disabled="busy||opening||closing" @click="startAccount">新增账户</el-button><el-button v-if="kind==='payable'&&can('erp:payable:add')" type="primary" :disabled="busy||opening||closing" @click="startSources">从收货登记应付</el-button><el-button v-if="kind==='payable'&&can('erp:payment:add')" :disabled="busy||opening||closing||!selected.length" type="success" @click="startPayment">付款登记（本页已选{{selected.length}}）</el-button><el-button v-if="kind==='payment'&&can('erp:payable:list')" @click="router.push('/erp/payable')">去应付页选择核销并付款</el-button><el-button v-if="['payable','statement'].includes(kind)&&can('erp:'+(kind==='payable'?'payable':'financeStatement')+':export')" @click="exportRows">导出当前筛选</el-button></template>
+  </ERPQueryBar>
   <el-alert v-if="kind==='statement'" title="仅汇总当前仓库范围内已登记的应付、抵减和有效核销；未登记退货不在抵减中。待付与超付分别逐单汇总，不自动跨单抵账，也不是全企业/银行余额。" type="warning" :closable="false" class="mb8"/>
   <el-alert v-if="listError" title="读取失败，旧价格及列表已清空，请重新查询。" type="error" :closable="false"/>
   <el-alert v-if="error&&!open" :title="error" type="warning" :closable="false"/>
   <el-alert v-if="lastResult" :title="`已确认 ${lastResult.kind} #${lastResult.id} · v${lastResult.version} · ${lastResult.status}。重放显示原结果，列表另行刷新。`" type="success" closable @close="lastResult=null"/>
-  <el-table :data="rows" size="small" v-loading="loading" :row-key="r=>kind==='statement'?r.supplierId+'-'+r.currency:r[{account:'accountId',payable:'payableId',payment:'paymentId'}[kind]]" @selection-change="selected=$event">
+  <el-table :data="rows" v-loading="loading" :row-key="r=>kind==='statement'?r.supplierId+'-'+r.currency:r[{account:'accountId',payable:'payableId',payment:'paymentId'}[kind]]" @selection-change="selected=$event">
    <el-table-column v-if="kind==='payable'&&can('erp:payment:add')" type="selection" width="42" :selectable="r=>r.dueAmount!=='0.0000'&&r.pendingReturnCount===0"/>
    <template v-if="kind==='account'"><el-table-column prop="accountCode" label="内部账户编码" min-width="150"/><el-table-column prop="accountName" label="名称" min-width="150"/><el-table-column prop="accountType" label="类型" width="90"/></template>
    <template v-else><el-table-column v-if="kind!=='statement'" :prop="kind==='payable'?'payableNo':'paymentNo'" label="单号" min-width="310"/><el-table-column prop="supplierName" label="供应商快照" min-width="150"/><el-table-column v-if="kind==='payable'" prop="receiptNo" label="原收货批次" min-width="290"/><el-table-column v-if="kind==='payment'" prop="accountName" label="付款账户快照" min-width="140"/></template>
@@ -30,31 +30,31 @@
    <template v-if="!pending">
     <template v-if="mode==='sources'">
      <p>只列未登记应付且当前有仓库范围的收货批次。历史数据不会自动入账。</p>
-     <el-form inline size="small" @submit.prevent="loadSources"><el-form-item label="完整收货单号"><el-input v-model="sourceQuery.code" clearable/></el-form-item><el-form-item><el-button @click="sourceQuery.pageNum=1;loadSources()">查询</el-button></el-form-item></el-form>
-     <el-table :data="sources" size="small" v-loading="opening"><el-table-column prop="receiptNo" label="收货批次" min-width="300"/><el-table-column prop="supplierName" label="供应商" min-width="140"/><el-table-column prop="currency" label="币种" width="80"/><el-table-column label="操作" width="110"><template #default="{row}"><el-button link type="primary" @click="previewSource(row.receiptId)">核对原价</el-button></template></el-table-column></el-table>
+     <ERPQueryBar :model="sourceQuery" :loading="opening" :disabled="busy||closing" @search="searchSources" @reset="resetSources"><el-form-item label="完整收货单号"><el-input v-model="sourceQuery.code" clearable/></el-form-item></ERPQueryBar>
+     <el-table :data="sources" v-loading="opening"><el-table-column prop="receiptNo" label="收货批次" min-width="300"/><el-table-column prop="supplierName" label="供应商" min-width="140"/><el-table-column prop="currency" label="币种" width="80"/><el-table-column label="操作" width="110"><template #default="{row}"><el-button link type="primary" @click="previewSource(row.receiptId)">核对原价</el-button></template></el-table-column></el-table>
      <pagination v-show="sourceTotal>0" :total="sourceTotal" v-model:page="sourceQuery.pageNum" v-model:limit="sourceQuery.pageSize" @pagination="loadSources"/>
     </template>
-    <el-form v-if="mode.startsWith('account')" label-width="100px" size="small" :disabled="busy||mode==='accountDetail'">
+    <el-form v-if="mode.startsWith('account')" label-width="100px" :disabled="busy||mode==='accountDetail'">
      <el-form-item label="内部编码"><el-input v-model="form.accountCode" maxlength="64" :disabled="mode!=='accountCreate'"/></el-form-item><el-form-item label="名称"><el-input v-model="form.accountName" maxlength="120"/></el-form-item><el-form-item label="类型"><el-select v-model="form.accountType" :disabled="mode!=='accountCreate'"><el-option label="银行记账" value="BANK"/><el-option label="现金记账" value="CASH"/><el-option label="其他" value="OTHER"/></el-select></el-form-item><el-form-item label="币种"><el-input v-model="form.currency" maxlength="3" :disabled="mode!=='accountCreate'"/></el-form-item><el-form-item label="状态"><el-radio-group v-model="form.status"><el-radio value="0">启用</el-radio><el-radio value="1">停用</el-radio></el-radio-group></el-form-item><el-form-item label="备注"><el-input v-model="form.remark" maxlength="500" type="textarea"/></el-form-item>
     </el-form>
     <template v-if="mode==='source'||mode==='payableDetail'">
      <p>{{form.receiptNo}} · {{form.supplierName}} · {{form.currency}} · 原批毛应付 {{form.grossAmount}}</p>
      <p v-if="mode==='payableDetail'">净应付 {{form.netAmount}} ／ 有效已付 {{form.paidAmount}} ／ 待付 {{form.dueAmount}} ／ 超付 {{form.overpaidAmount}} ／ v{{form.version}}</p>
-     <el-table :data="form.lines||[]" size="small"><el-table-column prop="skuCode" label="原SKU编码" min-width="140"/><el-table-column prop="productName" label="原商品" min-width="140"/><el-table-column prop="unit" label="单位" width="70"/><el-table-column prop="quantity" label="原收货量" width="100"/><el-table-column prop="unitPrice" label="冻结单价" min-width="125"/><el-table-column prop="lineAmount" label="原行金额" min-width="125"/></el-table>
+     <el-table :data="form.lines||[]"><el-table-column prop="skuCode" label="原SKU编码" min-width="140"/><el-table-column prop="productName" label="原商品" min-width="140"/><el-table-column prop="unit" label="单位" width="70"/><el-table-column prop="quantity" label="原收货量" width="100"/><el-table-column prop="unitPrice" label="冻结单价" min-width="125"/><el-table-column prop="lineAmount" label="原行金额" min-width="125"/></el-table>
      <template v-if="mode==='payableDetail'&&can('erp:payable:adjust')">
       <h4>原批采购退货抵减</h4><el-checkbox v-model="pendingOnly" @change="returnQuery.pageNum=1;loadReturns()">只看待登记</el-checkbox><span> 已付款后的退货可能形成超付，需后续处理退款。</span>
-      <el-table :data="returns" size="small" @selection-change="returnSelection=$event"><el-table-column type="selection" width="42" :selectable="r=>!r.registered"/><el-table-column prop="returnNo" label="原采购退货单" min-width="300"/><el-table-column prop="amount" label="按原价抵减" min-width="140"/><el-table-column label="状态" width="100"><template #default="{row}">{{row.registered?'已登记':'待登记'}}</template></el-table-column></el-table>
+      <el-table :data="returns" @selection-change="returnSelection=$event"><el-table-column type="selection" width="42" :selectable="r=>!r.registered"/><el-table-column prop="returnNo" label="原采购退货单" min-width="300"/><el-table-column prop="amount" label="按原价抵减" min-width="140"/><el-table-column label="状态" width="100"><template #default="{row}">{{row.registered?'已登记':'待登记'}}</template></el-table-column></el-table>
       <pagination v-show="returnTotal>0" :total="returnTotal" v-model:page="returnQuery.pageNum" v-model:limit="returnQuery.pageSize" @pagination="loadReturns"/>
      </template>
     </template>
     <template v-if="mode==='paymentCreate'">
      <p>{{form.supplierName}} · {{form.currency}} · 合计 {{paymentTotal}}。以下每行金额为本次核销，可分次付；每行仍须通过服务端当前版本与待付检查。</p>
-     <el-form label-width="100px" size="small"><el-form-item label="记账账户"><el-select v-model="form.accountId" filterable remote :remote-method="loadAccounts" :loading="accountLoading" @focus="loadAccounts('')" placeholder="最多100条，可输入完整账户编码检索" style="width:100%"><el-option v-for="a in accounts" :key="a.accountId" :value="a.accountId" :label="a.accountCode+' · '+a.accountName+' · '+a.currency"/></el-select></el-form-item><el-form-item label="记账备注"><el-input v-model="form.remark" maxlength="500"/></el-form-item></el-form>
-     <el-table :data="form.allocations" size="small"><el-table-column prop="payableNo" label="应付单号" min-width="300"/><el-table-column prop="dueAmount" label="读取时待付" min-width="130"/><el-table-column label="本次核销金额" min-width="160"><template #default="{row}"><el-input v-model="row.amount" maxlength="21" inputmode="decimal" placeholder="精确十进制字符串"/></template></el-table-column></el-table>
+     <el-form label-width="100px"><el-form-item label="记账账户"><el-select v-model="form.accountId" filterable remote :remote-method="loadAccounts" :loading="accountLoading" @focus="loadAccounts('')" placeholder="最多100条，可输入完整账户编码检索" style="width:100%"><el-option v-for="a in accounts" :key="a.accountId" :value="a.accountId" :label="a.accountCode+' · '+a.accountName+' · '+a.currency"/></el-select></el-form-item><el-form-item label="记账备注"><el-input v-model="form.remark" maxlength="500"/></el-form-item></el-form>
+     <el-table :data="form.allocations"><el-table-column prop="payableNo" label="应付单号" min-width="300"/><el-table-column prop="dueAmount" label="读取时待付" min-width="130"/><el-table-column label="本次核销金额" min-width="160"><template #default="{row}"><el-input v-model="row.amount" maxlength="21" inputmode="decimal" placeholder="精确十进制字符串"/></template></el-table-column></el-table>
     </template>
     <template v-if="mode==='paymentDetail'||mode==='paymentReverse'">
      <p>{{form.paymentNo}} · {{form.supplierName}} · {{form.accountName}} · {{form.currency}} {{form.amount}} · {{financeStatuses[form.status]}} · v{{form.version}}</p>
-     <el-table :data="form.allocations||[]" size="small"><el-table-column prop="payableId" label="应付ID" width="130"/><el-table-column prop="amount" label="原核销金额" min-width="160"/></el-table>
+     <el-table :data="form.allocations||[]"><el-table-column prop="payableId" label="应付ID" width="130"/><el-table-column prop="amount" label="原核销金额" min-width="160"/></el-table>
      <p>备注：{{form.remark||'—'}}</p><p v-if="form.reverseReason">冲销原因：{{form.reverseReason}}</p>
      <template v-if="mode==='paymentReverse'"><el-alert title="仅撤销本系统的整笔付款记账及核销，不会撤销真实转账、发起退款或修改采购库存。" type="warning" :closable="false"/><el-input class="mt8" v-model="form.reason" type="textarea" maxlength="500" placeholder="必填冲销原因"/></template>
     </template>
@@ -64,6 +64,9 @@
  </div>
 </template>
 <script setup>
+import ERPQueryBar from './ERPQueryBar.vue'
+import { resetERPQuery } from '@/utils/erp-query.mjs'
+
 import {ref,reactive,computed,watch,onBeforeUnmount,onDeactivated,onActivated} from 'vue'
 import {useRouter,useRoute} from 'vue-router'
 import {ElMessage} from 'element-plus'
@@ -86,6 +89,8 @@ function resetForm(){accountLoading.value=false;++detailSeq;++accountSeq;++retur
 function start(action){if(inactive)return;if(busy.value||opening.value||closing.value)return false;resetForm();error.value='';mode.value=action;form.value={requestKey:crypto.randomUUID()};open.value=true;return true}
 function startAccount(){if(!can('erp:financeAccount:add')||!start('accountCreate'))return;Object.assign(form.value,{accountCode:'',accountName:'',accountType:'BANK',currency:'CNY',status:'0',remark:''})}
 function startSources(){if(!can('erp:payable:add')||!start('sources'))return;sourceQuery.pageNum=1;sourceQuery.code='';loadSources()}
+function searchSources(){if(inactive||busy.value||opening.value||closing.value)return;sourceQuery.pageNum=1;return loadSources()}
+function resetSources(){if(inactive||busy.value||opening.value||closing.value)return;resetERPQuery(sourceQuery,{pageNum:1,pageSize:10});return searchSources()}
 async function loadSources(){if(inactive)return;const seq=++sourceSeq;sources.value=[];sourceTotal.value=0;opening.value=true;try{const v=await financeList('source',{...sourceQuery});if(seq===sourceSeq&&!inactive&&open.value){sources.value=v.rows;sourceTotal.value=v.total}}catch(e){if(seq===sourceSeq)readFailure(e,'收货批次读取失败')}finally{if(seq===sourceSeq)opening.value=false}}
 async function previewSource(id){if(inactive)return;if(opening.value||busy.value||!safeID(id))return;const seq=++detailSeq;opening.value=true;form.value={};try{const v=await financeGet('source',id);if(seq===detailSeq&&!inactive&&open.value){form.value={...v.data,requestKey:crypto.randomUUID()};mode.value='source'}}catch(e){if(seq===detailSeq)readFailure(e,'原批读取失败')}finally{if(seq===detailSeq)opening.value=false}}
 async function show(row,action){if(inactive)return;if(busy.value||opening.value||closing.value||!can('erp:'+permissionKey+':query'))return;const id=row[{account:'accountId',payable:'payableId',payment:'paymentId'}[kind]];if(!safeID(id))return;resetForm();const seq=++detailSeq;opening.value=true;open.value=false;error.value='';try{const v=await financeGet(kind,id);if(seq!==detailSeq||inactive)return;form.value={...v.data,requestKey:crypto.randomUUID(),reason:''};mode.value=kind==='account'?(action==='edit'?'accountEdit':'accountDetail'):kind==='payment'?(action==='reverse'?'paymentReverse':'paymentDetail'):'payableDetail';open.value=true;if(mode.value==='payableDetail'&&can('erp:payable:adjust')){returnQuery.pageNum=1;pendingOnly.value=true;await loadReturns()}}catch(e){if(seq===detailSeq)readFailure(e,'财务详情读取失败')}finally{if(seq===detailSeq)opening.value=false}}
@@ -104,5 +109,6 @@ function applyCurrencyLink(){if(kind!=='payable')return true;const raw=route.que
 watch(()=>route.query.currency,()=>{if(!inactive&&applyCurrencyLink())load()})
 function activate(){inactive=false;closing.value=false;if(applyCurrencyLink())load()}
 onBeforeUnmount(()=>{inactive=true;clear()});onDeactivated(clear);onActivated(()=>{if(inactive)activate()});activate()
+function reset(){resetERPQuery(query,{pageNum:1,pageSize:10});return search()}
 </script>
 <style scoped>.mb8{margin-bottom:8px}.mt8{margin-top:8px}h4{margin:16px 0 8px}</style>

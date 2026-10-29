@@ -1,3 +1,4 @@
+import { resetERPQuery } from '../src/utils/erp-query.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
@@ -5,11 +6,25 @@ import vm from 'node:vm'
 import {ref,reactive,computed} from 'vue'
 import {parse,compileScript} from '@vue/compiler-sfc'
 import * as helpers from '../src/utils/picking.mjs'
+
+test('reset keeps a pending picking command and restores list defaults only when unlocked',async()=>{
+ const calls=[]
+ const {state:s}=await setup({listPicking:async q=>{calls.push(q);return{rows:[],total:0}}})
+ await Promise.resolve()
+ s.query.pageNum=5;s.query.pageSize=50;s.query.warehouseId=91;s.query.status='SHIPPED'
+ s.pending.value={requestKey:'original-command'}
+ const count=calls.length
+ s.reset()
+ assert.equal(calls.length,count);assert.equal(s.query.warehouseId,91);assert.equal(s.pending.value.requestKey,'original-command')
+ s.pending.value=null
+ await s.reset()
+ assert.equal(s.query.pageNum,1);assert.equal(s.query.pageSize,50);assert.equal(s.query.warehouseId,undefined);assert.equal(s.query.status,'READY_TO_SHIP')
+})
 const sheet=()=>({packageId:1,version:2,status:'READY_TO_SHIP',scannable:true,checked:false,hasLogistics:true,items:[{skuId:9,scanCode:'00001',quantity:2},{skuId:10,scanCode:'__proto__',quantity:1}]})
 const deferred=()=>{let resolve,reject;const promise=new Promise((ok,no)=>{resolve=ok;reject=no});return{promise,resolve,reject}}
 async function setup(overrides={}){
  const source=await readFile(new URL('../src/views/erp/components/PickingWorkspace.vue',import.meta.url),'utf8'),code=compileScript(parse(source).descriptor,{id:'picking'}).content.replace(/^import\s[^\n]*\n/gm,'').replace('export default','const component=')
- const leave=[],prints=[],writes=[],route={query:{}},stubs={ref,reactive,computed,ReferenceSelect:{},watch(){},nextTick:async()=>{},onMounted(){},onActivated(){},onDeactivated:f=>leave.push(f),onBeforeUnmount:f=>leave.push(f),useRouter:()=>({push(){}}),useRoute:()=>route,checkPermi:()=>true,ElMessage:{warning(){},success(){}},ElMessageBox:{confirm:async()=>{}},listPicking:async()=>({rows:[],total:0}),getPicking:async()=>({data:sheet()}),checkPicking:async(id,payload)=>{writes.push({id,payload})},shipPicking:async(id,payload)=>{writes.push({id,payload})},window:{print:()=>prints.push(1)},...helpers,pickingKey:()=> '12345678',pickingCommand:(kind,d,c)=>helpers.pickingCommand(kind,d,c,'12345678'),...overrides}
+ const leave=[],prints=[],writes=[],route={query:{}},stubs={ ERPQueryBar:{}, resetERPQuery,ref,reactive,computed,ReferenceSelect:{},watch(){},nextTick:async()=>{},onMounted(){},onActivated(){},onDeactivated:f=>leave.push(f),onBeforeUnmount:f=>leave.push(f),useRouter:()=>({push(){}}),useRoute:()=>route,checkPermi:()=>true,ElMessage:{warning(){},success(){}},ElMessageBox:{confirm:async()=>{}},listPicking:async()=>({rows:[],total:0}),getPicking:async()=>({data:sheet()}),checkPicking:async(id,payload)=>{writes.push({id,payload})},shipPicking:async(id,payload)=>{writes.push({id,payload})},window:{print:()=>prints.push(1)},...helpers,pickingKey:()=> '12345678',pickingCommand:(kind,d,c)=>helpers.pickingCommand(kind,d,c,'12345678'),...overrides}
  const component=vm.runInNewContext(code+'\ncomponent',stubs);return{state:component.setup({},{expose(){}}),leave,prints,writes,route}
 }
 test('scanner preserves leading zeroes and hostile-looking text; rejects wrong/over/missing quantities',()=>{

@@ -1,15 +1,15 @@
 <template>
  <div class="app-container">
   <el-alert :title="ledger?'流水只读；名称沿用单据快照，来源详情另查功能及店铺/仓库权限。':'可用 = 实物 − 预占；零库存只指已有余额行。不同SKU/单位不相加，不提供覆盖余额入口。'" type="info" :closable="false" class="mb8"/>
-  <el-form inline size="small" @submit.prevent="search">
-   <el-form-item label="仓库"><ReferenceSelect kind="warehouse" v-model="query.warehouseId" @update:model-value="search" style="width:180px"/></el-form-item>
-   <el-form-item label="商品"><ReferenceSelect v-model="query.skuId" @update:model-value="search" style="width:220px"/></el-form-item>
-   <el-form-item v-if="!ledger" label="库存"><el-select v-model="query.stockState" style="width:140px" @change="search"><el-option v-for="(label,key) in states" :key="key" :value="key" :label="label"/></el-select></el-form-item>
-   <template v-else><el-form-item label="单号"><el-input v-model="query.documentNo" clearable placeholder="完整来源单号"/></el-form-item><el-form-item label="事件"><el-select v-model="query.event" clearable style="width:130px"><el-option v-for="(v,k) in eventLabels" :key="k" :value="k" :label="v"/></el-select></el-form-item><el-form-item label="时间"><el-date-picker v-model="times" type="datetimerange" value-format="YYYY-MM-DD HH:mm:ss" start-placeholder="开始" end-placeholder="结束" style="max-width:100%;width:340px"/></el-form-item></template>
-   <el-form-item><el-button type="primary" @click="search">查询</el-button><el-button @click="reset">重置</el-button><el-button v-if="can(ledger?'erp:ledger:export':'erp:stock:export')" @click="exportRows">导出</el-button><el-button v-if="!ledger&&can('erp:stock:reconcile')" @click="openReconcile">只读核对</el-button></el-form-item>
-  </el-form>
+  <ERPQueryBar :model="query" :loading="loading"  @search="search" @reset="reset">
+   <el-form-item label="仓库"><ReferenceSelect kind="warehouse" v-model="query.warehouseId"  /></el-form-item>
+   <el-form-item label="商品"><ReferenceSelect v-model="query.skuId"  /></el-form-item>
+   <el-form-item v-if="!ledger" label="库存"><el-select v-model="query.stockState"  ><el-option v-for="(label,key) in states" :key="key" :value="key" :label="label"/></el-select></el-form-item>
+   <template v-else><el-form-item label="单号"><el-input v-model="query.documentNo" clearable placeholder="完整来源单号"/></el-form-item><el-form-item label="事件"><el-select v-model="query.event" clearable ><el-option v-for="(v,k) in eventLabels" :key="k" :value="k" :label="v"/></el-select></el-form-item><el-form-item class="erp-query-wide" label="时间"><el-date-picker v-model="times" type="datetimerange" value-format="YYYY-MM-DD HH:mm:ss" start-placeholder="开始" end-placeholder="结束" /></el-form-item></template>
+   <template #toolbar><el-button v-if="can(ledger?'erp:ledger:export':'erp:stock:export')" @click="exportRows">导出</el-button><el-button v-if="!ledger&&can('erp:stock:reconcile')" @click="openReconcile">只读核对</el-button></template>
+  </ERPQueryBar>
   <el-alert v-if="listError" title="读取失败，旧数据已清除，请重试；不是零条记录。" type="error" :closable="false"/>
-  <el-table :data="rows" v-loading="loading" size="small">
+  <el-table :data="rows" v-loading="loading">
    <el-table-column prop="warehouseName" label="仓库" min-width="130"/><el-table-column prop="skuCode" label="SKU编码" min-width="130"/><el-table-column prop="productName" label="商品" min-width="150"/><el-table-column prop="unit" label="单位" width="65"/>
    <template v-if="!ledger"><el-table-column label="实物" prop="onHand" width="95"/><el-table-column label="预占" width="100"><template #default="{row}"><el-button v-if="can('erp:sales:query')&&row.reserved>0" link type="primary" @click="showReservations(row)">{{row.reserved}}</el-button><span v-else>{{row.reserved}}</span></template></el-table-column><el-table-column label="可用" prop="available" width="95"/><el-table-column label="最低库存" width="110"><template #default="{row}"><el-tag v-if="row.lowStock" type="danger">{{thresholdLabel(row.thresholdQuantity)}} · 低</el-tag><span v-else>{{thresholdLabel(row.thresholdQuantity)}}</span></template></el-table-column><el-table-column label="操作" width="150" fixed="right"><template #default="{row}"><el-button v-if="can('erp:ledger:list')" link @click="ledgerFor(row)">流水</el-button><el-button v-if="can('erp:stock:alert')" link type="primary" @click="openAlert(row)">预警</el-button></template></el-table-column></template>
    <template v-else><el-table-column label="来源单号" min-width="300"><template #default="{row}"><el-button v-if="canSource(row)" link type="primary" @click="showSource(row)">{{row.documentNo}}</el-button><span v-else>{{row.documentNo}}</span></template></el-table-column><el-table-column label="事件" width="110"><template #default="{row}">{{eventLabels[row.event]||row.event}}</template></el-table-column><el-table-column prop="onHandDelta" label="实物变化" width="100"/><el-table-column prop="reservedDelta" label="预占变化" width="100"/><el-table-column prop="onHandAfter" label="实物结余" width="100"/><el-table-column prop="reservedAfter" label="预占结余" width="100"/><el-table-column prop="createBy" label="操作人" width="110"/><el-table-column prop="createTime" label="时间" width="170"/></template>
@@ -22,14 +22,17 @@
    <el-alert v-if="detailError" :title="detailError" type="warning" :closable="false"/>
    <p v-if="inspectMode==='reservations'">仅列出你可读的预占来源，可能不是该仓库预占的全部来源；不显示订单收件资料。</p>
    <p v-if="inspectMode==='reconcile'">只读快照核对当前页，不是全仓已通过；差异只报告，不自动修账。</p>
-   <el-table v-if="inspectMode==='reconcile'" :data="inspectRows" size="small"><el-table-column prop="warehouseId" label="仓库ID"/><el-table-column prop="skuId" label="SKU ID"/><el-table-column prop="onHand" label="实物"/><el-table-column prop="ledgerOnHand" label="流水实物"/><el-table-column prop="reserved" label="预占"/><el-table-column prop="ledgerReserved" label="流水预占"/><el-table-column label="核对"><template #default="{row}"><el-tag :type="row.consistent?'success':'danger'">{{row.balanceMissing?'余额缺失':row.consistent?'一致':'有差异'}}</el-tag></template></el-table-column></el-table>
-   <el-table v-else-if="inspectMode==='reservations'" :data="inspectRows" size="small"><el-table-column label="单号" min-width="300"><template #default="{row}"><el-button link type="primary" @click="showSource({...row,documentKind:'SALE'})">{{row.documentNo}}</el-button></template></el-table-column><el-table-column prop="warehouseName" label="仓库"/><el-table-column prop="status" label="状态"/></el-table>
-   <template v-else-if="source"><p>{{source.documentNo||source.transferNo}} · {{source.status}} · v{{source.version}}</p><el-table :data="source.lines||[]" size="small"><el-table-column prop="skuCode" label="SKU编码"/><el-table-column prop="productName" label="商品快照"/><el-table-column prop="unit" label="单位"/><el-table-column prop="quantity" label="数量"/></el-table></template>
+   <el-table v-if="inspectMode==='reconcile'" :data="inspectRows"><el-table-column prop="warehouseId" label="仓库ID"/><el-table-column prop="skuId" label="SKU ID"/><el-table-column prop="onHand" label="实物"/><el-table-column prop="ledgerOnHand" label="流水实物"/><el-table-column prop="reserved" label="预占"/><el-table-column prop="ledgerReserved" label="流水预占"/><el-table-column label="核对"><template #default="{row}"><el-tag :type="row.consistent?'success':'danger'">{{row.balanceMissing?'余额缺失':row.consistent?'一致':'有差异'}}</el-tag></template></el-table-column></el-table>
+   <el-table v-else-if="inspectMode==='reservations'" :data="inspectRows"><el-table-column label="单号" min-width="300"><template #default="{row}"><el-button link type="primary" @click="showSource({...row,documentKind:'SALE'})">{{row.documentNo}}</el-button></template></el-table-column><el-table-column prop="warehouseName" label="仓库"/><el-table-column prop="status" label="状态"/></el-table>
+   <template v-else-if="source"><p>{{source.documentNo||source.transferNo}} · {{source.status}} · v{{source.version}}</p><el-table :data="source.lines||[]"><el-table-column prop="skuCode" label="SKU编码"/><el-table-column prop="productName" label="商品快照"/><el-table-column prop="unit" label="单位"/><el-table-column prop="quantity" label="数量"/></el-table></template>
    <pagination v-if="inspectMode!=='source'&&inspectTotal>0" :total="inspectTotal" v-model:page="inspectQuery.pageNum" v-model:limit="inspectQuery.pageSize" @pagination="loadInspection"/>
   </el-dialog>
  </div>
 </template>
 <script setup>
+import ERPQueryBar from './ERPQueryBar.vue'
+import { resetERPQuery } from '@/utils/erp-query.mjs'
+
 import {ref,reactive,watch,onActivated,onBeforeUnmount,onDeactivated} from 'vue'
 import {useRouter,useRoute} from 'vue-router'
 import {checkPermi} from '@/utils/permission'
@@ -50,7 +53,7 @@ let ticket=0,detailTicket=0,alive=true
 const params=()=>({...query,beginTime:times.value?.[0],endTime:times.value?.[1]})
 async function load(){if(!alive)return;const seq=++ticket;rows.value=[];total.value=0;loading.value=true;listError.value=false;try{const r=await(props.ledger?listLedger(params()):listStock(params()));if(alive&&seq===ticket){rows.value=r.rows;total.value=r.total}}catch{if(alive&&seq===ticket)listError.value=true}finally{if(alive&&seq===ticket)loading.value=false}}
 function search(){query.pageNum=1;inspectOpen.value=false;source.value=null;++detailTicket;load()}
-function reset(){Object.assign(query,{warehouseId:undefined,skuId:undefined,documentNo:undefined,event:undefined,stockState:'ALL',documentId:undefined});times.value=[];search()}
+function reset(){times.value=[];resetERPQuery(query,{pageNum:1,pageSize:10,stockState:'ALL'});return search()}
 function exportRows(){return download(props.ledger?'/erp/ledger/export':'/erp/stock/export',params(),props.ledger?'库存流水.xlsx':'库存余额.xlsx',{headers:{repeatSubmit:false}})}
 function ledgerFor(r){router.push({path:'/erp/ledger',query:{warehouseId:r.warehouseId,skuId:r.skuId}})}
 function canSource(r){return r.transferId?can('erp:transfer:query'):!!sourceType(r.documentKind)&&can(`erp:${sourceType(r.documentKind)}:query`)}

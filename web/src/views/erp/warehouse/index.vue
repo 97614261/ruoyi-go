@@ -1,11 +1,10 @@
 <template>
   <div class="app-container">
-    <el-form :model="queryParams" ref="queryRef" :inline="true">
-      <el-form-item label="仓库编码" prop="warehouseCode"><el-input v-model="queryParams.warehouseCode" clearable @keyup.enter="handleQuery" /></el-form-item>
-      <el-form-item label="仓库名称" prop="warehouseName"><el-input v-model="queryParams.warehouseName" clearable @keyup.enter="handleQuery" /></el-form-item>
-      <el-form-item label="状态" prop="status"><el-select v-model="queryParams.status" clearable style="width:130px"><el-option value="0" label="正常"/><el-option value="1" label="停用"/></el-select></el-form-item>
-      <el-form-item><el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button><el-button icon="Refresh" @click="resetQuery">重置</el-button></el-form-item>
-    </el-form>
+    <ERPQueryBar ref="queryRef" :model="queryParams" :loading="loading"  @search="handleQuery" @reset="resetQuery">
+   <el-form-item label="仓库编码" prop="warehouseCode"><el-input v-model="queryParams.warehouseCode" clearable  /></el-form-item>
+   <el-form-item label="仓库名称" prop="warehouseName"><el-input v-model="queryParams.warehouseName" clearable  /></el-form-item>
+   <el-form-item label="状态" prop="status"><el-select v-model="queryParams.status" clearable ><el-option value="0" label="正常"/><el-option value="1" label="停用"/></el-select></el-form-item>
+  </ERPQueryBar>
     <el-row :gutter="10" class="mb8"><el-col :span="1.5"><el-button type="primary" plain icon="Plus" @click="handleAdd()" v-hasPermi="['erp:warehouse:add']">新增</el-button></el-col><el-col :span="1.5"><el-button type="danger" plain icon="Delete" :disabled="multiple" @click="handleDelete()" v-hasPermi="['erp:warehouse:remove']">删除</el-button></el-col><el-col :span="1.5"><el-button type="warning" plain icon="Download" @click="handleExport" v-hasPermi="['erp:warehouse:export']">导出</el-button></el-col></el-row>
     <WarehouseAccess class="mb8"/>
     <el-table v-loading="loading" :data="rows" @selection-change="handleSelectionChange"><el-table-column type="selection" width="55" align="center" />
@@ -30,6 +29,8 @@
 </template>
 
 <script setup name="ErpWarehouse">
+import ERPQueryBar from '../components/ERPQueryBar.vue'
+
 let alive=true,view=0,operation=0,wasInactive=false
 import {onBeforeUnmount,onDeactivated,onActivated} from 'vue'
 import { listErpWarehouse, getErpWarehouse, addErpWarehouse, updateErpWarehouse, delErpWarehouse } from '@/api/erp/warehouse'

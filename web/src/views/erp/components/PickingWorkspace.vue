@@ -5,8 +5,11 @@
   <el-alert v-if="pending" class="no-print mb12" title="请求结果未确认，原版本、内容和请求标识已冻结。只可原请求重试，或关闭后重新读取结果。" type="warning" :closable="false"><el-button :loading="saving" @click="retry">原请求重试</el-button><el-button :disabled="saving" @click="discard">关闭并刷新</el-button></el-alert>
   <div class="picking-grid">
    <section class="package-list no-print">
-    <el-form inline size="small" @submit.prevent="search"><el-form-item label="仓库"><ReferenceSelect kind="warehouse" v-model="query.warehouseId" :disabled="busy" style="width:190px"/></el-form-item><el-form-item label="状态"><el-select v-model="query.status" :disabled="busy" style="width:130px"><el-option v-for="(name,key) in statuses" :key="key" :label="name" :value="key"/></el-select></el-form-item><el-button size="small" :disabled="busy" @click="search">查询</el-button></el-form>
-    <el-table :data="rows" size="small" v-loading="loading"><el-table-column prop="packageNo" label="包裹" min-width="160" show-overflow-tooltip/><el-table-column label="操作" width="74"><template #default="{row}"><el-button link type="primary" :disabled="busy||!can('query')" @click="openPackage(row.packageId)">拣货</el-button></template></el-table-column></el-table>
+    <ERPQueryBar :model="query" :loading="loading" :disabled="busy" @search="search" @reset="reset">
+   <el-form-item label="仓库"><ReferenceSelect kind="warehouse" v-model="query.warehouseId" :disabled="busy" /></el-form-item>
+   <el-form-item label="状态"><el-select v-model="query.status" :disabled="busy" ><el-option v-for="(name,key) in statuses" :key="key" :label="name" :value="key"/></el-select></el-form-item>
+  </ERPQueryBar>
+    <el-table :data="rows" v-loading="loading"><el-table-column prop="packageNo" label="包裹" min-width="160" show-overflow-tooltip/><el-table-column label="操作" width="74"><template #default="{row}"><el-button link type="primary" :disabled="busy||!can('query')" @click="openPackage(row.packageId)">拣货</el-button></template></el-table-column></el-table>
     <pagination v-show="total>0" small :total="total" v-model:page="query.pageNum" v-model:limit="query.pageSize" @pagination="load"/>
    </section>
    <section v-if="detail" class="picking-detail">
@@ -19,7 +22,7 @@
      <el-alert v-if="!detail.hasLogistics&&detail.status==='READY_TO_SHIP'" title="尚未保存物流/运单。请先到原包裹页面维护，回来重新读取并复核。" type="warning" :closable="false"/>
      <el-alert v-if="detail.blockReason" :title="detail.blockReason" type="error" :closable="false"/>
      <p><el-tag :type="detail.checked?'success':'info'">{{detail.status!=='READY_TO_SHIP'?statuses[detail.status]:detail.checked?'当前版本复核有效':'当前版本尚未有效复核'}}</el-tag><span v-if="detail.checkedAt"> 上次复核 {{detail.checkedAt}}</span></p>
-     <el-form inline size="small" @submit.prevent="scan"><el-form-item label="扫码"><el-input ref="scanRef" v-model="scanCode" :disabled="busy||!detail.scannable||detail.checked||!can('check')" placeholder="条码；无条码则扫SKU编码" autocomplete="off" @keydown.enter.prevent="scan"/></el-form-item><el-form-item label="数量"><el-input-number v-model="scanQty" :min="1" :max="1000000000" :disabled="busy||detail.checked" controls-position="right" style="width:105px"/></el-form-item><el-button :disabled="busy||!detail.scannable||detail.checked||!can('check')" @click="scan">记入</el-button></el-form>
+     <el-form inline @submit.prevent="scan"><el-form-item label="扫码"><el-input ref="scanRef" v-model="scanCode" :disabled="busy||!detail.scannable||detail.checked||!can('check')" placeholder="条码；无条码则扫SKU编码" autocomplete="off" @keydown.enter.prevent="scan"/></el-form-item><el-form-item label="数量"><el-input-number v-model="scanQty" :min="1" :max="1000000000" :disabled="busy||detail.checked" controls-position="right" style="width:105px"/></el-form-item><el-button :disabled="busy||!detail.scannable||detail.checked||!can('check')" @click="scan">记入</el-button></el-form>
      <div class="actions"><el-button :disabled="busy||detail.checked||detail.status!=='READY_TO_SHIP'" @click="counts={}">清空本次扫描</el-button><el-button :disabled="busy||!detail.scannable||detail.checked||!can('check')" type="primary" @click="confirmCheck">保存复核</el-button><el-button :disabled="busy||!detail.checked||!detail.hasLogistics||!can('ship')" type="success" @click="confirmShip">复核后发货</el-button><el-button :disabled="busy||!can('query')" @click="printSheet">打印清单</el-button><el-button :disabled="busy||!canPackage()" @click="goPackage">维护运单 / 包裹</el-button></div>
      <p class="sheet-note">复核不扣库存；发货由原库存事务扣减一次。包裹或商品扫描信息变化会使复核失效。原手工发货为独立权限能力，不代表经过扫码复核。</p>
     </div>
@@ -29,6 +32,9 @@
  </div>
 </template>
 <script setup>
+import ERPQueryBar from './ERPQueryBar.vue'
+import { resetERPQuery } from '@/utils/erp-query.mjs'
+
 import {ref,reactive,computed,onMounted,onBeforeUnmount,onDeactivated,onActivated,watch,nextTick} from 'vue'
 import {useRouter,useRoute} from 'vue-router'
 import {ElMessage,ElMessageBox} from 'element-plus'
@@ -80,6 +86,7 @@ async function printSheet(){
 async function followLink(){if(saving.value)return;const link=++linkEpoch;clearDetail();const raw=route.query.packageId;if(raw!==undefined&&!pickingID(raw)){++listEpoch;rows.value=[];total.value=0;error.value='包裹链接编号无效';return};await load();if(raw&&active&&link===linkEpoch)await openPackage(pickingID(raw))}
 function leave(){active=false;++listEpoch;++linkEpoch;saving.value=false;clearDetail();rows.value=[];total.value=0;error.value=''}
 watch(()=>route.query.packageId,followLink);onMounted(followLink);onDeactivated(()=>{wasDeactivated=true;leave()});onBeforeUnmount(leave);onActivated(()=>{if(wasDeactivated){wasDeactivated=false;active=true;followLink()}})
+function reset(){if(busy.value)return;resetERPQuery(query,{pageNum:1,pageSize:10,warehouseId:undefined,status:'READY_TO_SHIP'});return search()}
 </script>
 <style scoped>
 header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}h2{font-size:20px;margin:0 0 6px}header p,.sheet-note,.scan-controls>p{font-size:12px;color:var(--el-text-color-secondary);line-height:1.65;overflow-wrap:anywhere}.picking-grid{display:grid;grid-template-columns:330px minmax(0,1fr);gap:16px}.package-list,.picking-detail{min-width:0;border:1px solid var(--el-border-color-light);border-radius:6px;padding:12px}.package-list :deep(.pagination-container){padding:8px 0;height:auto}.picking-sheet h3{margin:0 0 10px;font-size:16px;overflow-wrap:anywhere}.pick-table{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}.pick-table th,.pick-table td{padding:8px 6px;border-bottom:1px solid var(--el-border-color-lighter);text-align:left;overflow-wrap:anywhere}.pick-table th:first-child{width:36%}.pick-table td small{display:block;margin-top:4px;color:var(--el-text-color-secondary)}.scan-code{font-family:monospace}.scan-controls{margin-top:12px}.scan-controls .el-form{margin-top:12px}.actions{display:flex;gap:8px;flex-wrap:wrap}.actions .el-button{margin-left:0}.empty{padding:28px;color:var(--el-text-color-secondary)}.mb12{margin-bottom:12px}@media(max-width:1000px){.picking-grid{grid-template-columns:minmax(0,1fr)}}

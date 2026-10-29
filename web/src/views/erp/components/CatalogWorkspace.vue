@@ -1,13 +1,13 @@
 <template>
  <div class="app-container catalog-workspace">
   <el-alert :title="category?'平级商品分类；编码建立后保留，停用不删除历史。':'商品档案：一个商品管理多个SKU。库存与订单沿用原SKU；已有引用的编码、规格和单位受保护。'" type="info" :closable="false" class="mb8"/>
-  <el-form inline size="small" @submit.prevent="search">
+  <ERPQueryBar :model="query" :loading="loading"  @search="search" @reset="reset">
    <template v-if="category"><el-form-item label="分类编码"><el-input v-model="query.categoryCode" clearable/></el-form-item><el-form-item label="分类名称"><el-input v-model="query.categoryName" clearable/></el-form-item></template>
    <template v-else><el-form-item label="商品编码"><el-input v-model="query.productCode" clearable/></el-form-item><el-form-item label="商品名称"><el-input v-model="query.productName" clearable/></el-form-item><el-form-item label="SKU编码"><el-input v-model="query.skuCode" clearable/></el-form-item><el-form-item label="条码"><el-input v-model="query.barcode" clearable/></el-form-item></template>
-   <el-form-item><el-button @click="search">查询</el-button><el-button v-if="can('add')" type="primary" :disabled="busy||opening" @click="start">新增{{category?'分类':'商品'}}</el-button><template v-if="!category"><el-button v-if="can('import')" :disabled="busy" @click="startImport">批量导入</el-button><el-button v-if="can('export')" @click="exportRows">导出筛选结果</el-button></template></el-form-item>
-  </el-form>
+   <template #toolbar><el-button v-if="can('add')" type="primary" :disabled="busy||opening" @click="start">新增{{category?'分类':'商品'}}</el-button><template v-if="!category"><el-button v-if="can('import')" :disabled="busy" @click="startImport">批量导入</el-button><el-button v-if="can('export')" @click="exportRows">导出筛选结果</el-button></template></template>
+  </ERPQueryBar>
   <el-alert v-if="error&&!open&&!importOpen" :title="error" type="error" :closable="false"/>
-  <el-table :data="rows" size="small" v-loading="loading" :row-key="category?'categoryId':'productId'">
+  <el-table :data="rows" v-loading="loading" :row-key="category?'categoryId':'productId'">
    <template v-if="category"><el-table-column prop="categoryCode" label="分类编码" min-width="150"/><el-table-column prop="categoryName" label="名称" min-width="170"/><el-table-column label="状态" width="90"><template #default="{row}">{{row.status==='0'?'启用':'停用'}}</template></el-table-column></template>
    <template v-else><el-table-column label="图片" width="68"><template #default="{row}"><img v-if="row.images?.length" :src="imageURL(row.images[0])" class="thumbnail" alt="商品图"/><span v-else>—</span></template></el-table-column><el-table-column prop="productCode" label="商品编码" min-width="150"/><el-table-column prop="productName" label="商品名称" min-width="200"/><el-table-column prop="categoryName" label="分类" min-width="130"/></template>
    <el-table-column prop="version" label="版本" width="70"/><el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip/>
@@ -17,7 +17,7 @@
   <el-dialog v-model="open" :title="(editable?(form[category?'categoryId':'productId']?'编辑':'新增'):'查看')+(category?'分类':'商品档案')" width="min(1100px, calc(100vw - 24px))" append-to-body :close-on-click-modal="false" :before-close="closeDialog" class="erp-dialog">
    <el-alert v-if="error" :title="error" type="error" :closable="false" class="mb8"/>
    <el-alert v-if="pending" title="已锁定原请求。可重试确认结果；不要改内容后复用同一请求。" type="warning" :closable="false" class="mb8"/>
-   <el-form :disabled="!editable||busy||!!pending" label-width="85px" size="small">
+   <el-form :disabled="!editable||busy||!!pending" label-width="85px">
     <div class="catalog-head">
      <el-form-item :label="category?'分类编码':'商品编码'"><el-input v-if="category" v-model="form.categoryCode" maxlength="64" :disabled="!!form.categoryId"/><el-input v-else v-model="form.productCode" maxlength="64" :disabled="!!form.productId"/></el-form-item>
      <el-form-item label="名称"><el-input v-if="category" v-model="form.categoryName" maxlength="120"/><el-input v-else v-model="form.productName" maxlength="120"/></el-form-item>
@@ -26,9 +26,9 @@
     </div>
     <el-form-item label="备注"><el-input v-model="form.remark" maxlength="500"/></el-form-item>
     <template v-if="!category">
-     <div class="catalog-toolbar"><strong>SKU规格（{{form.variants.length}} / 50）</strong><el-button v-if="editable" size="small" :disabled="form.variants.length>=50||busy||!!pending" @click="form.variants.push(blankVariant())">添加新SKU</el-button><el-select v-if="editable&&hasPermi(['erp:sku:list'])" filterable remote clearable :remote-method="findUnassigned" :loading="skuLoading" placeholder="搜索并归入已有SKU" @visible-change="v=>v&&findUnassigned('')" @change="attachSKU" :model-value="null" style="width:220px"><el-option v-for="s in skuOptions" :key="s.skuId" :value="s.skuId" :label="s.skuCode+' · '+s.productName"/></el-select></div>
+     <div class="catalog-toolbar"><strong>SKU规格（{{form.variants.length}} / 50）</strong><el-button v-if="editable" :disabled="form.variants.length>=50||busy||!!pending" @click="form.variants.push(blankVariant())">添加新SKU</el-button><el-select v-if="editable&&hasPermi(['erp:sku:list'])" filterable remote clearable :remote-method="findUnassigned" :loading="skuLoading" placeholder="搜索并归入已有SKU" @visible-change="v=>v&&findUnassigned('')" @change="attachSKU" :model-value="null" style="width:220px"><el-option v-for="s in skuOptions" :key="s.skuId" :value="s.skuId" :label="s.skuCode+' · '+s.productName"/></el-select></div>
      <p class="catalog-note">已有SKU不可移除；已被业务引用的编码、规格、单位不能变。条码按文本保存，未知重量/尺寸留空。</p>
-     <div class="catalog-scroll"><el-table :data="form.variants" size="small" style="min-width:970px">
+     <div class="catalog-scroll"><el-table :data="form.variants" style="min-width:970px">
       <el-table-column label="SKU编码" min-width="150"><template #default="{row}"><el-input v-model="row.skuCode" :disabled="!editable||busy||!!pending||row.referenced" maxlength="64"/></template></el-table-column>
       <el-table-column label="规格" min-width="145"><template #default="{row}"><el-input v-model="row.specification" :disabled="!editable||busy||!!pending||row.referenced" maxlength="120"/></template></el-table-column>
       <el-table-column label="单位" width="90"><template #default="{row}"><el-input v-model="row.unit" :disabled="!editable||busy||!!pending||row.referenced" maxlength="20"/></template></el-table-column>
@@ -54,6 +54,9 @@
  </div>
 </template>
 <script setup>
+import ERPQueryBar from './ERPQueryBar.vue'
+import { resetERPQuery } from '@/utils/erp-query.mjs'
+
 import {ref,reactive,onBeforeUnmount,onMounted,onActivated,onDeactivated,getCurrentInstance} from 'vue'
 import {saveAs} from 'file-saver'
 import {checkPermi as hasPermi} from '@/utils/permission'
@@ -90,7 +93,8 @@ function invalidate(){busy.value=false;opening.value=false;loading.value=false;c
 onDeactivated(invalidate)
 onActivated(()=>{if(!alive){alive=true;load()}})
 onBeforeUnmount(invalidate)
+function reset(){resetERPQuery(query,{pageNum:1,pageSize:10});return search()}
 </script>
 <style scoped>
-.catalog-head{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 10px}.catalog-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0 4px}.catalog-scroll{max-width:100%;overflow:auto}.catalog-note{font-size:12px;color:var(--el-text-color-secondary);line-height:1.6}.catalog-images{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.catalog-image{display:flex;flex-direction:column;gap:4px;align-items:center}.catalog-image img{width:90px;height:90px;object-fit:contain;border:1px solid var(--el-border-color)}.thumbnail{width:38px;height:38px;object-fit:contain}.catalog-upload{position:relative;display:flex;align-items:center;justify-content:center;width:120px;min-height:90px;border:1px dashed var(--el-border-color);cursor:pointer}.catalog-upload input{position:absolute;inset:0;opacity:0;width:100%;cursor:pointer}.catalog-workspace :deep(.el-table .cell){line-height:22px}.catalog-workspace :deep(.el-table td.el-table__cell){padding:5px 0}@media(max-width:768px){.catalog-head{grid-template-columns:1fr}.catalog-toolbar{gap:8px}}
+.catalog-head{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 10px}.catalog-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0 4px}.catalog-scroll{max-width:100%;overflow:auto}.catalog-note{font-size:12px;color:var(--el-text-color-secondary);line-height:1.6}.catalog-images{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}.catalog-image{display:flex;flex-direction:column;gap:4px;align-items:center}.catalog-image img{width:90px;height:90px;object-fit:contain;border:1px solid var(--el-border-color)}.thumbnail{width:38px;height:38px;object-fit:contain}.catalog-upload{position:relative;display:flex;align-items:center;justify-content:center;width:120px;min-height:90px;border:1px dashed var(--el-border-color);cursor:pointer}.catalog-upload input{position:absolute;inset:0;opacity:0;width:100%;cursor:pointer}@media(max-width:768px){.catalog-head{grid-template-columns:1fr}.catalog-toolbar{gap:8px}}
 </style>

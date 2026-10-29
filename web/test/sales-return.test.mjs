@@ -1,3 +1,4 @@
+import { resetERPQuery } from '../src/utils/erp-query.mjs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
@@ -12,7 +13,7 @@ async function setup(overrides={}){
  const source=await readFile(new URL('../src/views/erp/components/SalesReturnWorkspace.vue',import.meta.url),'utf8')
  const{descriptor}=parse(source),code=compileScript(descriptor,{id:'return'}).content.replace(/^import\s[^\n]*\n/gm,'').replace('export default','const component =')
  const hooks=[],activated=[],messages=[]
- const stubs={ref,reactive,computed,watch(){},onBeforeUnmount:f=>hooks.push(f),onDeactivated:f=>hooks.push(f),onActivated:f=>activated.push(f),useRoute:()=>({query:{}}),checkPermi:()=>true,ElMessage:{success:x=>messages.push(x)},crypto:{randomUUID:()=> 'return-fixed-key'},safeID,immutablePayload,salesReturnPayload,listReturnablePackages:async()=>({rows:[],total:0}),listSalesReturns:async()=>({rows:[],total:0}),getReturnablePackage:async()=>({data:receipt()}),...overrides}
+ const stubs={ ERPQueryBar:{}, resetERPQuery,ref,reactive,computed,watch(){},onBeforeUnmount:f=>hooks.push(f),onDeactivated:f=>hooks.push(f),onActivated:f=>activated.push(f),useRoute:()=>({query:{}}),checkPermi:()=>true,ElMessage:{success:x=>messages.push(x)},crypto:{randomUUID:()=> 'return-fixed-key'},safeID,immutablePayload,salesReturnPayload,listReturnablePackages:async()=>({rows:[],total:0}),listSalesReturns:async()=>({rows:[],total:0}),getReturnablePackage:async()=>({data:receipt()}),...overrides}
  const component=vm.runInNewContext(`${code}\ncomponent`,stubs);return{state:component.setup({},{expose(){},emit(){}}),hooks,activated,messages,source}
 }
 test('return payload whitelists fields and checks original batch remainder',()=>{

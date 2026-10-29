@@ -1,7 +1,7 @@
 <template>
  <div class="app-container">
   <el-alert title="这里只是渠道目录，不是已接入的平台。当前仅登记店铺资料；手工录单和文件导入将在后续阶段实现。" type="info" :closable="false" class="mb8"/>
-  <el-table :data="rows" v-loading="loading" size="small">
+  <el-table :data="rows" v-loading="loading">
    <el-table-column label="渠道编码" prop="channelCode" width="160"/>
    <el-table-column label="渠道名称" prop="channelName" width="160"/>
    <el-table-column label="接入方式" width="180"><template #default>手工 / 文件（规划）</template></el-table-column>

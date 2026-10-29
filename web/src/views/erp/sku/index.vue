@@ -1,12 +1,11 @@
 <template>
   <div class="app-container">
-    <el-form :model="queryParams" ref="queryRef" :inline="true">
-      <el-form-item label="SKU编码" prop="skuCode"><el-input v-model="queryParams.skuCode" clearable @keyup.enter="handleQuery" /></el-form-item>
-      <el-form-item label="商品名称" prop="productName"><el-input v-model="queryParams.productName" clearable @keyup.enter="handleQuery" /></el-form-item>
-      <el-form-item label="规格" prop="specification"><el-input v-model="queryParams.specification" clearable @keyup.enter="handleQuery" /></el-form-item>
-      <el-form-item label="单位" prop="unit"><el-input v-model="queryParams.unit" clearable @keyup.enter="handleQuery" /></el-form-item>
-      <el-form-item><el-button type="primary" icon="Search" @click="handleQuery">搜索</el-button><el-button icon="Refresh" @click="resetQuery">重置</el-button></el-form-item>
-    </el-form>
+    <ERPQueryBar ref="queryRef" :model="queryParams" :loading="loading"  @search="handleQuery" @reset="resetQuery">
+   <el-form-item label="SKU编码" prop="skuCode"><el-input v-model="queryParams.skuCode" clearable  /></el-form-item>
+   <el-form-item label="商品名称" prop="productName"><el-input v-model="queryParams.productName" clearable  /></el-form-item>
+   <el-form-item label="规格" prop="specification"><el-input v-model="queryParams.specification" clearable  /></el-form-item>
+   <el-form-item label="单位" prop="unit"><el-input v-model="queryParams.unit" clearable  /></el-form-item>
+  </ERPQueryBar>
     <el-row :gutter="10" class="mb8"><el-col :span="1.5"><el-button type="primary" plain icon="Plus" @click="handleAdd()" v-hasPermi="['erp:sku:add']">新增</el-button></el-col><el-col :span="1.5"><el-button type="danger" plain icon="Delete" :disabled="multiple" @click="handleDelete()" v-hasPermi="['erp:sku:remove']">删除</el-button></el-col><el-col :span="1.5"><el-button type="warning" plain icon="Download" @click="handleExport" v-hasPermi="['erp:sku:export']">导出</el-button></el-col></el-row>
     <el-table v-loading="loading" :data="rows" @selection-change="handleSelectionChange"><el-table-column type="selection" width="55" align="center" />
       <el-table-column label="SKU编号" prop="skuId" align="center" :show-overflow-tooltip="true" />
@@ -30,6 +29,8 @@
 </template>
 
 <script setup name="ErpSku">
+import ERPQueryBar from '../components/ERPQueryBar.vue'
+
 let alive=true,view=0,operation=0,wasInactive=false
 import {onBeforeUnmount,onDeactivated,onActivated} from 'vue'
 import { listErpSku, getErpSku, addErpSku, updateErpSku, delErpSku } from '@/api/erp/sku'

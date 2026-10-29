@@ -7,7 +7,7 @@
    <p>{{ current.description }}</p>
    <details><summary>将预填 {{ current.permissions.length }} 项权限（点击展开核对）</summary><ul><li v-for="p in current.permissions" :key="p.permission">{{ p.label }} · {{ p.permission }}</li></ul></details>
    <details v-if="current.unavailablePermissions.length"><summary>本企业未开通 {{ current.unavailablePermissions.length }} 项，不会选中</summary><ul><li v-for="p in current.unavailablePermissions" :key="p">{{ p }}</li></ul></details>
-   <el-button size="small" :disabled="!current.menuIds.length" @click="apply">预填当前模板</el-button><span v-if="applied"> 已预填，请核对菜单权限再保存。</span>
+   <el-button :disabled="!current.menuIds.length" @click="apply">预填当前模板</el-button><span v-if="applied"> 已预填，请核对菜单权限再保存。</span>
   </template>
  </div>
 </template>

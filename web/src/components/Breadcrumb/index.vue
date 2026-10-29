@@ -11,6 +11,7 @@
 
 <script setup>
 import usePermissionStore from '@/store/modules/permission'
+import { erpBreadcrumbs } from '@/utils/erp-navigation.mjs'
 
 const route = useRoute()
 const router = useRouter()
@@ -18,6 +19,11 @@ const permissionStore = usePermissionStore()
 const levelList = ref([])
 
 function getBreadcrumb() {
+  const erpTrail = erpBreadcrumbs(route.path, route.matched)
+  if (erpTrail) {
+    levelList.value = erpTrail.filter(item => item.meta?.title && item.meta.breadcrumb !== false)
+    return
+  }
   // only show routes with meta.title
   let matched = []
   const pathNum = findPathNum(route.path)
