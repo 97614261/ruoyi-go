@@ -3,8 +3,10 @@ package config
 
 import (
 	"fmt"
+	"github.com/go-sql-driver/mysql"
 	"net"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 
 // Config 应用配置总入口。
 type Config struct {
+	Portal  PortalConfig  `mapstructure:"portal"`
 	Server  ServerConfig  `mapstructure:"server"`
 	MySQL   MySQLConfig   `mapstructure:"mysql"`
 	Redis   RedisConfig   `mapstructure:"redis"`
@@ -21,6 +24,16 @@ type Config struct {
 	Upload  UploadConfig  `mapstructure:"upload"`
 	Gen     GenConfig     `mapstructure:"gen"`
 	Log     LogConfig     `mapstructure:"log"`
+}
+
+type PortalConfig struct {
+	PublicURL        string `mapstructure:"publicURL"`
+	PrivateAssetPath string `mapstructure:"privateAssetPath"`
+	ListenHost       string `mapstructure:"listenHost"`
+	Enabled          bool   `mapstructure:"enabled"`
+	Theme            string `mapstructure:"theme"`
+	SiteName         string `mapstructure:"siteName"`
+	RunJobs          bool   `mapstructure:"runJobs"`
 }
 
 // GenConfig 代码生成器配置。自定义路径写盘默认关闭；开启后也只能写入 OutputRoot。
@@ -173,9 +186,41 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("gen.outputRoot", ".")
 
 	v.SetDefault("log.level", "info")
+	v.SetDefault("portal.enabled", false)
+	v.SetDefault("portal.privateAssetPath", "./uploadPath-portal-private")
+	v.SetDefault("portal.listenHost", "127.0.0.1")
+	v.SetDefault("portal.publicURL", "http://127.0.0.1:8085")
+	v.SetDefault("portal.theme", "business")
+	v.SetDefault("portal.siteName", "门户开发站")
+	v.SetDefault("portal.runJobs", false)
 }
 
 func (c *Config) validate() error {
+	if c.Portal.Enabled {
+		origin, e := url.Parse(c.Portal.PublicURL)
+		if e != nil || origin.Host == "" || (origin.Scheme != "https" && origin.Scheme != "http") || origin.User != nil || origin.RawQuery != "" || origin.Fragment != "" || (origin.Path != "" && origin.Path != "/") {
+			return fmt.Errorf("portal.publicURL必须是站点HTTP/HTTPS源地址")
+		}
+		if c.Portal.ListenHost == "" {
+			c.Portal.ListenHost = "127.0.0.1"
+		}
+		if net.ParseIP(c.Portal.ListenHost) == nil {
+			return fmt.Errorf("portal.listenHost必须是IP地址")
+		}
+		dsn, err := mysql.ParseDSN(c.MySQL.DSN)
+		if err != nil || dsn.DBName != "ruoyi_go_portal" {
+			return fmt.Errorf("门户模式必须使用独立 ruoyi_go_portal 数据库")
+		}
+		if c.Redis.DB != 14 {
+			return fmt.Errorf("门户开发模式须使用专用 Redis DB 14，启动前核实未被其他应用占用")
+		}
+		if filepath.Base(filepath.Clean(c.Upload.Path)) != "uploadPath-portal-public" {
+			return fmt.Errorf("门户上传目录必须独立为 uploadPath-portal-public")
+		}
+		if c.Portal.Theme != "business" || strings.TrimSpace(c.Portal.SiteName) == "" {
+			return fmt.Errorf("门户初始模板须为 business，站点名称不能为空")
+		}
+	}
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port 必须在 1 到 65535 之间")
 	}

@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -27,7 +29,9 @@ import (
 	// 代价是约 450KB。
 	_ "time/tzdata"
 
+	"io/fs"
 	"ruoyi-go/internal/config"
+	"ruoyi-go/internal/handler"
 	"ruoyi-go/internal/middleware"
 	"ruoyi-go/internal/repository"
 	"ruoyi-go/internal/router"
@@ -35,7 +39,11 @@ import (
 	"ruoyi-go/pkg/logx"
 	"ruoyi-go/pkg/redisx"
 	"ruoyi-go/pkg/validate"
+	"ruoyi-go/portal"
 )
+
+var defaultConfigPath = "configs/application.yml"
+var portalBuild = "false"
 
 func main() {
 	if err := run(); err != nil {
@@ -45,14 +53,31 @@ func main() {
 }
 
 func run() error {
-	configPath := flag.String("config", "configs/application.yml", "配置文件路径")
+	configPath := flag.String("config", defaultConfigPath, "配置文件路径")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		return err
 	}
+	if portalBuild == "true" && !cfg.Portal.Enabled {
+		return fmt.Errorf("门户发布包必须显式启用 portal.enabled，拒绝回落到原库配置")
+	}
 	initLogger(cfg.Log.Level)
+	var portalUI *handler.PortalUI
+	if cfg.Portal.Enabled {
+		admin, err := fs.Sub(portal.Resources, "admin-dist")
+		if err != nil {
+			return err
+		}
+		portalUI, err = handler.NewPortalUI(portal.Resources, admin, cfg.Portal.Theme, cfg.Portal.SiteName)
+		if err == nil {
+			portalUI.SetOrigin(cfg.Portal.PublicURL)
+		}
+		if err != nil {
+			return err
+		}
+	}
 
 	if err := repository.Init(cfg.MySQL); err != nil {
 		return err
@@ -63,6 +88,19 @@ func run() error {
 		}
 	}()
 
+	if cfg.Portal.Enabled {
+		guardCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		err := repository.ValidatePortalSchema(guardCtx)
+		cancel()
+		if err != nil {
+			return err
+		}
+	}
+	if cfg.Portal.Enabled {
+		if err := service.InitCMSAssets(cfg.Portal.PrivateAssetPath, cfg.Upload.Path); err != nil {
+			return err
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -94,21 +132,43 @@ func run() error {
 
 	// 定时任务调度器：从 sys_job 装载状态正常的任务。
 	// 放在所有无副作用的启动校验之后，避免后续初始化失败时遗留任务。
-	if err := service.StartScheduler(ctx); err != nil {
-		return err
+	if !cfg.Portal.Enabled || cfg.Portal.RunJobs {
+		if err := service.StartScheduler(ctx); err != nil {
+			return err
+		}
 	}
 
+	engine := router.NewWithPortal(cfg, portalUI)
+	listenAddress := fmt.Sprintf(":%d", cfg.Server.Port)
+	if cfg.Portal.Enabled {
+		listenAddress = net.JoinHostPort(cfg.Portal.ListenHost, strconv.Itoa(cfg.Server.Port))
+	}
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
-		Handler:      router.New(cfg),
+		Addr:         listenAddress,
+		Handler:      engine,
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,
 	}
 
+	listener, err := net.Listen("tcp", srv.Addr)
+	if err != nil {
+		return fmt.Errorf("监听失败: %w", err)
+	}
+	defer listener.Close()
+	if cfg.Portal.Enabled {
+		worker := service.StartCMSScheduleWorker(ctx)
+		defer func() {
+			stopCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
+			defer cancel()
+			if err := worker.Stop(stopCtx); err != nil {
+				slog.Error("停止门户定时任务失败", "err", err)
+			}
+		}()
+	}
 	errCh := make(chan error, 1)
 	go func() {
 		slog.Info("服务已启动", "addr", srv.Addr, "mode", cfg.Server.Mode)
-		errCh <- srv.ListenAndServe()
+		errCh <- srv.Serve(listener)
 	}()
 
 	var serveErr error

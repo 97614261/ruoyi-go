@@ -275,6 +275,10 @@ func PermissionVersion(ctx context.Context, userID int64) (int64, error) {
 // advancePermissionVersions 在数据库权限写入前推进版本。版本不设置 TTL：
 // 只要旧 JWT 仍可能存在，版本就不能回退或消失。
 func advancePermissionVersions(ctx context.Context, userIDs []int64) (map[int64]int64, error) {
+	return advancePermissionVersionsClient(ctx, redisx.C(), userIDs)
+}
+
+func advancePermissionVersionsClient(ctx context.Context, client *redis.Client, userIDs []int64) (map[int64]int64, error) {
 	ids := uniquePositiveIDs(userIDs)
 	versions := make(map[int64]int64, len(ids))
 	const batchSize = 200
@@ -283,12 +287,14 @@ func advancePermissionVersions(ctx context.Context, userIDs []int64) (map[int64]
 			userID int64
 			cmd    *redis.Cmd
 		}
+		// Pipeline errors arrive only after Exec; Script.Run cannot perform its NOSCRIPT fallback here.
+		// Send EVAL explicitly so a cold cache or Redis restart never skips the revocation version.
 		commands := make([]command, 0, len(batch))
-		_, err := redisx.C().Pipelined(ctx, func(pipe redis.Pipeliner) error {
+		_, err := client.Pipelined(ctx, func(pipe redis.Pipeliner) error {
 			for _, userID := range batch {
 				commands = append(commands, command{
 					userID: userID,
-					cmd: advancePermissionVersionScript.Run(ctx, pipe,
+					cmd: advancePermissionVersionScript.Eval(ctx, pipe,
 						[]string{redisx.LoginUserPermissionVersionKey(userID)}),
 				})
 			}

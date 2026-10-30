@@ -25,3 +25,14 @@ configs/*.local.yml
 .idea/
 *.iml
 .vscode/
+
+# Portal build outputs and isolated runtime data
+/admin-web/node_modules/
+/admin-web/dist/
+/admin-web/.vite/
+/admin-web/.env.local
+/admin-web/.env.*.local
+/portal/admin-dist/*
+!/portal/admin-dist/README.md
+/uploadPath-portal-public/
+/uploadPath-portal-private/

@@ -1,0 +1,25 @@
+# Copy to portal.local.yml. Set MYSQL_DSN and JWT_SECRET in the local process environment.
+# This file cannot start against an old database: portal mode requires ruoyi_go_portal.
+server:
+  port: 8085
+  mode: debug
+mysql:
+  dsn: ""
+redis:
+  addr: "127.0.0.1:6379"
+  db: 14
+  password: ""
+jwt:
+  secret: ""
+upload:
+  path: "./uploadPath-portal-public"
+  urlPrefix: "/profile"
+portal:
+  listenHost: 127.0.0.1
+  enabled: true
+  theme: business
+  siteName: 门户开发站
+  publicURL: http://127.0.0.1:8085 # 生产改成实际站点源地址
+  runJobs: false
+log:
+  level: info

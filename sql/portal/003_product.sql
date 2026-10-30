@@ -1,0 +1,8 @@
+-- Explicit portal v3 -> v4. Only CMS revision extensions and new menu definitions.
+ALTER TABLE cms_content_revision ADD product_code VARCHAR(80) NOT NULL DEFAULT '', ADD product_params VARCHAR(2000) NOT NULL DEFAULT '', ADD gallery_ids TEXT NULL;
+INSERT INTO sys_menu(menu_id,menu_name,parent_id,order_num,path,component,is_frame,is_cache,menu_type,visible,status,perms,icon,create_by,create_time) VALUES(6040,'产品展示',6000,5,'product','cms/product/index',1,0,'C','0','0','cms:product:list','shopping','portal-init',NOW());
+INSERT INTO sys_menu(menu_id,menu_name,parent_id,order_num,path,component,is_frame,is_cache,menu_type,visible,status,perms,icon,create_by,create_time) VALUES(6041,'产品查询',6040,1,'#','',1,0,'F','0','0','cms:product:query','#','portal-init',NOW());
+INSERT INTO sys_menu(menu_id,menu_name,parent_id,order_num,path,component,is_frame,is_cache,menu_type,visible,status,perms,icon,create_by,create_time) VALUES(6042,'产品新增',6040,2,'#','',1,0,'F','0','0','cms:product:add','#','portal-init',NOW());
+INSERT INTO sys_menu(menu_id,menu_name,parent_id,order_num,path,component,is_frame,is_cache,menu_type,visible,status,perms,icon,create_by,create_time) VALUES(6043,'产品编辑',6040,3,'#','',1,0,'F','0','0','cms:product:edit','#','portal-init',NOW());
+INSERT INTO sys_menu(menu_id,menu_name,parent_id,order_num,path,component,is_frame,is_cache,menu_type,visible,status,perms,icon,create_by,create_time) VALUES(6044,'产品发布与下架',6040,4,'#','',1,0,'F','0','0','cms:product:publish','#','portal-init',NOW());
+INSERT INTO sys_menu(menu_id,menu_name,parent_id,order_num,path,component,is_frame,is_cache,menu_type,visible,status,perms,icon,create_by,create_time) VALUES(6045,'产品删除',6040,5,'#','',1,0,'F','0','0','cms:product:remove','#','portal-init',NOW());

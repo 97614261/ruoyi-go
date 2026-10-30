@@ -53,10 +53,21 @@ func ShutdownOperLogPool(ctx context.Context) error {
 // 只挂在增删改授权这类写操作上，查询不挂 —— Java 也是这么用的，
 // 给查询也记日志会让这张表迅速膨胀到没法用。
 func OperLog(title string, businessType int) gin.HandlerFunc {
+	return operLog(title, businessType, false)
+}
+
+// OperLogWithoutParameters audits actions while excluding private editorial request/response bodies.
+func OperLogWithoutParameters(title string, businessType int) gin.HandlerFunc {
+	return operLog(title, businessType, true)
+}
+func operLog(title string, businessType int, omit bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 
-		requestBody := captureRequestBody(c)
+		requestBody := ""
+		if !omit {
+			requestBody = captureRequestBody(c)
+		}
 
 		writer := &responseCapture{ResponseWriter: c.Writer, body: &bytes.Buffer{}}
 		c.Writer = writer
@@ -66,6 +77,10 @@ func OperLog(title string, businessType int) gin.HandlerFunc {
 		// 必须在启动 goroutine 前把数据取完：gin.Context 是池化复用的，
 		// 请求结束后再碰 c 就是读到别人的请求。
 		record := buildOperLog(c, title, businessType, requestBody, writer, start)
+		if omit {
+			record.OperParam = "[私有内容参数已省略]"
+			record.JSONResult = "[私有内容响应已省略]"
+		}
 
 		// 异步写库：日志不该拖慢请求，也不该因为写失败影响业务结果。
 		// 必须用新的 context —— 请求的 ctx 在 handler 返回后就被取消了。
@@ -104,6 +119,9 @@ func captureRequestBody(c *gin.Context) string {
 	// 没经过入口限制就不读取，避免独立装配时重新引入无上限 io.ReadAll。
 	return uncachedLogValue
 }
+
+// MarkOperLogFailure records a partial business failure without storing request bodies.
+func MarkOperLogFailure(c *gin.Context, message string) { c.Set("operlog-business-failure", message) }
 
 func buildOperLog(c *gin.Context, title string, businessType int,
 	requestBody string, writer *responseCapture, start time.Time) *model.SysOperLog {
@@ -144,6 +162,10 @@ func buildOperLog(c *gin.Context, title string, businessType int,
 	if code, msg := extractCode(responseBody); code != 0 && code != 200 {
 		record.Status = model.OperStatusFail
 		record.ErrorMsg = truncate(msg, maxErrorLength)
+	}
+	if message := c.GetString("operlog-business-failure"); message != "" {
+		record.Status = model.OperStatusFail
+		record.ErrorMsg = truncate(message, maxErrorLength)
 	}
 	if writer.Status() >= http.StatusBadRequest {
 		record.Status = model.OperStatusFail
