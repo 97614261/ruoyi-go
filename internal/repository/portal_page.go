@@ -42,6 +42,12 @@ func PortalResults(ctx context.Context, kind, channel, keyword string, offset, l
 		}
 		query = query.Where("r.channel_id=?", id)
 	}
+	if id := portalTag(ctx); id > 0 {
+		query = query.Where("EXISTS (SELECT 1 FROM cms_revision_tag rt WHERE rt.revision_id=r.revision_id AND rt.tag_id=?)", id)
+	}
+	if featuredOnly(ctx) {
+		query = query.Where("EXISTS (SELECT 1 FROM cms_revision_ops ro WHERE ro.revision_id=r.revision_id AND ro.featured=1)")
+	}
 	if keyword != "" {
 		pattern := "%" + escapeLike(keyword) + "%"
 		query = query.Where("r.title LIKE ? OR r.summary LIKE ?", pattern, pattern)
@@ -51,7 +57,7 @@ func PortalResults(ctx context.Context, kind, channel, keyword string, offset, l
 		return nil, err
 	}
 	rows := []model.PortalCard{}
-	if err = query.Select("c.kind,c.slug,r.title,r.summary,c.published_at,r.cover_asset_id,r.channel_id").Order("c.published_at DESC,c.content_id DESC").Offset(offset).Limit(limit).Scan(&rows).Error; err != nil {
+	if err = query.Joins("LEFT JOIN cms_revision_ops ro ON ro.revision_id=r.revision_id").Select("c.kind,c.slug,r.title,r.summary,c.published_at,r.cover_asset_id,r.channel_id").Order("COALESCE(ro.pin_order,0) DESC,c.published_at DESC,c.content_id DESC").Offset(offset).Limit(limit).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	for i := range rows {

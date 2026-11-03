@@ -184,10 +184,7 @@ func CMSAssetByID(ctx context.Context, id int64) (*model.CmsAsset, error) {
 	return &row, nil
 }
 func CMSAssetPage(ctx context.Context, q model.CMSAssetQuery, pg page.Query) ([]model.CmsAsset, int64, error) {
-	db := cmsDB(ctx).Model(&model.CmsAsset{}).Where("is_deleted=0")
-	if q.Name != "" {
-		db = db.Where("name LIKE ?", strings.TrimSpace(q.Name)+"%")
-	}
+	db := cmsAssetFilter(ctx, q)
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -223,7 +220,11 @@ func CMSInsertAsset(ctx context.Context, row *model.CmsAsset) error {
 }
 func CMSUpdateAsset(ctx context.Context, id int64, in model.CMSAssetInput, operator string) error {
 	return cmsLocked(ctx, func(tx *gorm.DB) error {
-		result := tx.Model(&model.CmsAsset{}).Where("asset_id=? AND version=? AND is_deleted=0", id, in.Version).Updates(map[string]any{"name": in.Name, "alt_text": in.AltText, "remark": in.Remark, "version": in.Version + 1, "update_by": operator, "update_time": types.Now()})
+		values := map[string]any{"name": in.Name, "alt_text": in.AltText, "remark": in.Remark, "version": in.Version + 1, "update_by": operator, "update_time": types.Now()}
+		if in.GroupName != nil {
+			values["group_name"] = *in.GroupName
+		}
+		result := tx.Model(&model.CmsAsset{}).Where("asset_id=? AND version=? AND is_deleted=0", id, in.Version).Updates(values)
 		if result.Error != nil {
 			return result.Error
 		}
@@ -269,6 +270,6 @@ func CMSAssetReferences(ctx context.Context, id int64, pg page.Query) ([]model.C
 		return nil, 0, err
 	}
 	rows := []model.CMSAssetReference{}
-	err := query.Select("r.ref_id,r.owner_type,r.owner_id,COALESCE(c.name,CONCAT('内容历史修订 #',r.owner_id),'其他引用') AS owner_name").Joins("LEFT JOIN cms_channel c ON r.owner_type='CHANNEL' AND c.channel_id=r.owner_id").Order("r.ref_id ASC").Offset(pg.Offset()).Limit(pg.PageSize).Scan(&rows).Error
+	err := query.Select("r.ref_id,r.owner_type,r.owner_id,CASE WHEN r.owner_type='CONTENT_RECOVERY' THEN CONCAT('个人自动保存副本 #',r.owner_id) ELSE COALESCE(c.name,CONCAT('内容历史修订 #',r.owner_id),'其他引用') END AS owner_name").Joins("LEFT JOIN cms_channel c ON r.owner_type='CHANNEL' AND c.channel_id=r.owner_id").Order("r.ref_id ASC").Offset(pg.Offset()).Limit(pg.PageSize).Scan(&rows).Error
 	return rows, total, err
 }

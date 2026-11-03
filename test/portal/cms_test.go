@@ -41,7 +41,7 @@ func cmsSetup(t *testing.T) *cmsClient {
 	if e != nil {
 		t.Fatal("private portal config unavailable")
 	}
-	if !strings.Contains(cfg.MySQL.DSN, "/ruoyi_go_portal?") || cfg.Redis.DB != 14 || cfg.Server.Port != 8085 {
+	if !strings.Contains(cfg.MySQL.DSN, "/ruoyi_go_portal?") || cfg.Redis.DB != 14 || cfg.Server.Port != portalTestPort() {
 		t.Fatal("isolated local portal required")
 	}
 	db, e := sql.Open("mysql", cfg.MySQL.DSN)
@@ -77,7 +77,7 @@ func (c *cmsClient) call(method, path, token string, body any) map[string]any {
 		}
 		data = bytes.NewReader(b)
 	}
-	req, e := http.NewRequest(method, "http://127.0.0.1:8085"+path, data)
+	req, e := http.NewRequest(method, portalTestURL()+""+path, data)
 	if e != nil {
 		c.t.Fatal(e)
 	}
@@ -137,17 +137,22 @@ func (c *cmsClient) login(name, password string) string {
 	}
 	return token
 }
-func (c *cmsClient) upload(name string, content []byte) map[string]any {
+func (c *cmsClient) upload(name string, content []byte, group ...string) map[string]any {
 	c.t.Helper()
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
+	if len(group) > 0 {
+		if e := form.WriteField("groupName", group[0]); e != nil {
+			c.t.Fatal(e)
+		}
+	}
 	file, e := form.CreateFormFile("file", name)
 	if e != nil {
 		c.t.Fatal(e)
 	}
 	file.Write(content)
 	form.Close()
-	req, e := http.NewRequest("POST", "http://127.0.0.1:8085/cms/asset/upload", &body)
+	req, e := http.NewRequest("POST", portalTestURL()+"/cms/asset/upload", &body)
 	if e != nil {
 		c.t.Fatal(e)
 	}
@@ -166,7 +171,7 @@ func (c *cmsClient) upload(name string, content []byte) map[string]any {
 }
 func (c *cmsClient) image(id int64, token string) (int, string, []byte) {
 	c.t.Helper()
-	req, _ := http.NewRequest("GET", fmt.Sprintf("http://127.0.0.1:8085/cms/asset/%d/file", id), nil)
+	req, _ := http.NewRequest("GET", fmt.Sprintf(portalTestURL()+"/cms/asset/%d/file", id), nil)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -277,7 +282,7 @@ func TestCMSChannelAssetFlow(t *testing.T) {
 	if key == "outside.png" {
 		t.Fatal("private file key was writable")
 	}
-	response, e := c.http.Get("http://127.0.0.1:8085/profile/" + key)
+	response, e := c.http.Get(portalTestURL() + "/profile/" + key)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -298,7 +303,7 @@ func TestCMSChannelAssetFlow(t *testing.T) {
 			}
 			snapshot["name"] = prefix + fmt.Sprint(i)
 			encoded, _ := json.Marshal(snapshot)
-			req, _ := http.NewRequest("PUT", "http://127.0.0.1:8085/cms/channel", bytes.NewReader(encoded))
+			req, _ := http.NewRequest("PUT", portalTestURL()+"/cms/channel", bytes.NewReader(encoded))
 			req.Header.Set("Authorization", "Bearer "+c.admin)
 			req.Header.Set("Content-Type", "application/json")
 			response, err := c.http.Do(req)
@@ -388,3 +393,11 @@ func TestCMSChannelAssetFlow(t *testing.T) {
 		t.Fatal("deleted image remains readable")
 	}
 }
+
+func portalTestPort() int {
+	if os.Getenv("PORTAL_TEST_PORT") == "18085" {
+		return 18085
+	}
+	return 8085
+}
+func portalTestURL() string { return fmt.Sprintf("http://127.0.0.1:%d", portalTestPort()) }

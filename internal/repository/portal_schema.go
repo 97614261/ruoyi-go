@@ -62,6 +62,27 @@ func PortalStructureVersion(ctx context.Context, conn *sql.DB, version int) (str
 	if version >= 6 {
 		expectedTables = 29
 	}
+	if version >= 7 {
+		expectedTables = 30
+	}
+	if version >= 11 {
+		expectedTables = 31
+	}
+	if version >= 12 {
+		expectedTables = 32
+	}
+	if version >= 13 {
+		expectedTables = 36
+	}
+	if version >= 14 {
+		expectedTables = 45
+	}
+	if version >= 15 {
+		expectedTables = 53
+	}
+	if version >= 16 {
+		expectedTables = 58
+	}
 	if len(names) != expectedTables {
 		return "", fmt.Errorf("门户v%d应有%d张表，当前%d", version, expectedTables, len(names))
 	}

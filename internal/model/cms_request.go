@@ -21,13 +21,21 @@ type CMSChannelQuery struct {
 	Status   string `form:"status" binding:"omitempty,oneof=0 1"`
 }
 type CMSAssetQuery struct {
-	Name string `form:"name" binding:"max=150"`
+	Ungrouped bool    `form:"ungrouped"`
+	GroupName *string `form:"groupName" binding:"omitempty,max=40"`
+	MimeType  string  `form:"mimeType" binding:"omitempty,oneof=image/png image/jpeg"`
+	MinWidth  int     `form:"minWidth" binding:"min=0,max=12000000"`
+	MaxWidth  int     `form:"maxWidth" binding:"min=0,max=12000000"`
+	MinBytes  int64   `form:"minBytes" binding:"min=0,max=8388608"`
+	MaxBytes  int64   `form:"maxBytes" binding:"min=0,max=8388608"`
+	Name      string  `form:"name" binding:"max=150"`
 }
 type CMSAssetInput struct {
-	Name    string `json:"name" binding:"notblank,xss,max=150"`
-	AltText string `json:"altText" binding:"xss,max=200"`
-	Remark  string `json:"remark" binding:"xss,max=500"`
-	Version int64  `json:"version" binding:"required,min=1"`
+	GroupName *string `json:"groupName" binding:"omitempty,xss,max=40"`
+	Name      string  `json:"name" binding:"notblank,xss,max=150"`
+	AltText   string  `json:"altText" binding:"xss,max=200"`
+	Remark    string  `json:"remark" binding:"xss,max=500"`
+	Version   int64   `json:"version" binding:"required,min=1"`
 }
 type CMSVersion struct {
 	Version int64 `json:"version" binding:"required,min=1"`

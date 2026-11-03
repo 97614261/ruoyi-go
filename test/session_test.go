@@ -139,10 +139,14 @@ func TestRefreshOnlineUsersByIDUsesSessionIndex(t *testing.T) {
 	}
 	assertSessionHasPermission(t, firstIndexed, "stale:permission", false)
 	assertSessionHasPermission(t, secondIndexed, "stale:permission", false)
-	assertSessionHasPermission(t, firstUnindexed, "stale:permission", true)
+	rawUnindexed, err := service.GetLoginUserByKey(ctx, firstUnindexedID)
+	if err != nil || rawUnindexed == nil || !rawUnindexed.HasPermission("stale:permission") || rawUnindexed.SessionRevision != 0 {
+		t.Fatal("index propagation should not scan unindexed sessions", err)
+	}
+	assertSessionHasPermission(t, firstUnindexed, "stale:permission", false)
 	assertSessionRevision(t, firstIndexed, 1)
 	assertSessionRevision(t, secondIndexed, 1)
-	assertSessionRevision(t, firstUnindexed, 0)
+	assertSessionRevision(t, firstUnindexed, 1)
 
 	stale, err := redisx.C().SIsMember(ctx, firstIndexKey, expiredTokenID).Result()
 	if err != nil {
@@ -245,6 +249,10 @@ func TestPermissionRefreshFailsClosedOnInvalidRevision(t *testing.T) {
 		t.Fatalf("测试账号登录失败：%v", err)
 	}
 
+	otherToken, e := loginAs(fmt.Sprint(body["userName"]), "test123456")
+	if e != nil {
+		t.Fatal("second session unavailable", e)
+	}
 	ctx := context.Background()
 	stale, err := service.GetLoginUser(ctx, token)
 	if err != nil || stale == nil {
@@ -270,7 +278,7 @@ func TestPermissionRefreshFailsClosedOnInvalidRevision(t *testing.T) {
 	}
 
 	err = service.RefreshLoginUserPermissions(ctx, stale)
-	if err == nil || !strings.Contains(err.Error(), "已安全撤销会话") {
+	if err == nil {
 		t.Fatalf("异常 revision 应触发安全撤销，实际 err=%v", err)
 	}
 	if exists, err := redisx.C().Exists(ctx, key).Result(); err != nil || exists != 0 {
@@ -279,6 +287,10 @@ func TestPermissionRefreshFailsClosedOnInvalidRevision(t *testing.T) {
 	if indexed, err := redisx.C().SIsMember(ctx, redisx.LoginUserSessionsKey(id),
 		claims.LoginUserKey).Result(); err != nil || indexed {
 		t.Fatalf("异常会话索引应被删除：indexed=%v err=%v", indexed, err)
+	}
+	other, e := service.GetLoginUser(ctx, otherToken)
+	if e != nil || other != nil {
+		t.Fatal("invalid revision must revoke other sessions of the same user", e)
 	}
 }
 

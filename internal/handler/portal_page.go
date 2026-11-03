@@ -18,7 +18,14 @@ func (p *PortalUI) SetOrigin(origin string) { p.origin = strings.TrimRight(origi
 func cardRows(rows []model.PortalCard) []portalview.Card {
 	out := []portalview.Card{}
 	for _, r := range rows {
-		out = append(out, portalview.Card{Title: r.Title, Summary: r.Summary, URL: r.URL, Kind: r.Kind, Cover: r.CoverAssetId})
+		card := portalview.Card{Title: r.Title, Summary: r.Summary, URL: r.URL, Kind: r.Kind, Cover: r.CoverAssetId}
+		for _, p := range r.TitleParts {
+			card.TitleParts = append(card.TitleParts, portalview.TextPart{Text: p.Text, Match: p.Match})
+		}
+		for _, p := range r.SummaryParts {
+			card.SummaryParts = append(card.SummaryParts, portalview.TextPart{Text: p.Text, Match: p.Match})
+		}
+		out = append(out, card)
 	}
 	return out
 }
@@ -44,6 +51,13 @@ func (p *PortalUI) render(c *gin.Context, status int, name string, d portalview.
 			return
 		}
 	}
+	if d.ShareImage == "" {
+		d.ShareImage = shareMedia(p.origin, d.Cover)
+		if d.ShareImage == "" {
+			d.ShareImage = shareMedia(p.origin, d.Logo)
+		}
+	}
+	decorateSEO(&d)
 	body, err := p.view.Render(theme, name, d)
 	if err != nil {
 		c.Status(500)
@@ -51,11 +65,14 @@ func (p *PortalUI) render(c *gin.Context, status int, name string, d portalview.
 	}
 	c.Header("Cache-Control", "no-store")
 	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("Content-Security-Policy", "default-src 'self'; script-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; style-src 'self' 'unsafe-inline'; img-src 'self'; frame-ancestors 'none'")
+	c.Header("Content-Security-Policy", "default-src 'self'; script-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'self'; style-src 'self' 'unsafe-inline'; img-src 'self'; frame-ancestors 'none'")
 	if status != 200 || d.NoIndex {
 		c.Header("X-Robots-Tag", "noindex, nofollow")
 	}
 	c.Data(status, "text/html; charset=utf-8", body)
+	if status == 200 && c.Request.Method == "GET" && (name == "home" || name == "column" || name == "article" || name == "product" || name == "page" || name == "search" || name == "downloads") {
+		service.CMSRecordVisit(c.Request.Context(), c.Request.URL.EscapedPath(), c.GetHeader("Referer"), d.Query, cfg)
+	}
 }
 func (p *PortalUI) pageError(c *gin.Context, err error) {
 	status, name, title := 500, "error", "暂时无法加载"
@@ -97,7 +114,16 @@ func (p *PortalUI) Listing(kind string) gin.HandlerFunc {
 		if kind != "" {
 			q = ""
 		}
-		r, err := service.PortalResults(c.Request.Context(), kind, c.Param("slug"), q, (pageNo-1)*12, 12)
+		var tag int64
+		if v := c.Query("tag"); v != "" {
+			var e error
+			tag, e = strconv.ParseInt(v, 10, 64)
+			if e != nil || tag < 1 {
+				c.Status(400)
+				return
+			}
+		}
+		r, err := service.PortalFiltered(c.Request.Context(), kind, c.Param("slug"), q, tag, (pageNo-1)*12, 12)
 		if err != nil {
 			p.pageError(c, err)
 			return
@@ -113,7 +139,7 @@ func (p *PortalUI) Listing(kind string) gin.HandlerFunc {
 		if kind == "" {
 			title, name = "搜索结果", "search"
 		}
-		d := portalview.PageData{Title: title, Description: title, Query: q, Cards: cardRows(r.Rows), NoIndex: kind == ""}
+		d := portalview.PageData{Title: title, Description: title, Query: q, Cards: cardRows(r.Rows), NoIndex: kind == "", IsListing: true}
 		for _, ch := range r.Channels {
 			if ch.Kind == kind {
 				prefix := "/news/c/"
@@ -122,6 +148,7 @@ func (p *PortalUI) Listing(kind string) gin.HandlerFunc {
 				}
 				d.Channels = append(d.Channels, portalview.Card{Title: ch.Name, URL: prefix + ch.Slug})
 				if ch.Slug == c.Param("slug") {
+					d.ChannelId = ch.ChannelId
 					d.Title = ch.Name
 					d.Description = ch.SeoDescription
 					if ch.SeoTitle != "" {
@@ -133,6 +160,9 @@ func (p *PortalUI) Listing(kind string) gin.HandlerFunc {
 		base := c.Request.URL.EscapedPath()
 		link := func(n int) string {
 			v := url.Values{}
+			if tag > 0 {
+				v.Set("tag", strconv.FormatInt(tag, 10))
+			}
 			if q != "" {
 				v.Set("q", q)
 			}
@@ -158,6 +188,9 @@ func (p *PortalUI) Content(kind string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		r, err := service.CMSPublicContent(c.Request.Context(), kind, c.Param("slug"))
 		if err != nil {
+			if service.IsCMSNotFound(err) && p.tryRedirect(c) {
+				return
+			}
 			p.pageError(c, err)
 			return
 		}
@@ -179,6 +212,27 @@ func (p *PortalUI) Content(kind string) gin.HandlerFunc {
 		d := portalview.PageData{Title: title, Description: desc, BodyHTML: template.HTML(r.BodyHTML), ProductCode: r.ProductCode, ProductParams: r.ProductParams, Gallery: r.GalleryIds, CoverAlt: r.CoverAltText, Author: r.Author}
 		if r.CoverAssetId != nil {
 			d.Cover = *r.CoverAssetId
+		}
+		if r.Ops != nil {
+			d.ShareTitle = r.Ops.ShareTitle
+			d.ShareDescription = r.Ops.ShareDescription
+			d.ShareImage = shareMedia(p.origin, r.Ops.ShareAssetId)
+			for _, t := range r.Ops.Tags {
+				path := "/news"
+				if kind == "PRODUCT" {
+					path = "/products"
+				}
+				d.Tags = append(d.Tags, portalview.Card{Title: t.Name, URL: path + "?tag=" + strconv.FormatInt(t.TagId, 10)})
+			}
+			related, e := service.CMSRelated(c.Request.Context(), r.Ops.RelatedIds)
+			if e != nil {
+				p.pageError(c, e)
+				return
+			}
+			d.Related = cardRows(related)
+		}
+		if kind == "ARTICLE" {
+			d.ShareType = "article"
 		}
 		p.render(c, 200, name, d)
 	}
@@ -228,7 +282,7 @@ func (p *PortalUI) Sitemap(c *gin.Context) {
 	}
 	items := []siteLoc{}
 	if offset == 0 {
-		for _, path := range []string{"/", "/news", "/products"} {
+		for _, path := range []string{"/", "/news", "/products", "/downloads"} {
 			items = append(items, siteLoc{p.origin + path})
 		}
 		for _, ch := range r.Channels {

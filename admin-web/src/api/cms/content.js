@@ -5,13 +5,14 @@ export const listChannels = params => request({ url: '/cms/channel/list', params
 export const getChannel = id => request({ url: `/cms/channel/${id}` })
 export const saveChannel = data => request({ url: '/cms/channel', method: data.channelId ? 'put' : 'post', data })
 export const deleteChannel = row => request({ url: `/cms/channel/${row.channelId}`, method: 'delete', data: { version: row.version } })
+export const assetStatistics = params => request({ url: "/cms/asset/statistics", params })
 export const listAssets = params => request({ url: '/cms/asset/list', params })
 export const getAsset = id => request({ url: `/cms/asset/${id}` })
 export const saveAsset = (id, data) => request({ url: `/cms/asset/${id}`, method: 'put', data })
 export const deleteAsset = row => request({ url: `/cms/asset/${row.assetId}`, method: 'delete', data: { version: row.version } })
 export const listAssetReferences = (id, params) => request({ url: `/cms/asset/${id}/references`, params })
-export const uploadAsset = file => {
-  const data = new FormData(); data.append('file', file)
+export const uploadAsset = (file, groupName = '') => {
+  const data = new FormData(); data.append('file', file); data.append('groupName', groupName)
   return request({ url: '/cms/asset/upload', method: 'post', data, timeout: 60000, headers: { 'Content-Type': 'multipart/form-data', repeatSubmit: false } })
 }
 export async function privateImage(id) {

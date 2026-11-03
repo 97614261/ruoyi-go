@@ -116,7 +116,20 @@ func startCMSScheduleWorker(parent context.Context, run func(context.Context) er
 	return w
 }
 func StartCMSScheduleWorker(ctx context.Context) *CMSScheduleWorker {
-	return startCMSScheduleWorker(ctx, CMSRunSchedules)
+	nextCleanup := time.Now()
+	return startCMSScheduleWorker(ctx, func(c context.Context) error {
+		e := CMSRunSchedules(c)
+		e = errors.Join(e, CMSRunSearchJobs(c))
+		e = errors.Join(e, repository.CMSQueueInquiryReminders(c), repository.CMSDispatchNotifications(c))
+		if time.Now().After(nextCleanup) {
+			nextCleanup = time.Now().Add(time.Minute)
+			e = errors.Join(e, repository.CMSCleanupRecoveries(c), repository.CMSCleanupNotifications(c))
+			if cfg, siteErr := repository.CMSRawPublishedSite(c); siteErr == nil {
+				e = errors.Join(e, repository.CMSCleanupVisits(c, cfg.AnalyticsRetention))
+			}
+		}
+		return e
+	})
 }
 func (w *CMSScheduleWorker) Stop(ctx context.Context) error {
 	w.cancel()

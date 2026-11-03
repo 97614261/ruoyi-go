@@ -8,6 +8,7 @@ import (
 	"ruoyi-go/pkg/errs"
 	"ruoyi-go/pkg/page"
 	"ruoyi-go/pkg/types"
+	"strconv"
 )
 
 func CMSGetSite(ctx context.Context) (*model.SiteState, error) {
@@ -42,6 +43,12 @@ func siteReferences(cfg model.SiteConfig) ([]int64, []int64) {
 	}
 	for _, n := range cfg.Navigation {
 		addC(n.ContentId)
+	}
+	for _, b := range cfg.Blocks {
+		for _, v := range b.Items {
+			addA(v.AssetId)
+			addC(v.ContentId)
+		}
 	}
 	return assets, contents
 }
@@ -79,6 +86,9 @@ func siteValidateRefs(tx *gorm.DB, cfg model.SiteConfig, publish bool) error {
 			channelIDs = append(channelIDs, b.ChannelId)
 		}
 	}
+	for _, o := range cfg.ChannelLayouts {
+		channelIDs = append(channelIDs, o.ChannelId)
+	}
 	if len(channelIDs) > 0 {
 		rows := []model.CmsChannel{}
 		if err = tx.Where("channel_id IN ?", channelIDs).Find(&rows).Error; err != nil {
@@ -87,6 +97,23 @@ func siteValidateRefs(tx *gorm.DB, cfg model.SiteConfig, publish bool) error {
 		by := map[int64]model.CmsChannel{}
 		for _, r := range rows {
 			by[r.ChannelId] = r
+		}
+		for _, o := range cfg.ChannelLayouts {
+			if _, ok := by[o.ChannelId]; !ok {
+				return errs.New("栏目布局引用不存在")
+			}
+			if publish {
+				found := false
+				for _, id := range active {
+					if id == o.ChannelId {
+						found = true
+						break
+					}
+				}
+				if !found {
+					return errs.New("栏目布局引用已停用，请先处理")
+				}
+			}
 		}
 		for _, b := range cfg.Blocks {
 			if b.ChannelId > 0 {
@@ -145,6 +172,9 @@ func CMSSaveSite(ctx context.Context, in model.SiteInput, operator string) error
 		if err = siteSaveRefs(tx, in.Config, "SITE_DRAFT", 1, operator); err != nil {
 			return err
 		}
+		if err = cmsRecordDraftActor(tx, "SITE", 1, strconv.FormatInt(row.Version+1, 10), operator); err != nil {
+			return err
+		}
 		return tx.Model(&model.CMSSite{}).Where("site_id=1").Updates(map[string]any{"draft_json": string(body), "version": row.Version + 1, "update_by": operator, "update_time": types.Now()}).Error
 	})
 }
@@ -156,6 +186,16 @@ func CMSPublishSite(ctx context.Context, in model.SiteAction, operator string, c
 		}
 		if site.Version != in.Version {
 			return errs.New("站点已变化，请刷新后重试")
+		}
+		var policy model.CMSReviewPolicy
+		if err := tx.Where("kind='SITE'").Take(&policy).Error; err != nil {
+			return err
+		}
+		if in.ReleaseId > 0 && policy.Required {
+			return errs.New("外观启用审核，请先恢复为草稿，再送审发布")
+		}
+		if err := cmsRequireApproval(tx, "SITE", 1, true); err != nil {
+			return err
 		}
 		body := site.DraftJSON
 		if in.ReleaseId > 0 {
@@ -262,6 +302,19 @@ func CMSResolveSite(ctx context.Context, cfg model.SiteConfig) (model.SiteConfig
 		banners = append(banners, b)
 	}
 	cfg.Banners = banners
+	for i, b := range cfg.Blocks {
+		items := []model.SiteWidgetItem{}
+		for _, v := range b.Items {
+			if v.ContentId > 0 {
+				v.URL = links[v.ContentId]
+				if v.URL == "" {
+					continue
+				}
+			}
+			items = append(items, v)
+		}
+		cfg.Blocks[i].Items = items
+	}
 	return cfg, nil
 }
 func CMSPublicSiteAsset(ctx context.Context, id int64) (bool, error) {
@@ -275,6 +328,15 @@ func CMSPublicSiteAsset(ctx context.Context, id int64) (bool, error) {
 	for _, b := range cfg.Banners {
 		if b.AssetId == id {
 			return true, nil
+		}
+	}
+	for _, b := range cfg.Blocks {
+		if b.Enabled {
+			for _, v := range b.Items {
+				if v.AssetId == id && id > 0 {
+					return true, nil
+				}
+			}
 		}
 	}
 	return false, nil

@@ -34,6 +34,9 @@ func cmsRevisionAssets(r model.CMSRevision) ([]int64, error) {
 			seen[id] = true
 		}
 	}
+	if r.Ops != nil && r.Ops.ShareAssetId > 0 && !seen[r.Ops.ShareAssetId] {
+		ids = append(ids, r.Ops.ShareAssetId)
+	}
 	return ids, err
 }
 func cmsCheckAsset(id int64, assets map[int64]model.CmsAsset) []model.CMSIssue {
@@ -199,6 +202,11 @@ func CMSInspectSite(ctx context.Context, pg page.Query, publicOrigin string) (*m
 	for _, b := range cfg.Banners {
 		add(b.AssetId)
 	}
+	for _, b := range cfg.Blocks {
+		for _, v := range b.Items {
+			add(v.AssetId)
+		}
+	}
 	assetsRows, err := repository.CMSAssetsByIDs(ctx, assetIDs)
 	if err != nil {
 		return nil, err
@@ -258,6 +266,18 @@ func CMSInspectSite(ctx context.Context, pg page.Query, publicOrigin string) (*m
 	for _, block := range cfg.Blocks {
 		if block.Enabled && block.ChannelId > 0 && !cmsActiveChannel(block.ChannelId, block.Kind, byChannel) {
 			out.Issues = append(out.Issues, cmsIssue("SITE_CHANNEL_UNAVAILABLE", "首页区块的栏目已停用或不存在", 0, 0))
+		}
+	}
+	for _, b := range cfg.Blocks {
+		if b.Enabled {
+			for _, v := range b.Items {
+				if v.AssetId > 0 {
+					out.Issues = append(out.Issues, cmsCheckAsset(v.AssetId, assets)...)
+				}
+				if v.ContentId > 0 && !urls[fmt.Sprintf("content:%d", v.ContentId)] {
+					out.Issues = append(out.Issues, cmsIssue("SITE_CONTENT_UNAVAILABLE", "首页组件引用内容已失效", v.ContentId, v.AssetId))
+				}
+			}
 		}
 	}
 	for _, n := range cfg.Navigation {

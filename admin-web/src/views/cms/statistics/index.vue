@@ -1,0 +1,11 @@
+<template><div class="app-container"><el-alert title="服务端页面访问统计，含刷新和机器人，不代表独立访客数。默认关闭；到「站点与外观」开启并发布后开始记录。统计写入为尽力保存。" :closable="false"/><el-form inline @submit.prevent="search" style="margin-top:16px"><el-form-item label="日期范围"><el-date-picker v-model="dates" type="daterange" value-format="YYYY-MM-DD" start-placeholder="开始日期" end-placeholder="结束日期" :clearable="false"/></el-form-item><el-form-item label="查看维度"><el-select v-model="q.dimension" style="width:150px"><el-option label="按日访问量" value="day"/><el-option label="热门页面" value="page"/><el-option label="来源域名" value="source"/><el-option label="搜索关键词" value="keyword"/></el-select></el-form-item><el-button type="primary" @click="search">查询</el-button></el-form><p>当前页合计 <b>{{sum}}</b> 次 · 共 {{total}} 项；最多查询90天。来源仅保留域名，关键词须单独开启。</p><el-table :data="rows" v-loading="loading"><el-table-column prop="value" :label="labels[q.dimension]" min-width="250" show-overflow-tooltip/><el-table-column prop="hits" label="访问次数" width="130"/><el-table-column label="本页相对占比" min-width="200"><template #default="s"><el-progress :percentage="sum?Math.round(s.row.hits/sum*100):0"/></template></el-table-column></el-table><pagination v-show="total" :total="total" v-model:page="q.pageNum" v-model:limit="q.pageSize" @pagination="load"/></div></template>
+<script setup>
+import {ref,reactive,computed,onMounted,onBeforeUnmount,onDeactivated} from 'vue'
+import request from '@/utils/request'
+const format=d=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(d)
+const dates=ref([format(new Date(Date.now()-6*86400000)),format(new Date())]),q=reactive({pageNum:1,pageSize:10,dimension:'day'}),rows=ref([]),total=ref(0),loading=ref(false),labels={day:'日期（北京时间）',page:'页面路径',source:'来源域名（仅供参考）',keyword:'站内搜索词'};let epoch=0
+const sum=computed(()=>rows.value.reduce((n,r)=>n+r.hits,0))
+function search(){q.pageNum=1;load()}
+async function load(){const ticket=++epoch;loading.value=true;try{const r=await request({url:'/cms/statistics/list',params:{...q,from:dates.value[0],to:dates.value[1]}});if(ticket===epoch){rows.value=r.rows;total.value=r.total}}finally{if(ticket===epoch)loading.value=false}}
+onMounted(load);onBeforeUnmount(()=>++epoch);onDeactivated(()=>++epoch)
+</script>

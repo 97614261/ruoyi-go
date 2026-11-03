@@ -69,7 +69,7 @@ func TestPortalSiteRelease(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			b, _ := json.Marshal(payload)
-			req, _ := http.NewRequest("POST", "http://127.0.0.1:8085/cms/site/publish", bytes.NewReader(b))
+			req, _ := http.NewRequest("POST", portalTestURL()+"/cms/site/publish", bytes.NewReader(b))
 			req.Header.Set("Authorization", "Bearer "+c.admin)
 			req.Header.Set("Content-Type", "application/json")
 			resp, e := c.http.Do(req)

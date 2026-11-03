@@ -114,7 +114,7 @@ func CMSAssetUpload(c *gin.Context) {
 		return
 	}
 	defer stream.Close()
-	row, err := service.CMSUploadAsset(c.Request.Context(), stream, file.Filename, currentUsername(c))
+	row, err := service.CMSUploadGroupedAsset(c.Request.Context(), stream, file.Filename, currentUsername(c), c.PostForm("groupName"))
 	if err != nil {
 		fail(c, err)
 		return

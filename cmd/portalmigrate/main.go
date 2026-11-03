@@ -12,6 +12,8 @@ import (
 	"ruoyi-go/internal/repository"
 	portalsql "ruoyi-go/sql/portal"
 	"time"
+	// Standalone trimpath tools must parse DSN IANA zones without a Go installation.
+	_ "time/tzdata"
 )
 
 func main() {
@@ -70,7 +72,37 @@ func run() error {
 		if next == 5 {
 			low, high = 6050, 6053
 		}
-		if next <= 5 {
+		if next == 7 {
+			low, high = 6060, 6063
+		}
+		if next == 8 {
+			low, high = 6070, 6075
+		}
+		if next == 11 {
+			low, high = 6080, 6084
+		}
+		if next == 13 {
+			low, high = 6090, 6094
+		}
+		if next == 14 {
+			low, high = 6100, 6109
+		}
+		if next == 16 {
+			var reserved int
+			if err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM cms_redirect WHERE source_path='/downloads' OR source_path LIKE '/downloads/%'").Scan(&reserved); err != nil {
+				return err
+			}
+			if reserved > 0 {
+				return fmt.Errorf("新下载入口与已有旧路径冲突，请先人工处理，不自动覆盖")
+			}
+		}
+		if next == 16 {
+			low, high = 6120, 6131
+		}
+		if next == 15 {
+			low, high = 6110, 6117
+		}
+		if next == 16 || next == 15 || next == 14 || next <= 5 || next == 7 || next == 8 || next == 11 || next == 13 {
 			var conflicts int
 			if err = db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sys_menu WHERE menu_id BETWEEN ? AND ?", low, high).Scan(&conflicts); err != nil {
 				return err

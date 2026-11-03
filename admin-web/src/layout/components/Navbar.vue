@@ -9,7 +9,7 @@
     </template>
 
     <div class="right-menu">
-      <template v-if="appStore.device !== 'mobile'">
+      <PortalNotice/><template v-if="appStore.device !== 'mobile'">
         <header-search id="header-search" class="right-menu-item" />
 
         <el-tooltip content="源码地址" effect="dark" placement="bottom">
@@ -81,6 +81,7 @@ import useUserStore from '@/store/modules/user'
 import useLockStore from '@/store/modules/lock'
 import useSettingsStore from '@/store/modules/settings'
 import HeaderNotice from './HeaderNotice'
+import PortalNotice from './PortalNotice.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -259,7 +260,7 @@ async function toggleTheme(event) {
 
         svg {
           transition: transform 0.3s;
-          
+
           &:hover {
             transform: scale(1.15);
           }

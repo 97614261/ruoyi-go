@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"ruoyi-go/internal/model"
@@ -56,6 +57,11 @@ func CMSCreateSchedule(ctx context.Context, row *model.CMSSchedule) error {
 		if c.Version != row.ContentVersion {
 			return errs.New("内容已变化，请刷新后创建任务")
 		}
+		if row.Action == "publish" {
+			if err = cmsRequireApproval(tx.WithContext(WithCMSActor(ctx, row.OwnerUserId)), row.Kind, row.ContentId, false); err != nil {
+				return err
+			}
+		}
 		if row.Action == "unpublish" && c.IsPublished == 0 {
 			return errs.New("未发布内容不能安排定时下架")
 		}
@@ -65,6 +71,13 @@ func CMSCreateSchedule(ctx context.Context, row *model.CMSSchedule) error {
 		}
 		if count > 0 {
 			return errs.New("此内容已有待执行任务，请先取消")
+		}
+		if row.Action == "publish" {
+			binding, e := cmsScheduleReviewBinding(tx, row.Kind, row.ContentId, row.ContentVersion)
+			if e != nil {
+				return e
+			}
+			row.Remark = binding
 		}
 		row.Status = "PENDING"
 		row.Version = 1
@@ -131,8 +144,16 @@ func CMSExecuteSchedule(ctx context.Context, snapshot model.CMSSchedule, now tim
 		if err == nil {
 			err = preflight
 		}
+		if err == nil && row.Action == "publish" {
+			binding, e := cmsScheduleReviewBinding(tx, row.Kind, row.ContentId, row.ContentVersion)
+			if e != nil {
+				err = e
+			} else if binding != "" && binding != row.Remark {
+				err = errs.New("原定时任务绑定的批准已撤回或替换，请重新安排")
+			}
+		}
 		if err == nil {
-			err = cmsChangeContentTx(tx, row.Kind, row.ContentId, model.CMSContentAction{Version: row.ContentVersion}, row.Action, operator, true, normalize)
+			err = cmsChangeContentTx(tx.WithContext(WithCMSActor(ctx, row.OwnerUserId)), row.Kind, row.ContentId, model.CMSContentAction{Version: row.ContentVersion}, row.Action, operator, true, normalize)
 		}
 		status, message := "SUCCESS", "执行成功"
 		if err != nil {
@@ -142,6 +163,32 @@ func CMSExecuteSchedule(ctx context.Context, snapshot model.CMSSchedule, now tim
 				return err
 			}
 		}
+		if status == "FAILED" {
+			if e := cmsEnqueue(tx, "SCHEDULE", row.ScheduleId, row.Kind, "SCHEDULE_FAILED", row.Version+1, []int64{row.OwnerUserId}, "一条定时任务执行失败，请检查"); e != nil {
+				return e
+			}
+		}
 		return tx.Model(&row).Updates(map[string]any{"status": status, "result_message": message, "finished_at": types.Time(now), "version": row.Version + 1, "update_by": operator, "update_time": types.Time(now)}).Error
 	})
+}
+
+// Bind a task to one concrete approval, not merely any later approval of the same unchanged draft.
+// Existing schedule input/shape/schema stay unchanged; remark is a server-owned internal stamp.
+func cmsScheduleReviewBinding(tx *gorm.DB, kind string, id, version int64) (string, error) {
+	var p model.CMSReviewPolicy
+	if e := tx.Where("kind=?", kind).Take(&p).Error; e != nil {
+		return "", e
+	}
+	if !p.Required {
+		return "", nil
+	}
+	var row model.CMSReviewRequest
+	e := tx.Select("review_id,policy_version").Where("kind=? AND object_id=? AND content_version=? AND policy_version=? AND status='APPROVED'", kind, id, version, p.Version).Take(&row).Error
+	if errors.Is(e, gorm.ErrRecordNotFound) {
+		return "", errs.New("定时任务所需批准已失效，请重新安排")
+	}
+	if e != nil {
+		return "", e
+	}
+	return fmt.Sprintf("review:%d:policy:%d", row.ReviewId, row.PolicyVersion), nil
 }

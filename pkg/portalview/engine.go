@@ -13,7 +13,7 @@ import (
 
 var identifier = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 
-var requiredPages = []string{"home", "column", "article", "product", "page", "search", "notfound", "error"}
+var requiredPages = []string{"home", "column", "article", "product", "page", "search", "notfound", "error", "inquiry", "downloads"}
 
 // Manifest is shipped with trusted application code, never uploaded by a site administrator.
 type Manifest struct {
@@ -24,47 +24,78 @@ type Manifest struct {
 }
 
 // PageData is the initial, text-only rendering contract. Published rich text is added separately after sanitization.
+type Download struct {
+	Id                                                    int64
+	Title, Summary, Category, FileName, Extension, SHA256 string
+	Size                                                  int64
+}
+type DownloadCategory struct {
+	Id   int64
+	Name string
+}
 type PageData struct {
-	SiteName      string
-	FooterLinks   []Card
-	Icon          int64
-	FontScale     string
-	FrameWidth    string
-	Radius        string
-	Theme         string
-	ThemeVersion  string
-	Palette       string
-	Density       string
-	Footer        string
-	Phone         string
-	Email         string
-	Logo          int64
-	Links         []Card
-	Banners       []Banner
-	Sections      []Section
-	Title         string
-	Description   string
-	Body          string
-	BodyHTML      template.HTML
-	Canonical     string
-	NoIndex       bool
-	Cards         []Card
-	Articles      []Card
-	Products      []Card
-	Navigation    []Card
-	Channels      []Card
-	Query         string
-	Prev          string
-	Next          string
-	ProductCode   string
-	ProductParams string
-	Gallery       []int64
-	Cover         int64
-	CoverAlt      string
-	Author        string
+	Downloads            []Download
+	DownloadCategories   []DownloadCategory
+	DownloadCategoryId   int64
+	DownloadCategoryPrev string
+	DownloadCategoryNext string
+	ShareTitle           string
+	ShareDescription     string
+	ShareImage           string
+	ShareType            string
+	Structured           template.JS
+	Tags                 []Card
+	Related              []Card
+	ListingLayout        string
+	IsListing            bool
+	ChannelId            int64
+	SiteName             string
+	FooterLinks          []Card
+	Icon                 int64
+	FontScale            string
+	FrameWidth           string
+	Radius               string
+	Theme                string
+	ThemeVersion         string
+	Palette              string
+	Density              string
+	Footer               string
+	Phone                string
+	Email                string
+	Logo                 int64
+	Links                []Card
+	Banners              []Banner
+	Sections             []Section
+	Title                string
+	Description          string
+	Body                 string
+	BodyHTML             template.HTML
+	Canonical            string
+	NoIndex              bool
+	Cards                []Card
+	Articles             []Card
+	Products             []Card
+	Navigation           []Card
+	Channels             []Card
+	Query                string
+	Prev                 string
+	Next                 string
+	ProductCode          string
+	ProductParams        string
+	Gallery              []int64
+	Cover                int64
+	CoverAlt             string
+	Author               string
 }
 
+type WidgetItem struct {
+	Title, Text, URL string
+	AssetId          int64
+}
 type Section struct {
+	Kind       string
+	Layout     string
+	Items      []WidgetItem
 	Title, URL string
 	Cards      []Card
 }
@@ -72,7 +103,13 @@ type Banner struct {
 	Title, URL string
 	AssetId    int64
 }
+type TextPart struct {
+	Text  string
+	Match bool
+}
 type Card struct {
+	TitleParts                []TextPart
+	SummaryParts              []TextPart
 	Title, Summary, URL, Kind string
 	Cover                     *int64
 }

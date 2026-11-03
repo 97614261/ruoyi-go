@@ -16,29 +16,42 @@ type SiteBanner struct {
 	URL       string `json:"-"`
 }
 type SiteBlock struct {
-	Kind      string `json:"kind"`
+	Title        string           `json:"title,omitempty"`
+	Layout       string           `json:"layout,omitempty"`
+	Items        []SiteWidgetItem `json:"items,omitempty"`
+	FeaturedOnly bool             `json:"featuredOnly,omitempty"`
+	Kind         string           `json:"kind"`
+	ChannelId    int64            `json:"channelId"`
+	Count        int              `json:"count"`
+	Enabled      bool             `json:"enabled"`
+}
+type ChannelLayout struct {
 	ChannelId int64  `json:"channelId"`
-	Count     int    `json:"count"`
-	Enabled   bool   `json:"enabled"`
+	Layout    string `json:"layout"`
 }
 type SiteConfig struct {
-	ThemeVersion string       `json:"-"`
-	IconAssetId  int64        `json:"iconAssetId"`
-	FontScale    string       `json:"fontScale"`
-	FrameWidth   string       `json:"frameWidth"`
-	Radius       string       `json:"radius"`
-	Theme        string       `json:"theme"`
-	SiteName     string       `json:"siteName"`
-	Slogan       string       `json:"slogan"`
-	Palette      string       `json:"palette"`
-	Density      string       `json:"density"`
-	LogoAssetId  int64        `json:"logoAssetId"`
-	Footer       string       `json:"footer"`
-	Phone        string       `json:"phone"`
-	Email        string       `json:"email"`
-	Navigation   []SiteLink   `json:"navigation"`
-	Banners      []SiteBanner `json:"banners"`
-	Blocks       []SiteBlock  `json:"blocks"`
+	AnalyticsEnabled   bool            `json:"analyticsEnabled,omitempty"`
+	AnalyticsKeywords  bool            `json:"analyticsKeywords,omitempty"`
+	AnalyticsRetention int             `json:"analyticsRetention,omitempty"`
+	ListingLayout      string          `json:"listingLayout,omitempty"`
+	ChannelLayouts     []ChannelLayout `json:"channelLayouts,omitempty"`
+	ThemeVersion       string          `json:"-"`
+	IconAssetId        int64           `json:"iconAssetId"`
+	FontScale          string          `json:"fontScale"`
+	FrameWidth         string          `json:"frameWidth"`
+	Radius             string          `json:"radius"`
+	Theme              string          `json:"theme"`
+	SiteName           string          `json:"siteName"`
+	Slogan             string          `json:"slogan"`
+	Palette            string          `json:"palette"`
+	Density            string          `json:"density"`
+	LogoAssetId        int64           `json:"logoAssetId"`
+	Footer             string          `json:"footer"`
+	Phone              string          `json:"phone"`
+	Email              string          `json:"email"`
+	Navigation         []SiteLink      `json:"navigation"`
+	Banners            []SiteBanner    `json:"banners"`
+	Blocks             []SiteBlock     `json:"blocks"`
 }
 type CMSSite struct {
 	SiteId             int64  `gorm:"primaryKey"`

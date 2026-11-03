@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"ruoyi-go/internal/model"
 	"ruoyi-go/pkg/errs"
@@ -32,6 +33,27 @@ func CMSInspectionPage(ctx context.Context, pg page.Query) ([]model.CMSInspectio
 	}
 	rows := []model.CMSInspectionRow{}
 	err := q.Select("c.kind,c.slug,c.version,r.*").Order("c.content_id").Offset(pg.Offset()).Limit(pg.PageSize).Scan(&rows).Error
+	if err == nil && len(rows) > 0 {
+		ids := []int64{}
+		for _, v := range rows {
+			ids = append(ids, v.RevisionId)
+		}
+		var ops []model.CMSRevisionOps
+		if err = cmsDB(ctx).Where("revision_id IN ?", ids).Find(&ops).Error; err != nil {
+			return nil, 0, err
+		}
+		by := map[int64]*model.CMSContentOps{}
+		for _, o := range ops {
+			v := &model.CMSContentOps{}
+			if err = json.Unmarshal([]byte(o.Payload), v); err != nil {
+				return nil, 0, err
+			}
+			by[o.RevisionId] = v
+		}
+		for i := range rows {
+			rows[i].Ops = by[rows[i].RevisionId]
+		}
+	}
 	return rows, total, err
 }
 func CMSInspectionURLs(ctx context.Context) (map[string]bool, error) {

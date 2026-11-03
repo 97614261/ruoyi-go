@@ -24,11 +24,19 @@ func (p *PortalUI) decorate(d *portalview.PageData, cfg model.SiteConfig) {
 	d.FrameWidth = cfg.FrameWidth
 	d.Radius = cfg.Radius
 	d.Theme = cfg.Theme
-	if cfg.Theme == "business" {
-		d.ThemeVersion = "v3"
-	} else {
-		d.ThemeVersion = "v1"
+	d.ListingLayout = cfg.ListingLayout
+	if d.IsListing && d.ChannelId > 0 {
+		for _, o := range cfg.ChannelLayouts {
+			if o.ChannelId == d.ChannelId {
+				d.ListingLayout = o.Layout
+				break
+			}
+		}
 	}
+	if t, ok := portalview.FindBuiltinTheme(cfg.Theme); ok {
+		d.ThemeVersion = t.Version
+	}
+
 	if cfg.ThemeVersion != "" {
 		d.ThemeVersion = cfg.ThemeVersion
 	}
@@ -51,37 +59,29 @@ func (p *PortalUI) decorate(d *portalview.PageData, cfg model.SiteConfig) {
 }
 func (p *PortalUI) homeData(c *gin.Context, cfg model.SiteConfig) (portalview.PageData, error) {
 	d := portalview.PageData{Title: "首页", Description: cfg.Slogan}
-	for _, block := range cfg.Blocks {
-		if !block.Enabled {
+	rows, err := service.CMSHomeRows(c.Request.Context(), cfg.Blocks)
+	if err != nil {
+		return d, err
+	}
+	for i, b := range cfg.Blocks {
+		if !b.Enabled {
 			continue
 		}
-		r, err := service.PortalResults(c.Request.Context(), block.Kind, "", "", 0, block.Count)
-		if err != nil {
-			return d, err
+		title, path := b.Title, ""
+		if title == "" {
+			title = map[string]string{"ARTICLE": "最新动态", "PRODUCT": "产品展示", "PAGE": "了解我们", "SERVICE": "服务介绍", "ADVANTAGE": "我们的优势", "CASE": "案例展示", "PARTNER": "合作伙伴", "FAQ": "常见问题"}[b.Kind]
 		}
-		if block.ChannelId > 0 {
-			slug := ""
-			for _, ch := range r.Channels {
-				if ch.ChannelId == block.ChannelId && ch.Kind == block.Kind {
-					slug = ch.Slug
-				}
-			}
-			if slug == "" {
-				continue
-			}
-			r, err = service.PortalResults(c.Request.Context(), block.Kind, slug, "", 0, block.Count)
-			if err != nil {
-				return d, err
-			}
+		if b.Kind == "ARTICLE" {
+			path = "/news"
 		}
-		title, path := "了解我们", "/search"
-		switch block.Kind {
-		case "PRODUCT":
-			title, path = "产品展示", "/products"
-		case "ARTICLE":
-			title, path = "最新动态", "/news"
+		if b.Kind == "PRODUCT" {
+			path = "/products"
 		}
-		d.Sections = append(d.Sections, portalview.Section{Title: title, URL: path, Cards: cardRows(r.Rows)})
+		sec := portalview.Section{Title: title, URL: path, Kind: b.Kind, Layout: b.Layout, Cards: cardRows(rows[i])}
+		for _, v := range b.Items {
+			sec.Items = append(sec.Items, portalview.WidgetItem{Title: v.Title, Text: v.Text, URL: v.URL, AssetId: v.AssetId})
+		}
+		d.Sections = append(d.Sections, sec)
 	}
 	return d, nil
 }

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -34,6 +35,9 @@ func Logger() gin.HandlerFunc {
 		start := time.Now()
 		path := c.Request.URL.Path
 		query := c.Request.URL.RawQuery
+		if path == "/inquiry" || strings.HasPrefix(path, "/cms/inquiry") || strings.HasPrefix(path, "/cms/review") || strings.HasPrefix(path, "/cms/workflow") || strings.HasPrefix(path, "/cms/data") || strings.HasPrefix(path, "/cms/compare") {
+			query = ""
+		} // Contact/message accidentally sent as query must never enter request logs.
 
 		c.Next()
 

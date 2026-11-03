@@ -17,6 +17,7 @@ import (
 	"ruoyi-go/internal/config"
 	"ruoyi-go/internal/repository"
 	"ruoyi-go/pkg/redisx"
+	portalsql "ruoyi-go/sql/portal"
 )
 
 // This suite is deliberately separate from the legacy single-tenant test entry point.
@@ -29,7 +30,7 @@ func TestPortalBootstrap(t *testing.T) {
 		t.Fatal("portal private config unavailable")
 	}
 	d, e := mysql.ParseDSN(cfg.MySQL.DSN)
-	if e != nil || d.DBName != "ruoyi_go_portal" || cfg.Redis.DB != 14 || cfg.Server.Port != 8085 || !cfg.Portal.Enabled {
+	if e != nil || d.DBName != "ruoyi_go_portal" || cfg.Redis.DB != 14 || cfg.Server.Port != portalTestPort() || !cfg.Portal.Enabled {
 		t.Fatal("isolated portal target required")
 	}
 	if d.Addr != "127.0.0.1:3306" && d.Addr != "localhost:3306" {
@@ -51,7 +52,7 @@ func TestPortalBootstrap(t *testing.T) {
 	}
 	t.Run("guard_rejects_manifest_drift_and_restores", func(t *testing.T) {
 		zero := strings.Repeat("0", 64)
-		result, e := db.ExecContext(ctx, "UPDATE portal_schema_version SET structure_sha256=? WHERE version=6 AND structure_sha256=?", zero, original)
+		result, e := db.ExecContext(ctx, "UPDATE portal_schema_version SET structure_sha256=? WHERE version=? AND structure_sha256=?", zero, portalsql.CurrentVersion, original)
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -63,7 +64,7 @@ func TestPortalBootstrap(t *testing.T) {
 		restore := func() {
 			restoreCtx, restoreCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer restoreCancel()
-			result, e := db.ExecContext(restoreCtx, "UPDATE portal_schema_version SET structure_sha256=? WHERE version=6 AND structure_sha256=?", original, zero)
+			result, e := db.ExecContext(restoreCtx, "UPDATE portal_schema_version SET structure_sha256=? WHERE version=? AND structure_sha256=?", original, portalsql.CurrentVersion, zero)
 			if e != nil {
 				t.Error("manifest restore failed")
 				return
@@ -115,7 +116,7 @@ func TestPortalBootstrap(t *testing.T) {
 			}
 			data = bytes.NewReader(b)
 		}
-		req, e := http.NewRequestWithContext(ctx, method, "http://127.0.0.1:8085"+path, data)
+		req, e := http.NewRequestWithContext(ctx, method, portalTestURL()+""+path, data)
 		if e != nil {
 			t.Fatal(e)
 		}

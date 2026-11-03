@@ -22,7 +22,7 @@ func TestCMSScheduleAtomicCommit(t *testing.T) {
 	if e != nil {
 		t.Fatal("private config unavailable")
 	}
-	if !strings.Contains(cfg.MySQL.DSN, "/ruoyi_go_portal?") || cfg.Redis.DB != 14 || cfg.Server.Port != 8085 {
+	if !strings.Contains(cfg.MySQL.DSN, "/ruoyi_go_portal?") || cfg.Redis.DB != 14 || (cfg.Server.Port != 8085 && !(os.Getenv("PORTAL_TEST_PORT") == "18085" && cfg.Server.Port == 18085)) {
 		t.Fatal("isolated portal only")
 	}
 	old := db

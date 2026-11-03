@@ -31,3 +31,14 @@ func TestClientOptionsAreDerivedAndQuoted(t *testing.T) {
 		t.Fatal("client options not safely quoted")
 	}
 }
+
+func TestRecoveryExplicitAlternatePort(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Redis.DB = 14
+	cfg.Server.Port = 18085
+	cfg.Portal.ListenHost = "127.0.0.1"
+	d := &mysql.Config{Net: "tcp", Addr: "127.0.0.1:3306", DBName: "ruoyi_go_portal"}
+	if recoveryTargetAllowed(cfg, d) || !recoveryTargetAllowed(cfg, d, 18085) || recoveryTargetAllowed(cfg, d, 18086) {
+		t.Fatal("explicit alternate port guard failed")
+	}
+}

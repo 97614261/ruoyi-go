@@ -37,7 +37,7 @@ func TestPortalBoundedReadLoad(t *testing.T) {
 			client := &http.Client{Timeout: 15 * time.Second}
 			for i := range queue {
 				at := time.Now()
-				resp, e := client.Get("http://127.0.0.1:8085" + paths[i%len(paths)])
+				resp, e := client.Get(portalTestURL() + "" + paths[i%len(paths)])
 				if e != nil {
 					errs <- "transport"
 					continue

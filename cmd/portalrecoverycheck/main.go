@@ -19,8 +19,11 @@ import (
 	"regexp"
 	"ruoyi-go/internal/config"
 	"ruoyi-go/internal/repository"
+	"strconv"
 	"strings"
 	"time"
+	// Standalone trimpath tools must parse DSN IANA zones without a Go installation.
+	_ "time/tzdata"
 )
 
 func main() {
@@ -32,6 +35,7 @@ func main() {
 func run() error {
 	confirm := flag.Bool("confirm", false, "服务已停，创建全新本地恢复副本并核验；不替换现库")
 	clientDir := flag.String("mysql-bin", `C:\Program Files\MySQL\MySQL Server 5.7\bin`, "官方MySQL客户端目录")
+	listenPort := flag.Int("listen-port", 8085, "核实停止的本地门户端口，仅8085或18085")
 	flag.Parse()
 	if !*confirm {
 		fmt.Println("预览：仅本地ruoyi_go_portal，停服务后备份SQL/私有配置/素材到logs，再创建全新ruoyi_go_portal_restore_时间戳副本并校验；不会覆盖、删除或启动恢复副本。")
@@ -42,10 +46,10 @@ func run() error {
 		return fmt.Errorf("无法读取门户私有配置")
 	}
 	d, err := mysql.ParseDSN(cfg.MySQL.DSN)
-	if err != nil || !recoveryTargetAllowed(cfg, d) {
+	if err != nil || !recoveryTargetAllowed(cfg, d, *listenPort) {
 		return fmt.Errorf("仅允许本地专用门户库")
 	}
-	if conn, e := net.DialTimeout("tcp", "127.0.0.1:8085", time.Second); e == nil {
+	if conn, e := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.Server.Port)), time.Second); e == nil {
 		conn.Close()
 		return fmt.Errorf("请先停止本地门户服务")
 	}
@@ -246,8 +250,15 @@ func run() error {
 	return nil
 }
 
-func recoveryTargetAllowed(cfg *config.Config, d *mysql.Config) bool {
-	return cfg != nil && d != nil && d.Net == "tcp" && d.DBName == "ruoyi_go_portal" && (d.Addr == "127.0.0.1:3306" || d.Addr == "localhost:3306") && cfg.Redis.DB == 14 && cfg.Server.Port == 8085 && cfg.Portal.ListenHost == "127.0.0.1" && !strings.ContainsRune(d.User, 0) && !strings.ContainsRune(d.Passwd, 0)
+func recoveryTargetAllowed(cfg *config.Config, d *mysql.Config, ports ...int) bool {
+	port := 8085
+	if len(ports) > 0 {
+		port = ports[0]
+	}
+	if port != 8085 && port != 18085 {
+		return false
+	}
+	return cfg != nil && d != nil && d.Net == "tcp" && d.DBName == "ruoyi_go_portal" && (d.Addr == "127.0.0.1:3306" || d.Addr == "localhost:3306") && cfg.Redis.DB == 14 && cfg.Server.Port == port && cfg.Portal.ListenHost == "127.0.0.1" && !strings.ContainsRune(d.User, 0) && !strings.ContainsRune(d.Passwd, 0)
 }
 func recoveryClientOptions(d *mysql.Config) []byte {
 	quote := func(s string) string {

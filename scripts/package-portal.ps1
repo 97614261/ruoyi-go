@@ -19,7 +19,7 @@ try{
  }
  New-Item -ItemType Directory (Join-Path $folder 'configs'),(Join-Path $folder 'docs') -Force | Out-Null
  Copy-Item -LiteralPath configs/portal.example.yml -Destination (Join-Path $folder 'configs/portal.example.yml')
- foreach($name in @('PORTAL_DELIVERY.md','PORTAL_STEP56_ACCEPTANCE.md','PORTAL_PHASE2_PLAN.md','PORTAL_PHASE2_ACCEPTANCE.md','PORTAL_SCHEDULE_ACCEPTANCE.md')){Copy-Item -LiteralPath (Join-Path $root "docs/$name") -Destination (Join-Path $folder "docs/$name")}
+ foreach($name in @('PORTAL_DELIVERY.md','PORTAL_STEP56_ACCEPTANCE.md','PORTAL_PHASE2_PLAN.md','PORTAL_PHASE2_ACCEPTANCE.md','PORTAL_SCHEDULE_ACCEPTANCE.md','PORTAL_PHASE2_FINAL.md','PORTAL_NEXT_PHASES.md','PORTAL_PHASE3_PLAN.md','PORTAL_TRANSFER_ACCEPTANCE.md','PORTAL_PHASE4_PLAN.md','PORTAL_PHASE4_ACCEPTANCE.md','PORTAL_ASSETS_ACCEPTANCE.md','PORTAL_REDIRECT_ACCEPTANCE.md','PORTAL_AUTOSAVE_ACCEPTANCE.md','PORTAL_GROWTH_PLAN.md','PORTAL_GROWTH_ACCEPTANCE.md','PORTAL_COLLABORATION_DESIGN.md','PORTAL_COLLABORATION_ACCEPTANCE.md','PORTAL_OPERATIONS_PLAN.md','PORTAL_OPERATIONS_ACCEPTANCE.md','PORTAL_DOWNLOAD_PRESETS_PLAN.md','PORTAL_DOWNLOAD_PRESETS_ACCEPTANCE.md','PORTAL_ROADMAP_20261103.md')){Copy-Item -LiteralPath (Join-Path $root "docs/$name") -Destination (Join-Path $folder "docs/$name")}
  Copy-Item -LiteralPath (Join-Path $root '门户使用说明.md') -Destination (Join-Path $folder '使用说明.md')
  Copy-Item -LiteralPath admin-web/LICENSE -Destination (Join-Path $folder 'LICENSE.vue')
  Copy-Item -LiteralPath sql/portal/LICENSE.ruoyi -Destination (Join-Path $folder 'LICENSE.sql')

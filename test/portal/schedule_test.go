@@ -225,6 +225,9 @@ func TestCMSScheduleRestart(t *testing.T) {
 	}
 	c := cmsSetup(t)
 	file := "../../logs/portal-schedule/restart-fixture.local.json"
+	if os.Getenv("PORTAL_RESTART_TAG") == "v7-20261102" {
+		file = "../../logs/portal-phase2-final/restart-v7.local.json"
+	}
 	state := map[string]any{}
 	if mode == "prepare" {
 		if _, e := os.Stat(file); !os.IsNotExist(e) {

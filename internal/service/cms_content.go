@@ -15,7 +15,8 @@ import (
 )
 
 // CMSBody accepts local material identifiers only. Run on both write and read boundaries.
-func CMSBody(raw string) (string, []int64, error) {
+func CMSBody(raw string) (string, []int64, error) { return cmsBody(raw, false) }
+func cmsBody(raw string, allowEmpty bool) (string, []int64, error) {
 	if len(raw) > 256<<10 {
 		return "", nil, errs.New("正文最多256KiB")
 	}
@@ -72,7 +73,7 @@ func CMSBody(raw string) (string, []int64, error) {
 	if err = walk(doc); err != nil {
 		return "", nil, err
 	}
-	if !hasText && len(ids) == 0 {
+	if !allowEmpty && !hasText && len(ids) == 0 {
 		return "", nil, errs.New("请输入正文")
 	}
 	var out strings.Builder
@@ -124,30 +125,38 @@ func cmsRevision(in model.CMSDraftInput) (model.CMSRevision, []int64, error) {
 	return r, ids, nil
 }
 func CMSSaveDraft(ctx context.Context, kind string, in model.CMSDraftInput, operator string, canReadAssets bool) (int64, error) {
-	if !cmsSlug.MatchString(in.Slug) {
-		return 0, errs.New("地址仅支持小写字母开头、数字和连字符")
-	}
-	if (kind == "ARTICLE" || kind == "PRODUCT") && in.ChannelId < 1 {
-		return 0, errs.New("文章必须选择文章栏目")
-	}
-	if kind == "PAGE" && in.ChannelId != 0 {
-		return 0, errs.New("单页不能指定栏目")
-	}
-	if in.ContentId > 0 && in.Version < 1 {
-		return 0, errs.New("请提交当前版本")
-	}
-	if kind != "PRODUCT" && (in.ProductCode != "" || in.ProductParams != "" || len(in.GalleryIds) > 0) {
-		return 0, errs.New("产品字段只能用于产品展示")
-	}
-	r, ids, err := cmsRevision(in)
+	r, ids, err := cmsPrepareDraft(kind, in, canReadAssets)
 	if err != nil {
 		return 0, err
 	}
-	if len(ids) > 0 && !canReadAssets {
-		return 0, errs.WithCode(403, "引用图片需要素材查询权限")
-	}
 	return repository.CMSSaveDraft(ctx, kind, in, r, ids, operator)
 }
+func cmsPrepareDraft(kind string, in model.CMSDraftInput, canReadAssets bool) (model.CMSRevision, []int64, error) {
+	if !cmsSlug.MatchString(in.Slug) {
+		return model.CMSRevision{}, nil, errs.New("地址仅支持小写字母开头、数字和连字符")
+	}
+	if (kind == "ARTICLE" || kind == "PRODUCT") && in.ChannelId < 1 {
+		return model.CMSRevision{}, nil, errs.New("文章必须选择文章栏目")
+	}
+	if kind == "PAGE" && in.ChannelId != 0 {
+		return model.CMSRevision{}, nil, errs.New("单页不能指定栏目")
+	}
+	if in.ContentId > 0 && in.Version < 1 {
+		return model.CMSRevision{}, nil, errs.New("请提交当前版本")
+	}
+	if kind != "PRODUCT" && (in.ProductCode != "" || in.ProductParams != "" || len(in.GalleryIds) > 0) {
+		return model.CMSRevision{}, nil, errs.New("产品字段只能用于产品展示")
+	}
+	r, ids, err := cmsRevision(in)
+	if err != nil {
+		return model.CMSRevision{}, nil, err
+	}
+	if len(ids) > 0 && !canReadAssets {
+		return model.CMSRevision{}, nil, errs.WithCode(403, "引用图片需要素材查询权限")
+	}
+	return r, ids, nil
+}
+
 func CMSContentPage(ctx context.Context, kind string, q model.CMSContentQuery, pg page.Query) ([]model.CMSContentView, int64, error) {
 	return repository.CMSContentPage(ctx, kind, q, pg)
 }

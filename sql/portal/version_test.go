@@ -7,7 +7,7 @@ import (
 )
 
 func TestPortalMigrationsAreAdditiveAndVersioned(t *testing.T) {
-	if CurrentVersion != 6 {
+	if CurrentVersion != 16 {
 		t.Fatal("update migration guard test for new explicit version")
 	}
 	for version := 1; version <= CurrentVersion; version++ {
@@ -32,5 +32,29 @@ func TestPortalMigrationsAreAdditiveAndVersioned(t *testing.T) {
 	}
 	if MigrationSQL(99) != "" || SourceSHA256(99) != "" {
 		t.Fatal("unknown version allowed")
+	}
+}
+
+func TestThemeCapabilityMigrationDoesNotMutateSchemaOrGrants(t *testing.T) {
+	s := MigrationSQL(9)
+	for _, bad := range []string{"CREATE TABLE", "ALTER TABLE", "INSERT INTO sys_role_menu", "UPDATE cms_site", "DROP TABLE"} {
+		if strings.Contains(s, bad) {
+			t.Fatal("template marker changed business data or schema", bad)
+		}
+	}
+	if !strings.Contains(s, "DO 0;") {
+		t.Fatal("explicit marker missing")
+	}
+}
+
+func TestGrowthMigrationKeepsBaselineAndGrants(t *testing.T) {
+	s := MigrationSQL(13)
+	if len(regexp.MustCompile(`(?im)^CREATE TABLE `).FindAllString(s, -1)) != 4 {
+		t.Fatal("growth table count")
+	}
+	for _, bad := range []string{"ALTER TABLE sys_", "UPDATE sys_user", "INSERT INTO sys_role_menu", "DROP TABLE", "ALTER TABLE cms_content"} {
+		if strings.Contains(s, bad) {
+			t.Fatal("growth crossed boundary", bad)
+		}
 	}
 }

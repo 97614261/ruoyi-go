@@ -82,3 +82,41 @@ func (p *PortalUI) PreviewSite(c *gin.Context) {
 	c.Header("X-Robots-Tag", "noindex, nofollow")
 	response.OkData(c, map[string]any{"html": string(body)})
 }
+
+func (p *PortalUI) PreviewReviewSite(c *gin.Context) {
+	id, e := parseID(c.Param("id"))
+	if e != nil {
+		fail(c, e)
+		return
+	}
+	row, e := service.CMSReviewDetail(service.CMSActorContext(c.Request.Context(), middleware.CurrentUser(c).UserID), id)
+	if e != nil {
+		fail(c, e)
+		return
+	}
+	if row.Kind != "SITE" || row.Snapshot.Site == nil {
+		response.Fail(c, "仅支持外观送审快照")
+		return
+	}
+	cfg, e := service.CMSResolveSite(c.Request.Context(), *row.Snapshot.Site)
+	if e != nil {
+		fail(c, e)
+		return
+	}
+	c.Set("portal-site-config", cfg)
+	d, e := p.homeData(c, cfg)
+	if e != nil {
+		fail(c, e)
+		return
+	}
+	d.NoIndex = true
+	p.decorate(&d, cfg)
+	body, e := p.view.Render(cfg.Theme, "home", d)
+	if e != nil {
+		fail(c, e)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.Header("X-Robots-Tag", "noindex, nofollow")
+	response.OkData(c, map[string]any{"html": string(body)})
+}

@@ -4,6 +4,7 @@ import "ruoyi-go/pkg/types"
 
 // CmsAsset 门户私有素材。
 type CmsAsset struct {
+	GroupName      string     `gorm:"column:group_name" json:"groupName"`
 	ReferenceCount int64      `gorm:"-" json:"referenceCount"`
 	AssetId        int64      `gorm:"column:asset_id;primaryKey;autoIncrement" json:"assetId"`
 	StorageKey     string     `gorm:"column:storage_key" json:"-"`

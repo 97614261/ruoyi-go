@@ -61,6 +61,6 @@ onMounted(async () => {
 })
 watch(() => props.modelValue, value => { if (value !== emitted) load(value) })
 onBeforeUnmount(() => { alive = false; ++epoch; release(); quill?.root.removeEventListener('paste', paste, true); quill?.root.removeEventListener('drop', drop, true); quill = null })
-defineExpose({ ready: () => !loading.value && !loadFailed })
+defineExpose({ ready: () => !!quill && !loading.value && !loadFailed && !applying })
 </script>
 <style scoped>.image-tools{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap}.cms-editor{width:100%}.cms-editor :deep(.ql-editor){min-height:260px;max-height:500px}.cms-editor :deep(img){max-width:100%}.tip{font-size:12px;color:#777;margin-top:4px}</style>

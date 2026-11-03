@@ -13,6 +13,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	// Standalone trimpath tools must parse DSN IANA zones without a Go installation.
+	_ "time/tzdata"
 
 	mysql "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
@@ -41,7 +43,7 @@ func run() error {
 	confirm := flag.Bool("confirm", false, "显式创建全新 ruoyi_go_portal，不允许复用/重置已有库")
 	flag.Parse()
 	if !*confirm {
-		fmt.Printf("预览：只可新建本地 ruoyi_go_portal，导入20张单租户基线表和8张CMS表并记录结构版本6；SQL SHA256=%s；未连接数据库。\n", portalsql.BaselineSHA256())
+		fmt.Printf("预览：只可新建本地 ruoyi_go_portal，导入单租户基线和当前CMS表并记录结构版本%d；SQL SHA256=%s；未连接数据库。\n", portalsql.CurrentVersion, portalsql.BaselineSHA256())
 		return nil
 	}
 	if *source == "" {
@@ -213,6 +215,6 @@ func run() error {
 	if err = os.Remove("logs/portal-install.pending.local.json"); err != nil {
 		return err
 	}
-	fmt.Println("新门户库安装并只读结构核验通过；20张基线表+8张CMS表+1张版本表；配置和新账号已保存至忽略文件，未输出密码。旧库未写入。")
+	fmt.Printf("新门户库v%d安装并只读结构核验通过；配置和新账号已保存至忽略文件，未输出密码。旧库未写入。\n", portalsql.CurrentVersion)
 	return nil
 }

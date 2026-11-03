@@ -18,7 +18,7 @@ import (
 
 func (c *cmsClient) public(path string, modified string) (int, string, string) {
 	c.t.Helper()
-	req, _ := http.NewRequest("GET", "http://127.0.0.1:8085"+path, nil)
+	req, _ := http.NewRequest("GET", portalTestURL()+""+path, nil)
 	if modified != "" {
 		req.Header.Set("If-Modified-Since", modified)
 	}
@@ -129,7 +129,7 @@ func TestCMSContentLifecycle(t *testing.T) {
 			}
 			input["title"] = fmt.Sprintf("并发新稿%d", i)
 			b, _ := json.Marshal(input)
-			req, _ := http.NewRequest("PUT", "http://127.0.0.1:8085/cms/article", bytes.NewReader(b))
+			req, _ := http.NewRequest("PUT", portalTestURL()+"/cms/article", bytes.NewReader(b))
 			req.Header.Set("Authorization", "Bearer "+c.admin)
 			req.Header.Set("Content-Type", "application/json")
 			resp, e := c.http.Do(req)

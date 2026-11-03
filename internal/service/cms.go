@@ -131,6 +131,10 @@ func CMSDeleteChannel(ctx context.Context, id, version int64) error {
 }
 
 func CMSAssetPage(ctx context.Context, q model.CMSAssetQuery, pg page.Query) ([]model.CmsAsset, int64, error) {
+	q, err := cmsAssetQuery(q)
+	if err != nil {
+		return nil, 0, err
+	}
 	return repository.CMSAssetPage(ctx, q, pg)
 }
 func CMSAssetDetail(ctx context.Context, id int64) (*model.CmsAsset, error) {
@@ -138,6 +142,13 @@ func CMSAssetDetail(ctx context.Context, id int64) (*model.CmsAsset, error) {
 }
 func CMSUpdateAsset(ctx context.Context, id int64, in model.CMSAssetInput, operator string) error {
 	in.Name = strings.TrimSpace(in.Name)
+	if in.GroupName != nil {
+		value, err := cmsAssetGroup(*in.GroupName)
+		if err != nil {
+			return err
+		}
+		in.GroupName = &value
+	}
 	if in.Name == "" {
 		return errs.New("素材名称不能为空")
 	}
@@ -159,6 +170,13 @@ func (w *cmsLimitedImage) Write(b []byte) (int, error) {
 	return w.buf.Write(b)
 }
 func CMSUploadAsset(ctx context.Context, input io.Reader, name, operator string) (*model.CmsAsset, error) {
+	return CMSUploadGroupedAsset(ctx, input, name, operator, "")
+}
+func CMSUploadGroupedAsset(ctx context.Context, input io.Reader, name, operator, group string) (*model.CmsAsset, error) {
+	group, groupErr := cmsAssetGroup(group)
+	if groupErr != nil {
+		return nil, groupErr
+	}
 	select {
 	case cmsUploadSlots <- struct{}{}:
 		defer func() { <-cmsUploadSlots }()
@@ -232,7 +250,7 @@ func CMSUploadAsset(ctx context.Context, input io.Reader, name, operator string)
 		}
 		return nil, closeErr
 	}
-	row := &model.CmsAsset{StorageKey: key, Name: name, MimeType: mimeType, ByteSize: int64(encoded.buf.Len()), Width: config.Width, Height: config.Height, Version: 1, CreateBy: operator, CreateTime: types.Now()}
+	row := &model.CmsAsset{GroupName: group, StorageKey: key, Name: name, MimeType: mimeType, ByteSize: int64(encoded.buf.Len()), Width: config.Width, Height: config.Height, Version: 1, CreateBy: operator, CreateTime: types.Now()}
 	if err = repository.CMSInsertAsset(ctx, row); err != nil {
 		_ = os.Remove(path)
 		return nil, err

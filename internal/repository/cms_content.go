@@ -9,6 +9,7 @@ import (
 	"ruoyi-go/pkg/errs"
 	"ruoyi-go/pkg/page"
 	"ruoyi-go/pkg/types"
+	"strconv"
 )
 
 // Do not expand draft HTML into slow/error SQL logs. Keep the normal logger and timings.
@@ -35,6 +36,9 @@ func cmsFindContent(tx *gorm.DB, kind string, id int64) (model.CMSContent, error
 }
 func CMSContentPage(ctx context.Context, kind string, q model.CMSContentQuery, pg page.Query) ([]model.CMSContentView, int64, error) {
 	db := cmsDB(ctx).Table("cms_content c").Joins("JOIN cms_content_revision r ON r.revision_id=c.working_revision_id AND r.content_id=c.content_id").Where("c.kind=? AND c.is_deleted=0", kind)
+	if q.Deleted {
+		db = cmsDB(ctx).Table("cms_content c").Joins("JOIN cms_content_revision r ON r.revision_id=c.working_revision_id AND r.content_id=c.content_id").Where("c.kind=? AND c.is_deleted=1", kind)
+	}
 	if q.Title != "" {
 		db = db.Where("r.title LIKE ?", q.Title+"%")
 	}
@@ -59,6 +63,9 @@ func CMSContentDetail(ctx context.Context, kind string, id int64) (*model.CMSCon
 		return nil, errs.New("草稿版本缺失")
 	}
 	if err = cmsDB(ctx).Where("content_id=? AND revision_id=?", id, *c.WorkingRevisionId).Take(&r).Error; err != nil {
+		return nil, err
+	}
+	if err = cmsAttachOps(cmsDB(ctx), &r); err != nil {
 		return nil, err
 	}
 	return &model.CMSContentDetail{CMSContent: c, Draft: r}, nil
@@ -144,6 +151,20 @@ func cmsRevisionValid(tx *gorm.DB, kind string, r model.CMSRevision, ids []int64
 	return nil
 }
 func cmsAppendRevision(tx *gorm.DB, c *model.CMSContent, r model.CMSRevision, ids []int64, operator string) error {
+	source := r.RevisionId
+	if source == 0 && c.WorkingRevisionId != nil {
+		source = *c.WorkingRevisionId
+	}
+	if r.Ops == nil {
+		r.RevisionId = source
+		if e := cmsAttachOps(tx, &r); e != nil {
+			return e
+		}
+	}
+	ids = opsAsset(ids, r.Ops)
+	if e := cmsRevisionValid(tx, c.Kind, r, ids, false); e != nil {
+		return e
+	}
 	r.RevisionId = 0
 	r.ContentId = c.ContentId
 	r.RevisionNo = c.RevisionSeq + 1
@@ -152,6 +173,12 @@ func cmsAppendRevision(tx *gorm.DB, c *model.CMSContent, r model.CMSRevision, id
 	r.UpdateBy = ""
 	r.UpdateTime = types.Time{}
 	if err := tx.Create(&r).Error; err != nil {
+		return err
+	}
+	if err := cmsRecordDraftActor(tx, c.Kind, c.ContentId, strconv.FormatInt(r.RevisionId, 10), operator); err != nil {
+		return err
+	}
+	if err := cmsStoreOps(tx, r, operator); err != nil {
 		return err
 	}
 	if len(ids) > 0 {
@@ -167,37 +194,46 @@ func cmsAppendRevision(tx *gorm.DB, c *model.CMSContent, r model.CMSRevision, id
 }
 func CMSSaveDraft(ctx context.Context, kind string, in model.CMSDraftInput, r model.CMSRevision, ids []int64, operator string) (int64, error) {
 	var id int64
-	err := cmsLocked(ctx, func(tx *gorm.DB) error {
-		if err := cmsRevisionValid(tx, kind, r, ids, false); err != nil {
-			return err
-		}
-		c := model.CMSContent{Kind: kind, Slug: in.Slug, Version: 1, CreateBy: operator, CreateTime: types.Now()}
-		if in.ContentId == 0 {
-			if err := tx.Create(&c).Error; err != nil {
-				return cmsContentDuplicate(err)
-			}
-		} else {
-			var err error
-			c, err = cmsFindContent(tx, kind, in.ContentId)
-			if err != nil {
-				return err
-			}
-			if c.Version != in.Version {
-				return errs.New("内容已变化，请刷新后重试")
-			}
-			if c.EverPublished != 0 && c.Slug != in.Slug {
-				return errs.New("首次发布后不能修改访问地址")
-			}
-			if c.Slug != in.Slug {
-				if err = tx.Model(&model.CMSContent{}).Where("content_id=?", c.ContentId).Update("slug", in.Slug).Error; err != nil {
-					return cmsContentDuplicate(err)
-				}
-			}
-		}
-		id = c.ContentId
-		return cmsAppendRevision(tx, &c, r, ids, operator)
-	})
+	err := cmsLocked(ctx, func(tx *gorm.DB) error { var e error; id, e = cmsSaveDraftTx(tx, kind, in, r, ids, operator); return e })
 	return id, err
+}
+func cmsSaveDraftTx(tx *gorm.DB, kind string, in model.CMSDraftInput, r model.CMSRevision, ids []int64, operator string) (int64, error) {
+	if e := cmsRevisionValid(tx, kind, r, ids, false); e != nil {
+		return 0, e
+	}
+	c := model.CMSContent{Kind: kind, Slug: in.Slug, Version: 1, CreateBy: operator, CreateTime: types.Now()}
+	if in.ContentId == 0 {
+		if e := cmsContentPathAvailable(tx, kind, in.Slug); e != nil {
+			return 0, e
+		}
+		if e := tx.Create(&c).Error; e != nil {
+			return 0, cmsContentDuplicate(e)
+		}
+	} else {
+		var e error
+		c, e = cmsFindContent(tx, kind, in.ContentId)
+		if e != nil {
+			return 0, e
+		}
+		if c.Version != in.Version {
+			return 0, errs.New("内容已变化，请刷新后重试")
+		}
+		if c.EverPublished != 0 && c.Slug != in.Slug {
+			return 0, errs.New("首次发布后不能修改访问地址")
+		}
+		if c.Slug != in.Slug {
+			if e = cmsContentPathAvailable(tx, kind, in.Slug); e != nil {
+				return 0, e
+			}
+			if e = tx.Model(&model.CMSContent{}).Where("content_id=?", c.ContentId).Update("slug", in.Slug).Error; e != nil {
+				return 0, cmsContentDuplicate(e)
+			}
+		}
+	}
+	if e := cmsAppendRevision(tx, &c, r, ids, operator); e != nil {
+		return 0, e
+	}
+	return c.ContentId, nil
 }
 func cmsContentDuplicate(err error) error {
 	mapped := cmsDuplicate(err)
@@ -251,7 +287,11 @@ func cmsChangeContentTx(tx *gorm.DB, kind string, id int64, in model.CMSContentA
 		} else if err != nil {
 			return err
 		}
+		if err = cmsAttachOps(tx, &r); err != nil {
+			return err
+		}
 		body, ids, err := normalize(r)
+		ids = opsAsset(ids, r.Ops)
 		if err != nil {
 			return err
 		}
@@ -265,19 +305,31 @@ func cmsChangeContentTx(tx *gorm.DB, kind string, id int64, in model.CMSContentA
 		if action == "restore" {
 			return cmsAppendRevision(tx, &c, r, ids, operator)
 		}
+		if e := cmsRequireApproval(tx, kind, id, true); e != nil {
+			return e
+		}
 		changes["published_revision_id"] = *revision
 		changes["is_published"] = 1
 		changes["ever_published"] = 1
 		changes["published_at"] = types.Now()
 	case "unpublish":
+		if e := cmsInvalidateReview(tx, []string{kind}, id, "内容已下架，原审核失效"); e != nil {
+			return e
+		}
 		changes["is_published"] = 0
 	case "remove":
+		if e := cmsInvalidateReview(tx, []string{kind}, id, "内容已删除，原审核失效"); e != nil {
+			return e
+		}
 		changes["is_published"] = 0
 		changes["is_deleted"] = 1
 	default:
 		return errs.New("不支持的内容操作")
 	}
-	return tx.Model(&model.CMSContent{}).Where("content_id=? AND version=?", id, c.Version).Updates(changes).Error
+	if e := tx.Model(&model.CMSContent{}).Where("content_id=? AND version=?", id, c.Version).Updates(changes).Error; e != nil {
+		return e
+	}
+	return cmsQueueSearch(tx, id)
 }
 
 func cmsPublished(tx *gorm.DB, active []int64) *gorm.DB {
@@ -293,6 +345,9 @@ func CMSPublishedContent(ctx context.Context, kind, slug string) (*model.CMSRevi
 	err = cmsPublished(tx, active).Select("r.*").Where("c.kind=? AND c.slug=?", kind, slug).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, errs.ErrNotFound
+	}
+	if err == nil {
+		err = cmsAttachOps(tx, &row)
 	}
 	return &row, err
 }

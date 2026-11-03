@@ -24,26 +24,27 @@ type CMSContent struct {
 func (CMSContent) TableName() string { return "cms_content" }
 
 type CMSRevision struct {
-	ProductCode    string     `json:"productCode"`
-	ProductParams  string     `json:"productParams"`
-	GalleryIds     []int64    `gorm:"serializer:json" json:"galleryIds"`
-	RevisionId     int64      `gorm:"primaryKey" json:"revisionId"`
-	ContentId      int64      `json:"contentId"`
-	RevisionNo     int        `json:"revisionNo"`
-	ChannelId      *int64     `json:"channelId"`
-	Title          string     `json:"title"`
-	Summary        string     `json:"summary"`
-	BodyHTML       string     `gorm:"column:body_html" json:"bodyHtml"`
-	Author         string     `json:"author"`
-	CoverAssetId   *int64     `json:"coverAssetId"`
-	CoverAltText   string     `json:"coverAltText"`
-	SeoTitle       string     `json:"seoTitle"`
-	SeoDescription string     `json:"seoDescription"`
-	CreateBy       string     `json:"createBy"`
-	CreateTime     types.Time `json:"createTime"`
-	UpdateBy       string     `json:"updateBy"`
-	UpdateTime     types.Time `json:"updateTime"`
-	Remark         string     `json:"remark"`
+	Ops            *CMSContentOps `gorm:"-" json:"-"`
+	ProductCode    string         `json:"productCode"`
+	ProductParams  string         `json:"productParams"`
+	GalleryIds     []int64        `gorm:"serializer:json" json:"galleryIds"`
+	RevisionId     int64          `gorm:"primaryKey" json:"revisionId"`
+	ContentId      int64          `json:"contentId"`
+	RevisionNo     int            `json:"revisionNo"`
+	ChannelId      *int64         `json:"channelId"`
+	Title          string         `json:"title"`
+	Summary        string         `json:"summary"`
+	BodyHTML       string         `gorm:"column:body_html" json:"bodyHtml"`
+	Author         string         `json:"author"`
+	CoverAssetId   *int64         `json:"coverAssetId"`
+	CoverAltText   string         `json:"coverAltText"`
+	SeoTitle       string         `json:"seoTitle"`
+	SeoDescription string         `json:"seoDescription"`
+	CreateBy       string         `json:"createBy"`
+	CreateTime     types.Time     `json:"createTime"`
+	UpdateBy       string         `json:"updateBy"`
+	UpdateTime     types.Time     `json:"updateTime"`
+	Remark         string         `json:"remark"`
 }
 
 func (CMSRevision) TableName() string { return "cms_content_revision" }
@@ -77,6 +78,7 @@ type CMSDraftInput struct {
 	Remark         string  `json:"remark" binding:"xss,max=500"`
 }
 type CMSContentQuery struct {
+	Deleted   bool   `form:"-" json:"-"`
 	Title     string `form:"title" binding:"max=120"`
 	Published *int   `form:"published" binding:"omitempty,oneof=0 1"`
 }
