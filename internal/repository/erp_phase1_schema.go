@@ -142,7 +142,7 @@ func inspectERPCreateSchema(q *gorm.DB, manifest []phase1Table, version, hash st
 	}
 	var foreign []phase1ActualFK
 	if err = q.Raw(`SELECT table_name,constraint_name,column_name,referenced_table_name,referenced_column_name,ordinal_position,(referenced_table_schema=DATABASE()) AS same_schema
- FROM information_schema.key_column_usage WHERE constraint_schema=DATABASE() AND referenced_table_name IS NOT NULL AND table_name IN ? ORDER BY table_name,constraint_name,ordinal_position`, names).Scan(&foreign).Error; err != nil {
+ FROM information_schema.key_column_usage WHERE constraint_schema=DATABASE() AND table_schema=DATABASE() AND referenced_table_name IS NOT NULL AND table_name IN ? ORDER BY table_name,constraint_name,ordinal_position`, names).Scan(&foreign).Error; err != nil {
 		return nil, err
 	}
 	// MySQL 5.7 materializes metadata joins poorly when many restore databases

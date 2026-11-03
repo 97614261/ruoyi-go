@@ -85,7 +85,7 @@ func VerifyERPControls(ctx context.Context) error {
 		ReferencedColumnName string
 		OrdinalPosition      int
 	}
-	if err := q.Raw("SELECT table_name,constraint_name,column_name,referenced_table_name,referenced_column_name,ordinal_position FROM information_schema.key_column_usage WHERE constraint_schema=DATABASE() AND referenced_table_name IS NOT NULL AND table_name IN ('erp_document','erp_warehouse_access','erp_warehouse_policy') ORDER BY table_name,constraint_name,ordinal_position").Scan(&foreignKeys).Error; err != nil {
+	if err := q.Raw("SELECT table_name,constraint_name,column_name,referenced_table_name,referenced_column_name,ordinal_position FROM information_schema.key_column_usage WHERE constraint_schema=DATABASE() AND table_schema=DATABASE() AND referenced_table_name IS NOT NULL AND table_name IN ('erp_document','erp_warehouse_access','erp_warehouse_policy') ORDER BY table_name,constraint_name,ordinal_position").Scan(&foreignKeys).Error; err != nil {
 		return err
 	}
 	fkCols := map[string]string{}

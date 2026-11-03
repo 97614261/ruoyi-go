@@ -7,7 +7,7 @@
    <el-form-item label="供应商" v-if="can('erp:supplier:list')"><PurchasingReferenceSelect kind="supplier" v-model="query.supplierId" /></el-form-item>
    <el-form-item label="状态"><el-select v-model="query.status" clearable ><el-option v-for="(name,status) in purchaseStates" :key="status" :label="name" :value="status"/></el-select></el-form-item>
    <el-form-item><el-checkbox v-model="query.awaitingReceipt" >只看尚待收货</el-checkbox></el-form-item>
-   <template #toolbar><el-button type="primary" v-if="can('erp:purchase:add')" :disabled="busy||opening||closing" @click="start">新建采购单</el-button></template>
+   <template #toolbar><el-button type="primary" v-if="can('erp:purchase:add')" :disabled="busy||opening||closing" @click="start">新建采购单</el-button><el-button v-if="canReplenish" :disabled="locked" @click="replenishOpen=true">补货建议</el-button></template>
   </ERPQueryBar>
   <el-alert v-if="listError" title="采购列表读取失败，请重试；并非零条数据。" type="error" :closable="false"/>
   <el-alert v-if="lastResult" :title="'操作成功：采购 #'+lastResult.purchaseId+' · '+purchaseStates[lastResult.status]+' · v'+lastResult.version" type="success" :closable="true" @close="lastResult=null"/>
@@ -28,10 +28,12 @@
    <template v-else><p>{{form.purchaseNo}} · 当前v{{form.version}}</p><el-alert :title="mode==='confirm'?'确认后冻结报价及快照，尚不入库。':mode==='close'?'关闭未收余量，不回滚已收库存，也不会标记为付款。':'只能取消未收货采购单，取消后不可重新打开。'" type="warning" :closable="false"/><el-input v-if="mode!=='confirm'" class="mt8" v-model="form.reason" type="textarea" maxlength="500" placeholder="必填原因（不换行）" :disabled="busy||!!pending"/></template>
    <template #footer><el-button :disabled="busy" @click="closeDialog">{{mode==='detail'?'关闭':'关闭 / 放弃本次重试'}}</el-button><el-button v-if="mode!=='detail'" type="primary" :loading="busy" @click="submit">{{pending?'沿用原请求重试':mode==='create'||mode==='edit'?'保存草稿':purchaseActions[mode]}}</el-button></template>
   </el-dialog>
+  <ReplenishmentPanel v-if="canReplenish" v-model="replenishOpen" @created="replenished" />
  </div>
 </template>
 <script setup name="PurchaseWorkspace">
 import ERPQueryBar from './ERPQueryBar.vue'
+import ReplenishmentPanel from './ReplenishmentPanel.vue'
 import { resetERPQuery } from '@/utils/erp-query.mjs'
 
 import {ref,reactive,computed,watch,onBeforeUnmount,onDeactivated,onActivated} from 'vue'
@@ -42,6 +44,8 @@ import {listPurchases,getPurchase,purchaseEvents,addPurchase,editPurchase,actPur
 import {purchaseStates,purchaseActions,purchasePayload,purchasePreview,immutablePayload,safeID} from '@/utils/purchasing.mjs'
 import PurchasingReferenceSelect from './PurchasingReferenceSelect.vue'
 const router=useRouter(),route=useRoute(),can=p=>checkPermi([p]),canEdit=computed(()=>can('erp:purchase:edit')&&can('erp:purchase:query'))
+const replenishOpen=ref(false),canReplenish=computed(()=>can('erp:stock:list')&&can('erp:purchase:list')&&can('erp:warehouse:list'))
+function replenished(result){lastResult.value=result;return load()}
 const rows=ref([]),total=ref(0),loading=ref(false),listError=ref(false),lastResult=ref(null),open=ref(false),closing=ref(false),opening=ref(false),busy=ref(false),mode=ref('detail'),form=ref({lines:[]}),pending=ref(null),error=ref(''),events=ref([]),eventsTotal=ref(0),eventsError=ref(false),eventPage=ref(1)
 const query=reactive({pageNum:1,pageSize:10,purchaseNo:'',status:'',awaitingReceipt:false,warehouseId:undefined,supplierId:undefined}),locked=computed(()=>busy.value||opening.value||closing.value),title=computed(()=>({create:'新建采购单',edit:'编辑采购草稿',detail:'采购单详情 · 冻结快照'}[mode.value]||purchaseActions[mode.value])),preview=computed(()=>{try{return purchasePreview(form.value.lines||[])}catch{return{}}}),supplierSeed=computed(()=>form.value.supplierId?[{supplierId:form.value.supplierId,supplierName:form.value.supplierName}]:[]),warehouseSeed=computed(()=>form.value.warehouseId?[{warehouseId:form.value.warehouseId,warehouseName:form.value.warehouseName}]:[])
 let listSeq=0,detailSeq=0,eventSeq=0,viewSeq=0,inactive=false
@@ -59,7 +63,7 @@ async function submit(){if(inactive)return;if(busy.value||!open.value||mode.valu
 function closed(){if(open.value)return;closing.value=true;++detailSeq;++eventSeq;form.value={lines:[]};pending.value=null;error.value='';events.value=[];eventsTotal.value=0;opening.value=false}
 function closeDialog(){if(busy.value)return;closing.value=true;open.value=false;closed()}
 function beforeClose(done){if(busy.value)return;closeDialog();done()}
-function clear(){busy.value=false;++viewSeq;++listSeq;++detailSeq;++eventSeq;open.value=false;form.value={lines:[]};pending.value=null;events.value=[];rows.value=[];total.value=0;opening.value=false;loading.value=false;lastResult.value=null}
+function clear(){replenishOpen.value=false;busy.value=false;++viewSeq;++listSeq;++detailSeq;++eventSeq;open.value=false;form.value={lines:[]};pending.value=null;events.value=[];rows.value=[];total.value=0;opening.value=false;loading.value=false;lastResult.value=null}
 function openLink(){if(inactive)return;const id=safeID(route.query.purchaseId);if(id&&can('erp:purchase:query'))return show({purchaseId:id},'detail')}
 watch(()=>route.query.purchaseId,openLink)
 onBeforeUnmount(()=>{inactive=true;clear()});onDeactivated(()=>{inactive=true;clear()});onActivated(()=>{if(inactive){inactive=false;closing.value=false;const pendingLoad=applyAwaitingLink()&&can('erp:purchase:list')?load():undefined;openLink();return pendingLoad}})

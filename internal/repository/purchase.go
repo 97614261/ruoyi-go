@@ -202,6 +202,9 @@ func purchaseDraftLines(tx *gorm.DB, p *model.ERPPurchase, s model.ErpSupplier, 
 	return nil
 }
 func CreateERPPurchase(ctx context.Context, in model.ERPPurchaseWrite, hash, operator string) (*model.ERPPurchaseResult, error) {
+	return createERPPurchase(ctx, in, hash, operator, nil)
+}
+func createERPPurchase(ctx context.Context, in model.ERPPurchaseWrite, hash, operator string, guard func(*gorm.DB) error) (*model.ERPPurchaseResult, error) {
 	var out *model.ERPPurchaseResult
 	e := erpError(erpTransaction(ctx, func(tx *gorm.DB) error {
 		if e := lockERPActor(tx); e != nil {
@@ -235,6 +238,11 @@ func CreateERPPurchase(ctx context.Context, in model.ERPPurchaseWrite, hash, ope
 		p := model.ERPPurchase{ERPRecord: model.ERPRecord{CreateBy: operator, CreateTime: types.Now(), Remark: in.Remark}, PurchaseNo: "P" + uuid.NewString(), SupplierID: in.SupplierID, WarehouseID: in.WarehouseID, Currency: in.Currency, Status: "DRAFT", Version: 1, CreateRequestKey: in.RequestKey, CreateRequestHash: hash}
 		if e = purchaseDraftLines(tx, &p, supplier, in, operator); e != nil {
 			return e
+		}
+		if guard != nil {
+			if e = guard(tx); e != nil {
+				return e
+			}
 		}
 		if e = tx.Omit("Lines").Create(&p).Error; e != nil {
 			return e
@@ -360,6 +368,12 @@ func ActERPPurchase(ctx context.Context, id int64, action string, in model.ERPPu
 			return errs.New("采购版本已变化或到达上限")
 		}
 		old := p
+		// Cancellation/close change incoming plans: serialize with draft creation and stock/alert writers.
+		if action == "CANCEL" || action == "CLOSE" {
+			if _, _, e = lockERPReferences(tx, p.WarehouseID, nil, false); e != nil {
+				return e
+			}
+		}
 		switch action {
 		case "CONFIRM":
 			if p.Status != "DRAFT" {

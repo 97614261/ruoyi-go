@@ -189,3 +189,6 @@ PUT	/erp/supplier/:supplierId	erp:supplier:edit	employee
 PUT	/erp/transfer/:id	erp:transfer:edit	employee
 PUT	/erp/warehouse	erp:warehouse:edit	employee
 PUT	/erp/warehouse/access/:userId	erp:warehouse:grant	employee
+
+GET	/erp/replenishment/list	erp:stock:list,erp:purchase:list	employee
+POST	/erp/replenishment	erp:stock:list,erp:purchase:list,erp:purchase:add	employee

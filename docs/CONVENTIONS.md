@@ -1134,3 +1134,12 @@ before-close保持原取消写法：不调用done也可以取消；返回Promise
 模板el-dialog默认标题栏可鼠标拖拽，沿原生视口限制；显式:draggable="false"可按窗关闭，最大化由原生禁拖。动作区不把mousedown冒泡给拖动手柄。仅真正新开时重置位置，最小化恢复不复位或重建表单。拖拽与window-controls开关独立，确认提示/抽屉不纳入；见[全局弹窗](./GLOBAL_DIALOG.md)。
 
 全局Editor注册必须从components/Editor/async.mjs进入，不在main.js静态导入Editor/index.vue或Quill；仅挂载使用Editor的页面时加载实现。修改注册入口须检查生产入口的静态依赖图，不得把压缩包大小变化等同于首屏耗时或全站总下载减少。原编辑器的模型和上传规则不由异步入口重写；加载状态与有界失败在异步入口处理。
+
+
+## 采购补货建议
+
+补货入口位于原采购页面，不增加权限别名或自动授权。GET /erp/replenishment/list需stock:list＋purchase:list，POST /erp/replenishment再需purchase:add；均使用当前企业身份与实时仓库范围。列表必选仓库、每页最多100，基于已配置且非null的预警，包含余额行尚未创建的组合，不生成仓库×SKU笛卡尔积。
+
+预警在available<=threshold时触发，最小解除目标为threshold+1。缺口=max(0,目标−可用−草稿采购量−已确认未收量)；取消/关闭/收齐不计在途，退货不反写历史毛收货。建议每行封顶原采购十亿数量限制，实际量与价格由用户确认。
+
+生成草稿须在actor→supplier→warehouse→sorted SKU锁下重算并比对basis；原请求重放先校验当前范围，再返回既有CREATE结果，不因当前缺口为0拒绝已提交请求的重放。取消/关闭也取得仓库锁，避免数量统计与创建交叉。新增聚合按页一次读取，不逐行查采购；不返回历史价格或供应商私密字段。
