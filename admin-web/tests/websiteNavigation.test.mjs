@@ -1,0 +1,12 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import {websiteNavigation,menuPath,websiteRouteTitles} from '../src/utils/websiteNavigation.mjs'
+import {statusChoices} from '../src/utils/cmsOptions.mjs'
+const leaf=path=>({path,meta:{title:path},permissions:['scope:'+path]})
+const leaves=nodes=>nodes.flatMap(r=>r.children?leaves(r.children):[r.path])
+test('groups existing routes without mutating router or widening access',()=>{const input=[{path:'/cms',meta:{title:'CMS'},children:['article','site','presets','asset','search-index','custom'].map(leaf)}],before=JSON.stringify(input);const result=websiteNavigation(input);assert.equal(JSON.stringify(input),before);assert.deepEqual(leaves(result).sort(),['/cms/article','/cms/site','/cms/asset','/cms/search-index','/cms/custom'].sort());assert.equal(result[0].children[0].children[0].permissions[0],'scope:article')})
+test('presets remains discoverable when site route is not granted',()=>{const result=websiteNavigation([{path:'/cms',children:[leaf('presets')]}]);assert.deepEqual(leaves(result),['/cms/presets'])})
+test('hidden records stay hidden and unknown authorized modules survive',()=>{const result=websiteNavigation([{path:'/cms',children:[{...leaf('article'),hidden:true},leaf('extension')]}]);const all=result[0].children;assert(all.some(r=>r.path==='/cms/article'&&r.hidden));assert(all.some(r=>r.path==='/cms/extension'));assert(!all.some(r=>r.path==='/__website/content'))})
+test('absolute submenu paths and external links resolve correctly',()=>{assert.equal(menuPath('/__website/content','/cms/article'),'/cms/article');assert.equal(menuPath('/cms','article'),'/cms/article');assert.equal(menuPath('/cms','https://example.invalid'),'https://example.invalid');assert.equal(menuPath('/cms/','article'),'/cms/article');assert.equal(menuPath('/cms/article',''),'/cms/article')})
+test('dictionary changes labels without inventing server status codes',()=>{assert.deepEqual(statusChoices([{value:'1',label:'禁用'},{value:'2',label:'new'}]),[{value:'0',label:'启用'},{value:'1',label:'禁用'}])})
+test('breadcrumb titles change without altering URLs, components or permissions',()=>{const input=[{path:'/cms',meta:{title:'门户管理'},children:[leaf('site')]}];const result=websiteRouteTitles(input);assert.equal(result[0].meta.title,'网站管理');assert.equal(result[0].children[0].meta.title,'模板与外观');assert.equal(result[0].children[0].path,'site');assert.equal(input[0].meta.title,'门户管理')})

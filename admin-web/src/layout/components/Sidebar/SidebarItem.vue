@@ -30,7 +30,7 @@
 <script setup>
 import { isExternal } from '@/utils/validate'
 import AppLink from './Link'
-import { getNormalPath } from '@/utils/ruoyi'
+import { menuPath } from '@/utils/websiteNavigation.mjs'
 
 const props = defineProps({
   // route object
@@ -85,9 +85,9 @@ function resolvePath(routePath, routeQuery) {
   }
   if (routeQuery) {
     let query = JSON.parse(routeQuery)
-    return { path: getNormalPath(props.basePath + '/' + routePath), query: query }
+    return { path: menuPath(props.basePath, routePath), query: query }
   }
-  return getNormalPath(props.basePath + '/' + routePath)
+  return menuPath(props.basePath, routePath)
 }
 
 function hasTitle(title){

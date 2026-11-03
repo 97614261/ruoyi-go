@@ -77,6 +77,9 @@ func (p *PortalUI) homeData(c *gin.Context, cfg model.SiteConfig) (portalview.Pa
 		if b.Kind == "PRODUCT" {
 			path = "/products"
 		}
+		if b.URL != "" {
+			path = b.URL
+		}
 		sec := portalview.Section{Title: title, URL: path, Kind: b.Kind, Layout: b.Layout, Cards: cardRows(rows[i])}
 		for _, v := range b.Items {
 			sec.Items = append(sec.Items, portalview.WidgetItem{Title: v.Title, Text: v.Text, URL: v.URL, AssetId: v.AssetId})

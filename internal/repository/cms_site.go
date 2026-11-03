@@ -258,6 +258,32 @@ func CMSRawPublishedSite(ctx context.Context) (model.SiteConfig, error) {
 }
 func CMSResolveSite(ctx context.Context, cfg model.SiteConfig) (model.SiteConfig, error) {
 	_, ids := siteReferences(cfg)
+	// Resolve each section's "more" link in one batch, including repeated kinds.
+	channelIDs := []int64{}
+	for _, b := range cfg.Blocks {
+		if b.ChannelId > 0 {
+			channelIDs = append(channelIDs, b.ChannelId)
+		}
+	}
+	channelLinks := map[int64]model.CmsChannel{}
+	if len(channelIDs) > 0 {
+		var rows []model.CmsChannel
+		if e := cmsDB(ctx).Select("channel_id,kind,slug").Where("channel_id IN ? AND status='0'", channelIDs).Find(&rows).Error; e != nil {
+			return cfg, e
+		}
+		for _, row := range rows {
+			channelLinks[row.ChannelId] = row
+		}
+	}
+	for i, b := range cfg.Blocks {
+		if ch, ok := channelLinks[b.ChannelId]; ok && ch.Kind == b.Kind {
+			prefix := "/news/c/"
+			if b.Kind == "PRODUCT" {
+				prefix = "/products/c/"
+			}
+			cfg.Blocks[i].URL = prefix + ch.Slug
+		}
+	}
 	links := map[int64]string{}
 	if len(ids) > 0 {
 		tx := cmsDB(ctx)

@@ -16,6 +16,7 @@ type SiteBanner struct {
 	URL       string `json:"-"`
 }
 type SiteBlock struct {
+	URL          string           `json:"-"`
 	Title        string           `json:"title,omitempty"`
 	Layout       string           `json:"layout,omitempty"`
 	Items        []SiteWidgetItem `json:"items,omitempty"`

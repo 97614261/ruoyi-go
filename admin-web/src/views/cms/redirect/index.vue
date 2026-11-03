@@ -1,9 +1,9 @@
 <template>
   <div class="app-container">
+    <el-tabs v-model="categoryTab" @tab-change="search"><el-tab-pane label="全部映射" name="all"/><el-tab-pane v-for="s in statusOptions" :key="s.value" :label="s.label" :name="s.value"/></el-tabs>
     <el-alert title="只配置旧站路径到已公开内容的一跳301。先保存停用，再启用；目标下架或栏目停用后返回404。映射停用保留，启用中需先停用才能修改。" :closable="false" style="margin-bottom:12px"/>
     <el-form inline @submit.prevent="search">
       <el-form-item label="旧路径前缀"><el-input v-model="query.sourcePath" maxlength="200" clearable placeholder="/old-news" @keyup.enter="search"/></el-form-item>
-      <el-form-item label="映射状态"><el-select v-model="query.status" style="width:120px" clearable><el-option label="启用" value="0"/><el-option label="停用" value="1"/></el-select></el-form-item>
       <el-form-item><el-button type="primary" icon="Search" @click="search">搜索</el-button><el-button icon="Refresh" @click="reset">重置</el-button></el-form-item>
     </el-form>
     <el-row style="margin-bottom:12px;gap:10px"><el-button v-if="can('add')" type="primary" plain icon="Plus" :disabled="busy" @click="create">新增映射</el-button><el-button :disabled="loading" @click="load">刷新</el-button></el-row>
@@ -12,7 +12,7 @@
       <el-table-column prop="sourcePath" label="旧路径" min-width="190" show-overflow-tooltip/>
       <el-table-column prop="targetId" label="目标编号" width="95"/>
       <el-table-column prop="targetPath" label="目标路径" min-width="190" show-overflow-tooltip/>
-      <el-table-column label="映射状态" width="100"><template #default="s"><el-tag :type="s.row.status==='0'?'success':'info'">{{s.row.status==='0'?'启用':'停用'}}</el-tag></template></el-table-column>
+      <el-table-column label="映射状态" width="100"><template #default="s"><el-tag :type="s.row.status==='0'?'success':'info'">{{statusOptions.find(o=>o.value===s.row.status)?.label||s.row.status}}</el-tag></template></el-table-column>
       <el-table-column prop="remark" label="备注" min-width="130" show-overflow-tooltip/>
       <el-table-column prop="updateTime" label="修改时间" width="165"/>
       <el-table-column label="操作" min-width="215"><template #default="s">
@@ -35,12 +35,14 @@
   </div>
 </template>
 <script setup name="CmsRedirect">
-import { ref,reactive,onMounted,onActivated,onDeactivated,onBeforeUnmount,nextTick } from 'vue'
+import { statusChoices } from '@/utils/cmsOptions.mjs'
+import { getCurrentInstance, computed,  ref,reactive,onMounted,onActivated,onDeactivated,onBeforeUnmount,nextTick } from 'vue'
 import { ElMessage,ElMessageBox } from 'element-plus'
 import auth from '@/plugins/auth'
 import { listRedirects,getRedirect,saveRedirect,setRedirectStatus } from '@/api/cms/redirect'
 const can=p=>auth.hasPermi('cms:redirect:'+p)
 const query=reactive({sourcePath:'',status:'',pageNum:1,pageSize:10}),rows=ref([]),total=ref(0),loading=ref(false),busy=ref(false),opened=ref(false),formRef=ref()
+const categoryTab=computed({get:()=>query.status||'all',set:v=>query.status=v==='all'?'':v})
 const initial=()=>({redirectId:0,sourcePath:'',targetId:1,remark:'',version:0}),form=reactive(initial())
 const rules={sourcePath:[{required:true,message:'请填旧路径',trigger:'blur'}],targetId:[{required:true,message:'请填已公开的目标内容编号',trigger:'change'}]}
 let epoch=0,operation=0,active=true
@@ -54,5 +56,7 @@ async function status(row){if(busy.value)return;const ticket=++operation;busy.va
 function visit(row){window.open(row.sourcePath,'_blank','noopener,noreferrer')}
 function leave(){active=false;++epoch;++operation;opened.value=false;loading.value=false;busy.value=false}
 onMounted(load);onActivated(()=>{if(!active){active=true;load()}});onDeactivated(leave);onBeforeUnmount(leave)
+const {sys_normal_disable}=getCurrentInstance().proxy.useDict('sys_normal_disable')
+const statusOptions=computed(()=>statusChoices(sys_normal_disable.value))
 </script>
 <style scoped>.hint{font-size:12px;color:var(--el-text-color-secondary);margin:0 0 16px 100px;line-height:1.7}</style>

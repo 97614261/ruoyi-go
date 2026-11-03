@@ -25,6 +25,7 @@
 </template>
 
 <script setup>
+import { websiteNavigation } from '@/utils/websiteNavigation.mjs'
 import Logo from './Logo'
 import SidebarItem from './SidebarItem'
 import variables from '@/assets/styles/variables.module.scss'
@@ -37,7 +38,7 @@ const appStore = useAppStore()
 const settingsStore = useSettingsStore()
 const permissionStore = usePermissionStore()
 
-const sidebarRouters = computed(() => permissionStore.sidebarRouters)
+const sidebarRouters = computed(() => websiteNavigation(permissionStore.sidebarRouters))
 const showLogo = computed(() => settingsStore.sidebarLogo)
 const sideTheme = computed(() => settingsStore.sideTheme)
 const theme = computed(() => settingsStore.theme)
@@ -61,6 +62,7 @@ const getMenuTextColor = computed(() => {
 
 const activeMenu = computed(() => {
   const { meta, path } = route
+  if (path === '/cms/presets' && sidebarRouters.value.find(r=>r.path==='/cms')?.children?.some(r=>r.path==='/cms/site')) return '/cms/site'
   if (meta.activeMenu) {
     return meta.activeMenu
   }

@@ -244,6 +244,41 @@ func TestPortalGrowth(t *testing.T) {
 	if viewsAfter < viewsBefore+4 {
 		t.Fatal("page views not persisted")
 	}
+	// Public article paths are recorded; management reports and pages are not.
+	articlePath := "/news/" + prefix
+	var articleViews int64
+	if e = c.db.QueryRow("SELECT COALESCE(SUM(hits),0) FROM cms_visit_daily WHERE dimension='page' AND dimension_value=?", articlePath).Scan(&articleViews); e != nil {
+		t.Fatal(e)
+	}
+	if status, _, _ := c.public(articlePath, ""); status != 200 {
+		t.Fatal("public article unavailable for visit proof")
+	}
+	var articleAfter int64
+	if e = c.db.QueryRow("SELECT COALESCE(SUM(hits),0) FROM cms_visit_daily WHERE dimension='page' AND dimension_value=?", articlePath).Scan(&articleAfter); e != nil || articleAfter < articleViews+1 {
+		t.Fatal("public article view not counted", e)
+	}
+	var managementBefore, managementAfter, managementTotalBefore, managementTotalAfter int64
+	managementPaths := []any{"/admin/", "/admin/login", "/cms/statistics/list", "/cms/site/preview"}
+	if e = c.db.QueryRow("SELECT COALESCE(SUM(hits),0) FROM cms_visit_daily WHERE dimension='page' AND dimension_value IN (?,?,?,?)", managementPaths...).Scan(&managementBefore); e != nil {
+		t.Fatal(e)
+	}
+	if e = c.db.QueryRow("SELECT COALESCE(SUM(hits),0) FROM cms_visit_daily WHERE dimension='total'").Scan(&managementTotalBefore); e != nil {
+		t.Fatal(e)
+	}
+	for _, path := range []string{"/admin/", "/admin/login"} {
+		if status, _, _ := c.public(path, ""); status != 200 {
+			t.Fatal("management page unavailable")
+		}
+	}
+	c.ok("GET", "/cms/statistics/list?dimension=page", nil)
+	if e = c.db.QueryRow("SELECT COALESCE(SUM(hits),0) FROM cms_visit_daily WHERE dimension='page' AND dimension_value IN (?,?,?,?)", managementPaths...).Scan(&managementAfter); e != nil || managementAfter != managementBefore {
+		t.Fatal("management access counted as public traffic", e)
+	}
+	if e = c.db.QueryRow("SELECT COALESCE(SUM(hits),0) FROM cms_visit_daily WHERE dimension='total'").Scan(&managementTotalAfter); e != nil || managementTotalAfter != managementTotalBefore {
+		t.Fatal("management access changed total public PV", e)
+	}
+	t.Logf("public article delta=%d; management page delta=%d; management total PV delta=%d", articleAfter-articleViews, managementAfter-managementBefore, managementTotalAfter-managementTotalBefore)
+	viewsAfter = managementTotalAfter
 	// HEAD, static assets, redirects/errors and authenticated previews must not count as public page views.
 	before := viewsAfter
 	c.ok("GET", "/cms/site/preview", nil)

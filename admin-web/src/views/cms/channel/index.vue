@@ -1,9 +1,9 @@
 <template>
   <div class="app-container">
+    <el-tabs v-model="categoryTab" @tab-change="search"><el-tab-pane label="全部栏目" name="all"/><el-tab-pane label="文章栏目" name="ARTICLE"/><el-tab-pane label="产品栏目" name="PRODUCT"/></el-tabs>
     <el-form :inline="true" :model="query" @submit.prevent="search">
       <el-form-item label="栏目名称"><el-input v-model="query.name" placeholder="输入名称前缀" maxlength="60" clearable @keyup.enter="search"/></el-form-item>
-      <el-form-item label="类型"><el-select v-model="query.kind" clearable placeholder="全部类型" style="width:140px"><el-option label="文章栏目" value="ARTICLE"/><el-option label="产品栏目" value="PRODUCT"/></el-select></el-form-item>
-      <el-form-item label="状态"><el-select v-model="query.status" clearable placeholder="全部状态" style="width:120px"><el-option label="启用" value="0"/><el-option label="停用" value="1"/></el-select></el-form-item>
+      <el-form-item label="状态"><el-select v-model="query.status" clearable placeholder="全部状态" style="width:120px"><el-option v-for="s in statusOptions" :key="s.value" :label="s.label" :value="s.value"/></el-select></el-form-item>
       <el-form-item><el-button type="primary" icon="Search" @click="search">搜索</el-button><el-button icon="Refresh" @click="reset">重置</el-button></el-form-item>
     </el-form>
     <div class="cms-toolbar"><el-button v-hasPermi="['cms:channel:add']" type="primary" plain icon="Plus" :disabled="busy" @click="edit()">新增栏目</el-button><el-button :disabled="loading" @click="load">刷新</el-button><span class="cms-note">最多8层；父栏目停用前请先停用子栏目。当前只有管理功能，尚未公开到门户。</span></div>
@@ -23,7 +23,7 @@
         <el-form-item label="栏目名称" prop="name"><el-input v-model="form.name" maxlength="60" show-word-limit/></el-form-item>
         <el-form-item label="栏目地址" prop="slug"><el-input v-model="form.slug" maxlength="80" placeholder="如 company-news，只填英文短名称"/></el-form-item>
         <el-form-item label="排序"><el-input-number v-model="form.orderNum" :min="0" :max="100000"/></el-form-item>
-        <el-form-item label="状态"><el-radio-group v-model="form.status"><el-radio value="0">启用</el-radio><el-radio value="1">停用</el-radio></el-radio-group></el-form-item>
+        <el-form-item label="状态"><el-radio-group v-model="form.status"><el-radio v-for="s in statusOptions" :key="s.value" :value="s.value">{{s.label}}</el-radio></el-radio-group></el-form-item>
         <el-form-item label="栏目封面"><AssetPicker v-model="form.coverAssetId" :label="coverName" @picked="v => coverName = v"/></el-form-item>
         <el-form-item label="SEO标题"><el-input v-model="form.seoTitle" maxlength="150"/></el-form-item>
         <el-form-item label="SEO描述"><el-input v-model="form.seoDescription" type="textarea" :rows="2" maxlength="300"/></el-form-item>
@@ -34,12 +34,16 @@
   </div>
 </template>
 <script setup name="CmsChannel">
-import { ref, reactive, onMounted, onActivated, onDeactivated, onBeforeUnmount, nextTick, getCurrentInstance } from 'vue'
+import { computed,  ref, reactive, onMounted, onActivated, onDeactivated, onBeforeUnmount, nextTick, getCurrentInstance } from 'vue'
 import { listChannels, getChannel, saveChannel, deleteChannel } from '@/api/cms/content'
+import { statusChoices } from '@/utils/cmsOptions.mjs'
 import AssetPicker from '../components/AssetPicker.vue'
 const { proxy } = getCurrentInstance()
+const {sys_normal_disable}=proxy.useDict('sys_normal_disable')
+const statusOptions=computed(()=>statusChoices(sys_normal_disable.value))
 const rows = ref([]), total = ref(0), loading = ref(false), busy = ref(false), visible = ref(false), formRef = ref(), parents = ref([]), coverName = ref('')
 const query = reactive({ name: '', kind: '', status: '', pageNum: 1, pageSize: 10 })
+const categoryTab=computed({get:()=>query.kind||'all',set:v=>query.kind=v==='all'?'':v})
 const empty = () => ({ channelId: 0, parentId: 0, name: '', kind: 'ARTICLE', slug: '', orderNum: 0, status: '0', coverAssetId: 0, seoTitle: '', seoDescription: '', remark: '', version: 0 })
 const form = reactive(empty()), rules = { name: [{ required: true, message: '请输入栏目名称', trigger: 'blur' }], slug: [{ required: true, pattern: /^[a-z][a-z0-9-]{0,79}$/, message: '请输入小写英文地址，可含数字和连字符', trigger: 'blur' }] }
 let active = true, epoch = 0, parentEpoch = 0, operation = 0

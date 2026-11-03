@@ -1,4 +1,5 @@
 import auth from '@/plugins/auth'
+import { websiteRouteTitles } from '@/utils/websiteNavigation.mjs'
 import router, { constantRoutes, dynamicRoutes } from '@/router'
 import { getRouters } from '@/api/menu'
 import Layout from '@/layout/index'
@@ -36,6 +37,7 @@ const usePermissionStore = defineStore(
         return new Promise(resolve => {
           // 向后端请求路由数据
           getRouters().then(res => {
+            res = { ...res, data: websiteRouteTitles(res.data) }
             const sdata = JSON.parse(JSON.stringify(res.data))
             const rdata = JSON.parse(JSON.stringify(res.data))
             const defaultData = JSON.parse(JSON.stringify(res.data))

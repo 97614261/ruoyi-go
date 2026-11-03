@@ -92,7 +92,7 @@ func ValidateSite(cfg model.SiteConfig) (string, error) {
 			return "", errs.New("轮播参数不正确")
 		}
 	}
-	seen := map[string]bool{}
+	// Repeated content kinds are independent sections; the 15-section cap still applies.
 	for _, b := range cfg.Blocks {
 		if b.Kind == "SERVICE" || b.Kind == "ADVANTAGE" || b.Kind == "CASE" || b.Kind == "PARTNER" || b.Kind == "FAQ" {
 			if b.ChannelId != 0 || b.FeaturedOnly {
@@ -103,10 +103,9 @@ func ValidateSite(cfg model.SiteConfig) (string, error) {
 		if len(b.Items) > 0 {
 			return "", errs.New("内容列表区块不能填写手动条目")
 		}
-		if !regexp.MustCompile(`^(ARTICLE|PRODUCT|PAGE)$`).MatchString(b.Kind) || seen[b.Kind] || b.Count < 1 || b.Count > 12 || b.ChannelId < 0 || (b.Kind == "PAGE" && b.ChannelId != 0) {
+		if !regexp.MustCompile(`^(ARTICLE|PRODUCT|PAGE)$`).MatchString(b.Kind) || b.Count < 1 || b.Count > 12 || b.ChannelId < 0 || (b.Kind == "PAGE" && b.ChannelId != 0) {
 			return "", errs.New("首页区块类型、条数或栏目不正确")
 		}
-		seen[b.Kind] = true
 	}
 	return theme.Version, nil
 }

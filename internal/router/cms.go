@@ -94,6 +94,7 @@ func registerCMS(r *gin.Engine, cfg *config.Config) {
 	g.PUT("/site", middleware.HasPermission("cms:site:edit"), middleware.OperLogWithoutParameters("站点草稿", model.BusinessTypeUpdate), handler.CMSSaveSite)
 	g.POST("/site/publish", middleware.HasPermission("cms:site:publish"), middleware.OperLogWithoutParameters("外观发布或恢复", model.BusinessTypeUpdate), handler.CMSPublishSite)
 	g.GET("/site/inspect", middleware.HasPermission("cms:site:query"), middleware.HasPermission("cms:asset:query"), middleware.HasPermission("cms:channel:query"), middleware.HasPermission("cms:article:query"), middleware.HasPermission("cms:product:query"), middleware.HasPermission("cms:page:query"), handler.CMSInspectSite(cfg.Portal.PublicURL))
+	g.GET("/site/references", middleware.HasPermission("cms:site:query"), handler.CMSSiteReferences)
 	g.GET("/site/history", middleware.HasPermission("cms:site:query"), handler.CMSSiteHistory)
 	g.GET("/channel/list", middleware.HasPermission("cms:channel:list"), handler.CMSChannelList)
 	g.GET("/channel/:id", middleware.HasPermission("cms:channel:query"), handler.CMSChannelGet)
