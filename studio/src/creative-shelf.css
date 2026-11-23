@@ -1,0 +1,114 @@
+.library-redesign {
+  --shelf-surface: color-mix(in srgb, var(--paper) 92%, var(--accent));
+  --shelf-soft: color-mix(in srgb, var(--paper) 96%, var(--accent));
+  width: min(1100px, calc(100vw - 40px));
+  max-height: min(850px, calc(100dvh - 40px));
+  background: var(--paper);
+}
+.creative-library-dialog.library-redesign > header {
+  display: grid; grid-template-columns: minmax(110px, 1fr) auto minmax(44px, 1fr);
+  gap: 12px; padding: 12px 22px; border-bottom-color: var(--line);
+  background: var(--paper); z-index: 3;
+}
+.creative-library-dialog.library-redesign > header h2 { display: block; margin: 0; font-size: 14px; }
+.library-redesign > header > button { justify-self: end; }
+.creative-library-dialog.library-redesign nav { padding: 3px; gap: 3px; border-radius: 10px; background: var(--field); }
+.creative-library-dialog.library-redesign nav button { display: inline-flex; min-height: 36px; padding: 6px 12px; gap: 6px; align-items: center; justify-content: center; background: transparent; white-space: nowrap; }
+.creative-library-dialog.library-redesign nav button[aria-pressed=true] { background: var(--paper); color: var(--accent); box-shadow: inset 0 0 0 1px var(--line); }
+.creative-shelf { --shelf-surface: color-mix(in srgb, var(--paper) 92%, var(--accent)); --shelf-soft: color-mix(in srgb, var(--paper) 96%, var(--accent)); min-width: 0; }
+.library-redesign .creative-shelf { padding: 22px; }
+.shelf-intro { display: flex; justify-content: space-between; align-items: end; gap: 18px; margin-bottom: 16px; }
+.shelf-intro h2, .library-redesign .shelf-intro h2 { display: block; margin: 0; color: var(--ink); font-size: clamp(23px, 3vw, 34px); line-height: 1.16; letter-spacing: -.045em; }
+.shelf-intro p { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 7px 0 0; }
+.shelf-search { display: flex; flex: 0 1 290px; gap: 8px; align-items: center; padding-inline: 11px; color: var(--muted); background: var(--field); border: 1px solid var(--line); border-radius: 8px; }
+.shelf-search svg { flex: none; }
+.shelf-search input { width: 100%; min-width: 0; min-height: 40px; font: inherit; font-size: 13px; color: var(--ink); background: transparent; border: 0; }
+.shelf-search input:focus-visible { outline: none; }
+.shelf-search:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.shelf-filters { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 13px; margin-bottom: 15px; border-bottom: 1px solid var(--line); }
+.shelf-filters button { display: inline-flex; gap: 6px; align-items: center; min-height: 34px; color: var(--muted); background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 5px 10px; font-size: 13px; }
+.shelf-filters button[aria-pressed=true] { background: var(--shelf-surface); color: var(--accent); border-color: var(--line); }
+.shelf-filters .shelf-favorites { margin-left: auto; }
+.creative-shelf .shelf-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; margin: 0; }
+.creative-shelf .shelf-preset { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
+.shelf-cover { position: relative; display: block; width: 100%; padding: 0; overflow: hidden; border: 0; border-bottom: 1px solid var(--line); background: #dedbd0; text-align: left; }
+.shelf-cover img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; object-fit: cover; }
+.shelf-cover span { position: absolute; left: 8px; bottom: 8px; padding: 3px 6px; border-radius: 4px; background: #242823; color: #fff; font-size: 11px; }
+.shelf-cover:focus-visible { outline-offset: -4px; z-index: 1; }
+.template-preset-grid .shelf-preset .shelf-card-body { display: flex; flex: 1; flex-direction: column; padding: 12px; }
+.shelf-preset h3 { margin: 0; color: var(--ink); font-size: 16px; line-height: 1.3; }
+.creative-shelf .shelf-preset p { margin: 5px 0 10px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.shelf-preset .workflow-preset { align-items: center; flex-direction: row; justify-content: space-between; gap: 5px; min-height: 38px; margin-top: auto; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); background: var(--field); font-size: 13px; }
+.shelf-preset .workflow-preset:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--shelf-soft); }
+.shelf-preset-detail { width: min(780px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 12px; }
+.shelf-preset-detail::backdrop { background: rgb(15 18 15 / 60%); }
+.shelf-preset-detail > header, .shelf-preset-detail > footer { display: flex; align-items: center; gap: 8px; padding: 10px 14px; }
+.shelf-preset-detail > header { justify-content: space-between; border-bottom: 1px solid var(--line); }
+.shelf-preset-detail > header .icon-button { flex: none; }
+.shelf-preset-detail > footer { justify-content: flex-end; border-top: 1px solid var(--line); }
+.shelf-preset-detail h2, .shelf-preset-detail h3 { margin: 0; }
+.shelf-preset-detail h2 { font-size: 19px; }
+.shelf-preset-detail h3 { font-size: 14px; }
+.shelf-detail-body { display: grid; align-items: start; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; padding: 14px; }
+.shelf-detail-body figure { margin: 0; }
+.shelf-detail-body figure img { display: block; width: 100%; height: auto; border-radius: 8px; }
+.shelf-detail-body figcaption, .shelf-detail-body dt { color: var(--muted); font-size: 12px; }
+.shelf-detail-body figcaption { margin-top: 5px; }
+.shelf-detail-body dl { display: grid; gap: 7px; margin: 0; }
+.shelf-detail-body dl > div { display: grid; grid-template-columns: 4.2rem minmax(0, 1fr); }
+.shelf-detail-body dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.shelf-detail-body p { font-size: 13px; line-height: 1.55; color: var(--muted); }
+.shelf-detail-body .template-graph { margin-top: 6px; height: clamp(112px, 21vw, 150px); border-radius: 7px; }
+.inspiration-layout { display: grid; grid-template-columns: minmax(212px, 31%) minmax(0, 1fr); gap: 16px; align-items: start; }
+.inspiration-index { display: grid; gap: 3px; align-content: start; max-height: 420px; padding: 4px; overflow-y: auto; scrollbar-gutter: stable; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 12px; }
+.inspiration-index button { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 9px; min-height: 52px; padding: 6px 8px; text-align: left; color: var(--ink); background: transparent; border: 1px solid transparent; border-radius: 8px; }
+.inspiration-index button:hover, .inspiration-index button[aria-pressed=true] { background: var(--shelf-soft); }
+.inspiration-index button[aria-pressed=true] { border-color: var(--line); }
+.inspiration-index button:focus-visible { outline-offset: -2px; }
+.inspiration-index strong, .inspiration-index small { display: block; overflow-wrap: anywhere; }
+.inspiration-index strong { font-size: 13px; }
+.inspiration-index small { margin-top: 3px; color: var(--muted); font-size: 12px; }
+.inspiration-swatch { display: flex; overflow: hidden; }
+.inspiration-swatch { height: 34px; border-radius: 6px; }
+.inspiration-swatch i { flex: 1; }
+.inspiration-preview { min-width: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--paper); }
+.inspiration-copy { padding: 16px; }
+.inspiration-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+.inspiration-title small { color: var(--accent); font-size: 12px; font-weight: 700; }
+.inspiration-title h3 { margin: 4px 0 0; line-height: 1.3; font-size: 23px; }
+.inspiration-title .icon-button[aria-pressed=true] { color: var(--accent); }
+.inspiration-reference { display: flex; align-items: flex-start; gap: 6px; padding: 7px 9px; margin: 0 0 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink); background: var(--shelf-soft); font-size: 12px; line-height: 1.5; }
+.inspiration-reference svg { flex: none; color: var(--accent); }
+.inspiration-parameters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(155px, 100%), 1fr)); gap: 9px; margin-bottom: 12px; }
+.inspiration-parameters label, .inspiration-full { display: grid; gap: 4px; min-width: 0; font-size: 13px; font-weight: 650; }
+.inspiration-parameters small { margin-left: 4px; color: var(--muted); font-size: 11px; font-weight: 500; }
+.inspiration-parameters input { width: 100%; min-width: 0; min-height: 38px; padding: 6px 8px; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 7px; font: inherit; font-weight: 500; }
+.inspiration-full textarea { font-weight: 500; }
+.inspiration-full textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.inspiration-copy textarea { display: block; width: 100%; min-height: 124px; resize: vertical; padding: 12px; line-height: 1.8; font-size: 14px; color: var(--ink); background: var(--field); border: 1px solid var(--line); border-radius: 8px; }
+.inspiration-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.shelf-notice { font-size: 12px; margin: 9px 0 0; color: var(--muted); }
+.shelf-empty { display: grid; justify-items: center; gap: 10px; padding: 42px 14px; color: var(--muted); }
+@media (max-width: 930px) { .creative-shelf .shelf-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) {
+  .library-redesign { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); }
+  .creative-library-dialog.library-redesign > header { grid-template-columns: minmax(0, 1fr) auto; padding: 8px; }
+  .creative-library-dialog.library-redesign > header h2 { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .creative-library-dialog.library-redesign nav button { padding-inline: 6px; min-height: 44px; font-size: 12px; }
+  .library-redesign .creative-shelf { padding: 12px; }
+  .shelf-intro { align-items: stretch; flex-direction: column; gap: 10px; }
+  .shelf-search { flex-basis: auto; }
+  .shelf-filters { gap: 3px; }
+  .shelf-filters button { padding-inline: 6px; font-size: 12px; }
+  .shelf-filters .shelf-favorites { margin-left: 0; }
+  .inspiration-layout, .creative-shelf .shelf-grid { grid-template-columns: minmax(0, 1fr); }
+  .inspiration-index { max-height: 142px; }
+  .inspiration-copy { padding: 12px; }
+  .shelf-detail-body { grid-template-columns: minmax(0, 1fr); }
+  .shelf-detail-body figure img { aspect-ratio: 16 / 9; object-fit: cover; }
+  .inspiration-parameters input { min-height: 44px; }
+  .inspiration-actions > button, .shelf-preset .workflow-preset { min-height: 44px; }
+}
+@media (pointer: coarse) {
+  .shelf-filters button, .shelf-search input, .inspiration-title .icon-button, .library-redesign > header > button { min-height: 44px; }
+}

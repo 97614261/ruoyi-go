@@ -1,0 +1,494 @@
+[
+  {
+    "provider": "deepseek",
+    "code": "deepseek-flash",
+    "name": "DeepSeek Flash",
+    "kind": "text",
+    "officialModelId": "deepseek-flash",
+    "capabilities": {
+      "maxInputBytes": 32000,
+      "maxOutputTokens": 512
+    },
+    "cost": {
+      "input": "2",
+      "output": "8"
+    },
+    "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+    "note": "按工作日峰时、未命中缓存价格保守估算；非分时结算。",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "deepseek",
+    "code": "deepseek-v4-pro",
+    "name": "DeepSeek V4 Pro",
+    "kind": "text",
+    "officialModelId": "deepseek-v4-pro",
+    "capabilities": {
+      "maxInputBytes": 32000,
+      "maxOutputTokens": 512
+    },
+    "cost": {
+      "input": "9",
+      "output": "27"
+    },
+    "source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+    "note": "按工作日峰时、未命中缓存价格保守估算。",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "zhipu",
+    "code": "glm-47-flash",
+    "name": "GLM 4.7 Flash · 免费",
+    "kind": "text",
+    "officialModelId": "glm-4.7-flash",
+    "capabilities": {
+      "maxInputBytes": 32000,
+      "maxOutputTokens": 512
+    },
+    "cost": {
+      "input": "0",
+      "output": "0"
+    },
+    "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+    "note": "官方免费，仍需 Key、模型权限和限流额度。",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "zhipu",
+    "code": "glm-53-flash",
+    "name": "GLM 5.3 Flash",
+    "kind": "text",
+    "officialModelId": "glm-5.3-flash",
+    "capabilities": {
+      "maxInputBytes": 32000,
+      "maxOutputTokens": 512
+    },
+    "cost": {
+      "input": "0.8",
+      "output": "2.8"
+    },
+    "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+    "note": "",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "zhipu",
+    "code": "glm-53-flashx",
+    "name": "GLM 5.3 FlashX",
+    "kind": "text",
+    "officialModelId": "glm-5.3-flashx",
+    "capabilities": {
+      "maxInputBytes": 32000,
+      "maxOutputTokens": 512
+    },
+    "cost": {
+      "input": "2",
+      "output": "7"
+    },
+    "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+    "note": "",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "zhipu",
+    "code": "glm-53",
+    "name": "GLM 5.3",
+    "kind": "text",
+    "officialModelId": "glm-5.3",
+    "capabilities": {
+      "maxInputBytes": 32000,
+      "maxOutputTokens": 512
+    },
+    "cost": {
+      "input": "8",
+      "output": "28"
+    },
+    "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+    "note": "",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "zhipu",
+    "code": "glm-cogview-3-flash",
+    "name": "CogView 3 Flash · 免费",
+    "kind": "image",
+    "officialModelId": "cogview-3-flash",
+    "capabilities": {
+      "maxPromptChars": 1200,
+      "maxImages": 1,
+      "maxReferenceImages": 0,
+      "ratios": [
+        "1:1",
+        "3:4",
+        "4:3",
+        "9:16",
+        "16:9"
+      ]
+    },
+    "cost": {
+      "image": "0"
+    },
+    "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+    "note": "官方免费，单张文生图；不支持参考图。竖横长图采用官方近似比例尺寸。",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "zhipu",
+    "code": "glm-cogview-4",
+    "name": "CogView 4 · 低价",
+    "kind": "image",
+    "officialModelId": "cogview-4",
+    "capabilities": {
+      "maxPromptChars": 1200,
+      "maxImages": 1,
+      "maxReferenceImages": 0,
+      "ratios": [
+        "1:1",
+        "3:4",
+        "4:3",
+        "9:16",
+        "16:9"
+      ]
+    },
+    "cost": {
+      "image": "0.06"
+    },
+    "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+    "note": "同步单张标准质量；不按批处理折扣估算。",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "zhipu",
+    "code": "glm-image",
+    "name": "GLM Image",
+    "kind": "image",
+    "officialModelId": "glm-image",
+    "capabilities": {
+      "maxPromptChars": 1200,
+      "maxImages": 1,
+      "maxReferenceImages": 0,
+      "ratios": [
+        "1:1",
+        "3:4",
+        "4:3",
+        "9:16",
+        "16:9"
+      ]
+    },
+    "cost": {
+      "image": "0.1"
+    },
+    "source": "https://docs.bigmodel.cn/cn/guide/start/pricing",
+    "note": "同步单张 HD；尺寸按官方推荐值，部分比例为近似值。",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "siliconflow",
+    "code": "sf-kolors",
+    "name": "Kolors · 免费",
+    "kind": "image",
+    "officialModelId": "Kwai-Kolors/Kolors",
+    "capabilities": {
+      "maxPromptChars": 1200,
+      "maxImages": 1,
+      "maxReferenceImages": 0,
+      "ratios": [
+        "1:1",
+        "3:4",
+        "9:16"
+      ]
+    },
+    "cost": {
+      "image": "0"
+    },
+    "source": "https://www.siliconflow.cn/pricing",
+    "note": "官方免费 API；单张文生图，不承诺账号额度。",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "siliconflow",
+    "code": "sf-z-image-turbo",
+    "name": "Z Image Turbo",
+    "kind": "image",
+    "officialModelId": "Tongyi-MAI/Z-Image-Turbo",
+    "capabilities": {
+      "maxPromptChars": 1200,
+      "maxImages": 1,
+      "maxReferenceImages": 0,
+      "ratios": [
+        "1:1"
+      ]
+    },
+    "cost": {
+      "image": "0.1"
+    },
+    "source": "https://www.siliconflow.cn/pricing",
+    "note": "",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "siliconflow",
+    "code": "sf-z-image",
+    "name": "Z Image",
+    "kind": "image",
+    "officialModelId": "Tongyi-MAI/Z-Image",
+    "capabilities": {
+      "maxPromptChars": 1200,
+      "maxImages": 1,
+      "maxReferenceImages": 0,
+      "ratios": [
+        "1:1"
+      ]
+    },
+    "cost": {
+      "image": "0.3"
+    },
+    "source": "https://www.siliconflow.cn/pricing",
+    "note": "",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "siliconflow",
+    "code": "sf-qwen-image",
+    "name": "Qwen Image · 硅基",
+    "kind": "image",
+    "officialModelId": "Qwen/Qwen-Image",
+    "capabilities": {
+      "maxPromptChars": 1200,
+      "maxImages": 1,
+      "maxReferenceImages": 0,
+      "ratios": [
+        "1:1",
+        "3:4",
+        "4:3",
+        "9:16",
+        "16:9"
+      ]
+    },
+    "cost": {
+      "image": "0.3"
+    },
+    "source": "https://www.siliconflow.cn/pricing",
+    "note": "不同于百炼，凭据和账单独立。",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "siliconflow",
+    "code": "sf-qwen-image-edit",
+    "name": "Qwen Image Edit · 单参考图",
+    "kind": "image",
+    "officialModelId": "Qwen/Qwen-Image-Edit",
+    "capabilities": {
+      "maxPromptChars": 1200,
+      "maxImages": 1,
+      "maxReferenceImages": 1,
+      "ratios": [
+        "1:1"
+      ]
+    },
+    "cost": {
+      "image": "0.3"
+    },
+    "source": "https://www.siliconflow.cn/pricing",
+    "note": "至少一张参考图，输出沿用输入尺寸；界面比例不改变原图尺寸。",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "siliconflow",
+    "code": "sf-qwen-image-edit-2509",
+    "name": "Qwen Image Edit 2509 · 多参考图",
+    "kind": "image",
+    "officialModelId": "Qwen/Qwen-Image-Edit-2509",
+    "capabilities": {
+      "maxPromptChars": 1200,
+      "maxImages": 1,
+      "maxReferenceImages": 3,
+      "ratios": [
+        "1:1"
+      ]
+    },
+    "cost": {
+      "image": "0.3"
+    },
+    "source": "https://www.siliconflow.cn/pricing",
+    "note": "至少一张参考图，最多三张；输出沿用输入尺寸。",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "siliconflow",
+    "code": "sf-moss-image",
+    "name": "MOSS Image",
+    "kind": "image",
+    "officialModelId": "OpenMOSS-Team/MOSS-Image",
+    "capabilities": {
+      "maxPromptChars": 1200,
+      "maxImages": 1,
+      "maxReferenceImages": 0,
+      "ratios": [
+        "1:1"
+      ]
+    },
+    "cost": {
+      "image": "0.15"
+    },
+    "source": "https://www.siliconflow.cn/pricing",
+    "note": "",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "kimi",
+    "code": "kimi-k31-pro",
+    "name": "Kimi K3.1 Pro",
+    "kind": "text",
+    "officialModelId": "kimi-k3.1-pro",
+    "capabilities": {
+      "maxInputBytes": 32000,
+      "maxOutputTokens": 512
+    },
+    "cost": {
+      "input": "13",
+      "output": "68"
+    },
+    "source": "https://platform.kimi.com/docs/pricing/chat",
+    "note": "低 reasoning_effort，输出含思考 Token；使用 max_completion_tokens。",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "kimi",
+    "code": "kimi-k31-highspeed",
+    "name": "Kimi K3.1 Pro Highspeed",
+    "kind": "text",
+    "officialModelId": "kimi-k3.1-pro-highspeed",
+    "capabilities": {
+      "maxInputBytes": 32000,
+      "maxOutputTokens": 512
+    },
+    "cost": {
+      "input": "26",
+      "output": "136"
+    },
+    "source": "https://platform.kimi.com/docs/pricing/chat",
+    "note": "",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "kimi",
+    "code": "kimi-k3",
+    "name": "Kimi K3",
+    "kind": "text",
+    "officialModelId": "kimi-k3",
+    "capabilities": {
+      "maxInputBytes": 32000,
+      "maxOutputTokens": 512
+    },
+    "cost": {
+      "input": "20",
+      "output": "100"
+    },
+    "source": "https://platform.kimi.com/docs/pricing/chat",
+    "note": "",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "openai",
+    "code": "openai-gpt41-mini",
+    "name": "GPT 4.1 mini",
+    "kind": "text",
+    "officialModelId": "gpt-4.1-mini",
+    "capabilities": {
+      "maxInputBytes": 32000,
+      "maxOutputTokens": 512
+    },
+    "cost": null,
+    "source": "https://openai.com/api/pricing/",
+    "note": "美元报价须先确认人民币换算及用户点数，保留无版本草稿。",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "openai",
+    "code": "openai-gpt41",
+    "name": "GPT 4.1",
+    "kind": "text",
+    "officialModelId": "gpt-4.1",
+    "capabilities": {
+      "maxInputBytes": 32000,
+      "maxOutputTokens": 512
+    },
+    "cost": null,
+    "source": "https://openai.com/api/pricing/",
+    "note": "美元报价须先确认人民币换算及用户点数，保留无版本草稿。",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "openai",
+    "code": "openai-gpt4o",
+    "name": "GPT 4o",
+    "kind": "text",
+    "officialModelId": "gpt-4o",
+    "capabilities": {
+      "maxInputBytes": 32000,
+      "maxOutputTokens": 512
+    },
+    "cost": null,
+    "source": "https://openai.com/api/pricing/",
+    "note": "美元报价须先确认人民币换算及用户点数，保留无版本草稿。",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "openai",
+    "code": "openai-dalle3",
+    "name": "DALL E 3 · 标准质量",
+    "kind": "image",
+    "officialModelId": "dall-e-3",
+    "capabilities": {
+      "maxPromptChars": 1200,
+      "maxImages": 1,
+      "maxReferenceImages": 0,
+      "ratios": [
+        "1:1",
+        "9:16",
+        "16:9"
+      ]
+    },
+    "cost": null,
+    "source": "https://openai.com/api/pricing/",
+    "note": "须核实当前账号上架情况、美元换算及各尺寸价格后保存版本。",
+    "checkedAt": "2026-11-17"
+  },
+  {
+    "provider": "volcengine",
+    "code": "volcengine-seedream-5-0-flash",
+    "name": "豆包 Seedream 5.0 Flash",
+    "kind": "image",
+    "officialModelId": "doubao-seedream-5-0-flash-260915",
+    "capabilities": { "maxPromptChars": 1200, "maxImages": 1, "maxReferenceImages": 3, "ratios": ["1:1", "3:4", "4:3", "9:16", "16:9"] },
+    "cost": { "image": "0.12" },
+    "source": "https://docs.volcengine.com/docs/ark/model-pricing?lang=zh&redirect=1",
+    "note": "按成功输出张数计费；参考图免费。支持文生图、参考图生图；每次 1 张、最多 3 张参考图，暂不做图层拆分。",
+    "checkedAt": "2026-11-18"
+  },
+  {
+    "provider": "volcengine",
+    "code": "volcengine-seed-2-0-mini",
+    "name": "豆包 Seed 2.0 Mini LTS",
+    "kind": "text",
+    "officialModelId": "doubao-seed-2-0-mini-260428",
+    "capabilities": { "maxInputBytes": 16000, "maxOutputTokens": 512 },
+    "cost": { "input": "0.2", "output": "2" },
+    "source": "https://docs.volcengine.com/docs/ark/model-pricing?lang=zh&redirect=1",
+    "note": "常规在线推理，采用 32K 以内非音频输入档；工具、深度思考和缓存折扣不计入估算。",
+    "checkedAt": "2026-11-18"
+  },
+  {
+    "provider": "volcengine",
+    "code": "volcengine-seed-2-1-lite",
+    "name": "豆包 Seed 2.1 Lite",
+    "kind": "text",
+    "officialModelId": "doubao-seed-2-1-lite-260915",
+    "capabilities": { "maxInputBytes": 32000, "maxOutputTokens": 512 },
+    "cost": { "input": "0.8", "output": "2.7" },
+    "source": "https://docs.volcengine.com/docs/ark/model-pricing?lang=zh&redirect=1",
+    "note": "常规在线推理，纯文字模式；关闭深度思考，估算不计缓存折扣。",
+    "checkedAt": "2026-11-18"
+  }
+]

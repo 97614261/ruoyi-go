@@ -1,0 +1,19 @@
+.batch-dialog { width: min(920px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line); border-radius: 16px; color: var(--ink); background: var(--paper); overflow: auto; }
+.batch-dialog::backdrop { background: #24283766; }
+.batch-dialog > .template-dialog-header { position: sticky; top: 0; z-index: 1; margin: 0; padding: 16px 20px; background: var(--paper); border-bottom: 1px solid var(--line); }
+.batch-dialog form { margin: 0; }
+.batch-inputs { border: 0; padding: 20px 24px; display: grid; gap: 16px; min-width: 0; }
+.batch-input-row { border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 12px; min-width: 0; background: var(--canvas); }
+.batch-input-heading, .batch-detail-heading, .batch-result-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.batch-input-heading > div, .batch-result-row > div:last-child { display: flex; gap: 8px; flex-wrap: wrap; }
+.batch-thumbnails { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.batch-thumbnails img { width: 56px; height: 56px; object-fit: contain; border: 1px solid var(--line); border-radius: 6px; background: white; }
+.batch-confirm { padding: 18px 24px; border-top: 1px solid var(--line); display: grid; gap: 12px; }
+.batch-confirm p, .batch-result-row p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.batch-impact { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 14px; background: var(--canvas); border-radius: 8px; }
+.batch-impact p { flex-basis: 100%; }
+.batch-result-row { padding: 14px 0; border-bottom: 1px solid var(--line); }
+.batch-result-row strong, .batch-detail-heading h2 { overflow-wrap: anywhere; }
+.batch-slot { min-width: 0; }
+.batch-inputs input, .batch-inputs textarea { box-sizing: border-box; width: 100%; }
+@media (max-width: 640px) { .batch-inputs, .batch-confirm { padding: 16px; } .batch-result-row, .batch-input-heading { align-items: flex-start; flex-direction: column; } .batch-history .run-row { grid-template-columns: 1fr; gap: 6px; } .batch-result-row button, .batch-input-heading button { min-height: 44px; } }

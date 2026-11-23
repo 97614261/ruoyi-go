@@ -1,0 +1,50 @@
+/* Keep the hit area and wire anchor fixed while the visible socket follows. */
+.workflow-node .vue-flow__handle.magnetic-handle {
+  --port-follow-x: 0px; --port-follow-y: 0px;
+  --port-ink: #4363a7;
+  width: 1px; height: 1px; min-width: 1px; min-height: 1px;
+  border: 0; background: transparent; box-shadow: none; border-radius: 50%; z-index: 4;
+  outline: none; touch-action: none;
+}
+.workflow-node .magnetic-handle[data-type='images'] { --port-ink: #228068; }
+:root[data-theme='dark'] .workflow-node .magnetic-handle { --port-ink: #a5bcff; }
+:root[data-theme='dark'] .workflow-node .magnetic-handle[data-type='images'] { --port-ink: #85dcc0; }
+.workflow-node .magnetic-handle.vue-flow__handle-left { left: 0; }
+.workflow-node .magnetic-handle.vue-flow__handle-right { right: 0; }
+.workflow-node .vue-flow__handle.magnetic-handle::before {
+  content: ''; position: absolute; left: 50%; top: 50%;
+  width: 34px; height: 25px; transform: translate(-50%, -50%); border-radius: 10px;
+}
+.magnetic-handle-button {
+  position: absolute; left: 50%; top: 50%; width: 19px; height: 19px;
+  box-sizing: border-box; aspect-ratio: 1;
+  display: grid; place-items: center; border: 1px solid var(--port-ink); border-radius: 50%;
+  background: var(--paper); color: var(--port-ink); opacity: 0; pointer-events: none;
+  transform: translate(-50%, -50%) translate3d(var(--port-follow-x), var(--port-follow-y), 0);
+  transition: transform 180ms cubic-bezier(.2, .75, .25, 1), opacity 120ms ease, box-shadow 120ms ease;
+}
+.workflow-node:hover .magnetic-handle-button,
+.workflow-node .magnetic-handle:is(:focus-visible, .connecting, .valid, [aria-expanded='true']) .magnetic-handle-button,
+.canvas-connecting .magnetic-handle-button { opacity: 1; }
+.workflow-node .magnetic-handle:is(:hover, :focus-visible, .connecting, .valid) .magnetic-handle-button {
+  box-shadow: 0 0 0 1px var(--port-ink), 0 0 0 4px color-mix(in srgb, var(--port-ink) 25%, transparent);
+}
+.workflow-node .magnetic-handle:focus-visible .magnetic-handle-button { outline: 2px solid var(--accent); outline-offset: 4px; }
+.magnetic-handle.is-following .magnetic-handle-button { transition-duration: 110ms, 120ms, 120ms; }
+.magnetic-handle-label {
+  position: absolute; left: 50%; bottom: 19px; transform: translateX(-50%);
+  width: max-content; max-width: 180px; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--paper); color: var(--muted); font-size: 11px; line-height: 1.4; opacity: 0; pointer-events: none;
+}
+.magnetic-handle:is(:hover, :focus-visible) .magnetic-handle-label { opacity: 1; }
+.magnetic-handle[aria-disabled='true'] { pointer-events: none; }
+.workflow-node .magnetic-handle[aria-disabled='true'] .magnetic-handle-button { opacity: 0; }
+.canvas-motion-off .magnetic-handle-button,
+.canvas-motion-paused .magnetic-handle-button { transition: none; }
+@media (hover: none), (pointer: coarse) {
+  .workflow-node .magnetic-handle-button { width: 21px; height: 21px; opacity: 1; transform: translate(-50%, -50%); transition: none; }
+  .workflow-node .vue-flow__handle.magnetic-handle::before { width: 44px; height: 34px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .workflow-node .magnetic-handle-button { transform: translate(-50%, -50%) !important; transition: none !important; }
+}

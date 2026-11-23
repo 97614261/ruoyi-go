@@ -78,6 +78,130 @@ func New(cfg *config.Config) *gin.Engine {
 
 	registerAnonymous(r, bodyLimit, multipartLimit)
 	registerAuthed(r, bodyLimit, multipartLimit)
+	if cfg.POD.Enabled {
+		admin := r.Group("/pod-admin", middleware.Auth(), middleware.PODAdminAccess(), bodyLimit)
+		admin.GET("/bootstrap", handler.PODAdminBootstrap)
+		admin.GET("/overview", middleware.HasPermission(model.PODAdminOverviewQuery), handler.PODAdminOverview)
+		admin.GET("/audits", middleware.HasPermission(model.PODAdminAuditList), handler.PODAdminAudits)
+		admin.GET("/audits/:id", middleware.HasPermission(model.PODAdminAuditQuery), handler.PODAdminAudit)
+		admin.GET("/runs", middleware.HasPermission("podAdmin:task:list"), handler.PODAdminTasks(false))
+		admin.GET("/runs/:id", middleware.HasPermission("podAdmin:task:query"), handler.PODAdminTask(false))
+		admin.GET("/runs/:id/nodes", middleware.HasPermission("podAdmin:task:query"), handler.PODAdminTaskNodes)
+		admin.GET("/batches", middleware.HasPermission("podAdmin:task:list"), handler.PODAdminTasks(true))
+		admin.GET("/batches/:id", middleware.HasPermission("podAdmin:task:query"), handler.PODAdminTask(true))
+		admin.GET("/usage", middleware.HasPermission("podAdmin:usage:query"), handler.PODAdminUsage)
+		admin.GET("/private-grants", middleware.HasPermission("podAdmin:privacy:grant"), handler.PODAdminGrants)
+		admin.GET("/private/runs/:id", middleware.HasPermission("podAdmin:private:read"), handler.PODAdminPrivateRun)
+		privateAssets := service.NewPODAssetService(cfg.POD.StorageRoot, model.PODAssetLimits{MaxUploadBytes: cfg.POD.MaxUploadBytes, MaxPixels: cfg.POD.MaxImagePixels})
+		admin.GET("/private/assets/:id/content", middleware.HasPermission("podAdmin:private:read"), handler.PODAdminPrivateAsset(privateAssets, false))
+		admin.GET("/private/assets/:id/download", middleware.HasPermission("podAdmin:private:read"), handler.PODAdminPrivateAsset(privateAssets, true))
+		for _, route := range []struct{ path, op string }{{"/runs/:id/cancel", "task.cancel"}, {"/batches/:id/stop", "batch.stop"}, {"/private-grants", "private.grant"}, {"/private-grants/:id/revoke", "private.revoke"}} {
+			admin.POST(route.path, middleware.HasPermission(service.CatalogPermission(route.op)), handler.PODOperation(route.op))
+		}
+		admin.GET("/providers", middleware.HasPermission("podAdmin:provider:list"), handler.PODCatalogList(true))
+		admin.GET("/providers/:id", middleware.HasPermission("podAdmin:provider:query"), handler.PODCatalogGet(true))
+		admin.GET("/models", middleware.HasPermission("podAdmin:model:list"), handler.PODCatalogList(false))
+		admin.GET("/models/:id", middleware.HasPermission("podAdmin:model:query"), handler.PODCatalogGet(false))
+		admin.GET("/models/:id/versions", middleware.HasPermission("podAdmin:model:query"), handler.PODCatalogVersions)
+		admin.POST("/models/:id/check-config", middleware.HasPermission("podAdmin:model:check"), handler.PODCatalogCheck)
+		admin.GET("/model-defaults", middleware.HasPermission("podAdmin:model:query"), handler.PODCatalogDefaults)
+		admin.GET("/actions/:requestId", handler.PODCatalogAction)
+		for _, route := range []struct{ method, path, op string }{
+			{"POST", "/providers", "provider.create"}, {"PUT", "/providers/:id", "provider.update"}, {"POST", "/providers/:id/status", "provider.status"}, {"PUT", "/providers/:id/credential", "provider.credential"},
+			{"POST", "/models", "model.create"}, {"PUT", "/models/:id", "model.update"}, {"POST", "/models/:id/status", "model.status"}, {"POST", "/models/:id/versions", "model.version"}, {"PUT", "/model-defaults", "defaults.update"},
+		} {
+			admin.Handle(route.method, route.path, middleware.HasPermission(service.CatalogPermission(route.op)), handler.PODCatalogWrite(route.op))
+		}
+		creatorLimits := service.PODExecutionLimits(cfg.POD.Execution)
+		admin.GET("/creator-limits", middleware.HasPermission("podAdmin:creator:list"), handler.PODCreatorLimits(creatorLimits))
+		admin.GET("/creator-model-options", middleware.HasPermission("podAdmin:creator:grant"), handler.PODCreatorModelOptions)
+		admin.GET("/creators", middleware.HasPermission("podAdmin:creator:list"), handler.PODCreators)
+		admin.GET("/creators/:userId", middleware.HasPermission("podAdmin:creator:query"), handler.PODCreatorGet)
+		admin.GET("/creators/:userId/points", middleware.HasPermission("podAdmin:points:query"), handler.PODCreatorPoints)
+		admin.GET("/creators/:userId/point-events", middleware.HasPermission("podAdmin:points:query"), handler.PODCreatorEvents)
+		for _, route := range []struct{ method, path, op string }{
+			{"POST", "/creators", "creator.create"}, {"PUT", "/creators/:userId/policy", "creator.policy"}, {"PUT", "/creators/:userId/models", "creator.models"}, {"POST", "/creators/:userId/point-adjustments", "points.adjust"},
+		} {
+			admin.Handle(route.method, route.path, middleware.HasPermission(service.CatalogPermission(route.op)), handler.PODCreatorWrite(route.op, creatorLimits))
+		}
+		pod := r.Group("/pod", middleware.Auth(), bodyLimit, middleware.HasPermission(model.PODStudioAccess), middleware.PODCreatorAccess())
+		official := handler.PODOfficialHandler{Service: service.NewPODOfficialService(cfg.POD.StorageRoot, model.PODGraphLimits{MaxNodes: cfg.POD.MaxNodes, MaxEdges: cfg.POD.MaxEdges, MaxGraphBytes: cfg.POD.MaxGraphBytes}, model.PODAssetLimits{MaxUploadBytes: cfg.POD.MaxUploadBytes, MaxPixels: cfg.POD.MaxImagePixels})}
+		admin.GET("/catalog/templates", middleware.HasPermission("podAdmin:template:list"), official.List(true))
+		admin.GET("/catalog/templates/:id", middleware.HasPermission("podAdmin:template:query"), official.Get(true))
+		admin.GET("/catalog/templates/:id/versions", middleware.HasPermission("podAdmin:template:query"), official.Versions)
+		admin.GET("/catalog/assets", middleware.HasPermission("podAdmin:template:edit"), official.Assets)
+		admin.POST("/catalog/assets", middleware.HasPermission("podAdmin:template:edit"), official.Upload)
+		admin.GET("/catalog/assets/:id/content", middleware.HasPermission("podAdmin:template:edit"), official.Content)
+		for _, route := range []struct{ method, path, op string }{{"POST", "/catalog/templates", "official.create"}, {"PUT", "/catalog/templates/:id", "official.update"}, {"POST", "/catalog/templates/:id/versions", "official.version"}, {"POST", "/catalog/templates/:id/publish", "official.publish"}, {"POST", "/catalog/templates/:id/unpublish", "official.unpublish"}} {
+			admin.Handle(route.method, route.path, middleware.HasPermission(service.CatalogPermission(route.op)), official.Write(route.op))
+		}
+		pod.GET("/catalog/templates", official.List(false))
+		pod.GET("/catalog/templates/:id", official.Get(false))
+		pod.POST("/catalog/templates/:id/use", official.Use)
+		pod.GET("/catalog/use-actions/:requestId", official.UseAction)
+		pod.GET("/models", handler.PODCreatorModels)
+		pod.GET("/models/:id", handler.PODCreatorModel)
+		pod.GET("/execution-quotes/:id", handler.PODQuoteGet)
+		pod.GET("/eligibility", handler.PODMyEligibility)
+		pod.GET("/points", handler.PODMyPoints)
+		assetLimits := model.PODAssetLimits{MaxUploadBytes: cfg.POD.MaxUploadBytes, MaxPixels: cfg.POD.MaxImagePixels}
+		h := handler.PODHandler{Limits: model.PODGraphLimits{MaxNodes: cfg.POD.MaxNodes, MaxEdges: cfg.POD.MaxEdges, MaxGraphBytes: cfg.POD.MaxGraphBytes}, AssetLimits: assetLimits}
+		h.Execution = service.PODExecutionLimits(cfg.POD.Execution)
+		runs := handler.PODRunHandler{Service: service.PODRunService{Limits: h.Execution, GraphLimits: h.Limits, BudgetFen: cfg.POD.Qwen.BudgetFen}}
+		pod.GET("/runs", runs.List)
+		pod.POST("/execution-quotes", runs.Quote)
+		pod.POST("/runs", runs.Create)
+		pod.GET("/runs/:id", runs.Get)
+		pod.POST("/runs/:id/cancel", runs.Cancel)
+		pod.POST("/runs/:id/retry", runs.Retry)
+		pod.GET("/credits", runs.Credits)
+		pod.GET("/usage", runs.Usage)
+		pod.GET("/bootstrap", h.Bootstrap)
+		pod.POST("/workspace", h.InitWorkspace)
+		pod.GET("/projects", h.List)
+		pod.POST("/projects", h.Create)
+		pod.GET("/projects/:id", h.Get)
+		pod.PUT("/projects/:id", h.Update)
+		pod.DELETE("/projects/:id", h.Delete)
+		pod.POST("/projects/:id/restore", h.Restore)
+		templates := handler.PODTemplateHandler{Service: service.PODTemplateService{Limits: h.Limits}}
+		pod.GET("/templates", templates.List)
+		pod.POST("/templates", templates.Save)
+		pod.GET("/templates/:id", templates.Get)
+		pod.PUT("/templates/:id", templates.Update)
+		pod.DELETE("/templates/:id", templates.Delete)
+		pod.POST("/templates/:id/restore", templates.Restore)
+		pod.GET("/templates/:id/versions", templates.Versions)
+		pod.POST("/templates/:id/versions", templates.Save)
+		pod.GET("/templates/:id/versions/:version", templates.Version)
+		pod.POST("/templates/:id/copy", templates.Copy)
+		pod.POST("/templates/:id/use", templates.Use)
+		a := handler.PODAssetHandler{Service: service.NewPODAssetService(cfg.POD.StorageRoot, assetLimits)}
+		products := handler.PODProductHandler{Service: service.PODProductService{Limits: h.Limits, Execution: h.Execution, Assets: a.Service}}
+		pod.GET("/product-packs", products.Packs)
+		pod.GET("/product-jobs", products.Jobs)
+		pod.POST("/product-jobs", products.Create)
+		pod.GET("/product-jobs/:id", products.Get)
+		pod.GET("/product-jobs/:id/download", products.ZIP)
+		pod.GET("/product-jobs/:id/history/:node", products.History)
+		pod.PUT("/product-jobs/:id/finals/:node", products.SetFinal)
+		pod.GET("/product-jobs/:id/page-assets", a.ListProductPages)
+		pod.POST("/product-jobs/:id/page-assets", a.UploadProductPage)
+		batches := handler.PODBatchHandler{Service: service.PODBatchService{Runs: runs.Service, Assets: a.Service}}
+		pod.GET("/batches", batches.List)
+		pod.POST("/batches/preview", batches.Preview)
+		pod.POST("/batches", batches.Create)
+		pod.GET("/batches/:id", batches.Get)
+		pod.POST("/batches/:id/stop", batches.Stop)
+		pod.GET("/batches/:id/download", batches.ZIP)
+		pod.GET("/assets", a.List)
+		pod.POST("/assets", a.Upload)
+		pod.GET("/assets/:id", a.Get)
+		pod.GET("/assets/:id/content", a.Content)
+		pod.GET("/assets/:id/download", a.Download)
+		pod.DELETE("/assets/:id", a.Delete)
+		pod.POST("/assets/:id/restore", a.Restore)
+	}
 
 	return r
 }

@@ -1,0 +1,35 @@
+{
+  "name": "pod-studio-creator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5177 --strictPort",
+    "typecheck": "vue-tsc --noEmit",
+    "build": "vue-tsc --noEmit && vite build",
+    "test": "vitest run",
+    "preview": "vite preview --host 127.0.0.1 --port 5177 --strictPort"
+  },
+  "dependencies": {
+    "@fontsource-variable/manrope": "5.3.0",
+    "@phosphor-icons/vue": "2.2.1",
+    "@vue-flow/background": "1.3.2",
+    "@vue-flow/controls": "1.1.3",
+    "@vue-flow/core": "1.48.2",
+    "@vue-flow/minimap": "1.5.4",
+    "vue": "3.5.45"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "6.0.10",
+    "@vue/test-utils": "2.5.1",
+    "happy-dom": "21.0.4",
+    "typescript": "5.9.3",
+    "vite": "8.3.7",
+    "vitest": "5.1.0",
+    "vue-tsc": "3.3.14"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "packageManager": "pnpm@11.25.0"
+}

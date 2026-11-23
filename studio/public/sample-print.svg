@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" fill="none">
+  <title>Original geometric flower print sample</title>
+  <defs><g id="petal"><ellipse cx="200" cy="115" rx="36" ry="78" stroke="#2e6a8b" stroke-width="16"/><ellipse cx="200" cy="115" rx="22" ry="62" stroke="#62a28e" stroke-width="8"/></g></defs>
+  <use href="#petal"/><use href="#petal" transform="rotate(45 200 200)"/><use href="#petal" transform="rotate(90 200 200)"/><use href="#petal" transform="rotate(135 200 200)"/><use href="#petal" transform="rotate(180 200 200)"/><use href="#petal" transform="rotate(225 200 200)"/><use href="#petal" transform="rotate(270 200 200)"/><use href="#petal" transform="rotate(315 200 200)"/>
+  <circle cx="200" cy="200" r="29" fill="#e9c963" stroke="#fff" stroke-width="7"/>
+</svg>

@@ -88,7 +88,8 @@ func TestContractPermissionsCoverAllGoRoutes(t *testing.T) {
 		t.Fatal("未从路由提取到任何权限标识")
 	}
 	for _, match := range matches {
-		if _, exists := contractMenuPermissions[match[1]]; !exists {
+		// POD is a new domain; its registered permissions are not Java baseline identifiers.
+		if _, exists := contractMenuPermissions[match[1]]; !exists && !slices.Contains(model.PODAdminPermissions, match[1]) {
 			t.Errorf("路由权限 %q 未登记到契约集合", match[1])
 		}
 	}

@@ -1,0 +1,50 @@
+[
+  {
+    "code": "starter-text-print-v1",
+    "name": "文字生成印花",
+    "description": "适合从一个想法开始。\n1. 修改主题、风格和构图要求。\n2. 打开画布，选择已授权的图片模型，核对 1 张图片及点数后运行。\n3. 下载 PNG，按需再去背景或调整尺寸。生成依赖模型额度，复制模板不会调用模型；下载前核对印刷尺寸与 DPI。",
+    "sort": 10,
+    "graph": {"schemaVersion":1,"nodes":[
+      {"id":"idea","type":"textInput","version":1,"position":{"x":0,"y":100},"config":{"title":"主题与风格","text":"一朵蓝色野花，简洁平面插画，主体完整，白色背景，无文字，无水印，适合后续制作 T 恤印花。"}},
+      {"id":"generate","type":"imageGenerate","version":1,"position":{"x":420,"y":100},"config":{"title":"生成一张印花","ratio":"1:1","count":1}},
+      {"id":"print","type":"export","version":1,"position":{"x":840,"y":100},"config":{"title":"下载印花 PNG","mode":"print","format":"png","fileName":"创意印花","printWidthMM":300,"printHeightMM":300}}
+    ],"edges":[
+      {"id":"idea-generate","source":"idea","sourcePort":"text","target":"generate","targetPort":"text"},
+      {"id":"generate-print","source":"generate","sourcePort":"images","target":"print","targetPort":"images"}
+    ]}
+  },
+  {
+    "code": "starter-reference-print-v1",
+    "name": "参考图改图",
+    "description": "适合保留主体、更换风格。\n1. 选择你有权使用的个人参考图，填写需要保留与修改的细节。\n2. 打开画布，选择支持参考图的已授权图片模型，核对点数后运行。\n3. 对比参考图与结果，下载 PNG。复制不会调用模型；请勿上传没有使用权的图片。",
+    "sort": 20,
+    "graph": {"schemaVersion":1,"nodes":[
+      {"id":"idea","type":"textInput","version":1,"position":{"x":0,"y":0},"config":{"title":"改图要求","text":"保留参考图的主体和主要构图，改成轮廓清晰的扁平插画，减少细碎纹理，白色背景，无文字和水印。"}},
+      {"id":"reference","type":"imageInput","version":1,"position":{"x":0,"y":360},"config":{"title":"选择参考图片","assetIds":[]}},
+      {"id":"generate","type":"imageGenerate","version":1,"position":{"x":420,"y":120},"config":{"title":"参考图生成","ratio":"1:1","count":1}},
+      {"id":"print","type":"export","version":1,"position":{"x":840,"y":120},"config":{"title":"下载改图 PNG","mode":"print","format":"png","fileName":"参考图创作","printWidthMM":300,"printHeightMM":300}}
+    ],"edges":[
+      {"id":"idea-generate","source":"idea","sourcePort":"text","target":"generate","targetPort":"text"},
+      {"id":"reference-generate","source":"reference","sourcePort":"images","target":"generate","targetPort":"images"},
+      {"id":"generate-print","source":"generate","sourcePort":"images","target":"print","targetPort":"images"}
+    ]}
+  },
+  {
+    "code": "starter-print-mockup-v1",
+    "name": "印花处理与商品预览",
+    "description": "适合已有图片做上身展示，不调用付费模型。\n1. 选择自己的印花图片，优先使用纯白背景。\n2. 在画布调去背景容差、T 恤颜色、印花位置与大小，再运行。\n3. 分别下载透明 PNG 印花和 JPG 展示图。复杂背景需另选 CPU AI 去背景；二维预览和 DPI 提示不等于工厂印刷验收。",
+    "sort": 30,
+    "graph": {"schemaVersion":1,"nodes":[
+      {"id":"input","type":"imageInput","version":1,"position":{"x":0,"y":100},"config":{"title":"选择已有印花","assetIds":[]}},
+      {"id":"process","type":"imageProcess","version":1,"position":{"x":400,"y":100},"config":{"title":"去除纯色背景","operation":"removeBackground","method":"basic","background":"#ffffff","tolerance":30}},
+      {"id":"preview","type":"productPreview","version":1,"position":{"x":800,"y":100},"config":{"title":"T 恤预览","product":"tshirt","side":"front","color":"#233446","printX":0.5,"printY":0.4,"printScale":0.75}},
+      {"id":"mockup","type":"export","version":1,"position":{"x":1200,"y":100},"config":{"title":"下载展示图","mode":"mockup","format":"jpeg","fileName":"T恤展示"}},
+      {"id":"print","type":"export","version":1,"position":{"x":800,"y":550},"config":{"title":"下载透明印花","mode":"print","format":"png","fileName":"透明印花","printWidthMM":300,"printHeightMM":400}}
+    ],"edges":[
+      {"id":"input-process","source":"input","sourcePort":"images","target":"process","targetPort":"images"},
+      {"id":"process-preview","source":"process","sourcePort":"images","target":"preview","targetPort":"images"},
+      {"id":"preview-mockup","source":"preview","sourcePort":"images","target":"mockup","targetPort":"images"},
+      {"id":"process-print","source":"process","sourcePort":"images","target":"print","targetPort":"images"}
+    ]}
+  }
+]

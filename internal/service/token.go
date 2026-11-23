@@ -288,7 +288,10 @@ func advancePermissionVersions(ctx context.Context, userIDs []int64) (map[int64]
 			for _, userID := range batch {
 				commands = append(commands, command{
 					userID: userID,
-					cmd: advancePermissionVersionScript.Run(ctx, pipe,
+					// Pipeline errors arrive after Exec, too late for Run's
+					// EVALSHA -> EVAL fallback. EVAL is atomic and cache-independent;
+					// never replay the whole batch after a partial increment.
+					cmd: advancePermissionVersionScript.Eval(ctx, pipe,
 						[]string{redisx.LoginUserPermissionVersionKey(userID)}),
 				})
 			}

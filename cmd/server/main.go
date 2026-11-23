@@ -7,9 +7,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -45,7 +47,7 @@ func main() {
 }
 
 func run() error {
-	configPath := flag.String("config", "configs/application.yml", "配置文件路径")
+	configPath := flag.String("config", "configs/pod.local.yml", "POD 独立配置文件路径")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
@@ -53,6 +55,12 @@ func run() error {
 		return err
 	}
 	initLogger(cfg.Log.Level)
+	if err := config.ValidatePOD(cfg); err != nil {
+		return err
+	}
+	if err := service.InitPODCatalog(cfg.POD.Catalog, cfg.JWT.Secret); err != nil {
+		return err
+	}
 
 	if err := repository.Init(cfg.MySQL); err != nil {
 		return err
@@ -65,6 +73,16 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	checkCtx, cancelCheck := context.WithTimeout(ctx, 10*time.Second)
+	defer cancelCheck()
+	if err := repository.VerifyPODSchema(checkCtx, cfg.POD.InstanceID); err != nil {
+		return err
+	}
+	if cfg.POD.Execution.Mode == "managed" {
+		if err := repository.EnablePODManaged(checkCtx); err != nil {
+			return err
+		}
+	}
 
 	if err := redisx.Init(ctx, redisx.Options{
 		Addr:     cfg.Redis.Addr,
@@ -79,6 +97,14 @@ func run() error {
 			slog.Error("关闭 Redis 连接失败", "err", err)
 		}
 	}()
+	if err := redisx.ClaimPODInstance(checkCtx, cfg.POD.InstanceID); err != nil {
+		return err
+	}
+	if cfg.POD.Execution.Mode == "simulation" || cfg.POD.Execution.Mode == "qwen" || cfg.POD.Execution.Mode == "managed" {
+		if err := redisx.VerifyPODQueueRedis(checkCtx); err != nil {
+			return err
+		}
+	}
 
 	// 依赖数据库和 Redis 就绪，必须放在两者初始化之后
 	service.InitToken(cfg.JWT)
@@ -99,7 +125,7 @@ func run() error {
 	}
 
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
+		Addr:         net.JoinHostPort(cfg.Server.Host, strconv.Itoa(cfg.Server.Port)),
 		Handler:      router.New(cfg),
 		ReadTimeout:  cfg.Server.ReadTimeout,
 		WriteTimeout: cfg.Server.WriteTimeout,

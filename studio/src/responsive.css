@@ -1,0 +1,132 @@
+/* Loaded last: device adaptations share the desktop visual language. */
+body { min-width: 0; }
+.studio-layout, .studio-main, .editor-header, .editor-body { min-width: 0; }
+.studio-nav { min-width: 0; }
+.studio-nav button { flex-shrink: 0; }
+.canvas-tool-overflow { display: contents; }
+.canvas-tool-overflow > span { width: 25px; height: 1px; flex-shrink: 0; margin: 5px 0; background: var(--line); }
+.canvas-more-toggle, .mobile-tool-label, .canvas-touch-guide, .editor-panel-backdrop { display: none; }
+dialog { max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); overscroll-behavior: contain; }
+.studio-dialog { overflow: auto; }
+.manual-connection { scroll-margin-top: 64px; }
+
+@media (max-width: 1180px) {
+  .studio-header { flex-wrap: wrap; gap: 12px; padding: 14px 24px; }
+  .studio-header .account { margin-left: auto; }
+  .studio-nav { order: 3; width: 100%; justify-content: space-between; }
+  .studio-nav button { flex: 1; min-height: 44px; padding: 10px 12px; }
+}
+
+@media (max-width: 900px) {
+  .studio-main { padding: 24px; }
+  .studio-footer { gap: 12px; flex-wrap: wrap; }
+  .page-heading, .runs-heading, .asset-library-heading { flex-wrap: wrap; }
+  .page-heading > div, .runs-heading > div, .asset-library-heading > div { min-width: 0; }
+  .run-row { min-width: 0; }
+  .run-row > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+  .runs-tabs { flex-wrap: wrap; gap: 6px; }
+  .run-actions { flex-wrap: wrap; }
+  .project-tabs, .library-filters { gap: 12px; flex-wrap: wrap; }
+  .library-search { min-width: 0; }
+  .editor-header { flex-shrink: 0; }
+  .editor-panel-backdrop { display: block; position: absolute; inset: 0; border: 0; border-radius: 0; background: #24283724; z-index: 4; padding: 0; }
+  .editor-inspector, .editor-runs { max-width: calc(100% - 32px); }
+  .panel-heading { position: sticky; top: -1px; z-index: 2; background: var(--paper); padding-block: 4px; }
+  .editor-inspector .panel-heading { top: -18px; }
+  .node-palette .panel-heading { top: -10px; }
+  .node-palette .palette-node { min-height: 56px; }
+}
+
+@media (max-width: 640px) {
+  .studio-header { gap: 10px; padding: calc(12px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left)); }
+  .studio-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 4px; }
+  .studio-nav button { width: 100%; padding: 9px 4px; gap: 5px; font-size: 12px; }
+  .studio-header .brand { font-size: 17px; }
+  .studio-main { padding: 22px max(14px, env(safe-area-inset-right)) 24px max(14px, env(safe-area-inset-left)); }
+  .studio-footer { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+  .page-heading h1, .runs-heading h1 { font-size: 23px; }
+  .page-heading p { max-width: none; }
+  .projects-grid, .template-preset-grid { grid-template-columns: 1fr; }
+  .project-tabs > div { gap: 12px; flex-wrap: wrap; }
+  .asset-grid { gap: 12px; }
+  .asset-item-info { padding: 10px; }
+  .asset-item-info strong { white-space: normal; overflow-wrap: anywhere; }
+  .runs-tabs { gap: 4px; }
+  .runs-tabs button[aria-pressed] { flex: 1 0 auto; justify-content: center; padding-inline: 8px; }
+  .run-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+  .run-row > :first-child { white-space: normal; }
+  .run-row time { grid-column: 1 / -1; }
+  .run-result-images { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .run-pagination, .eligibility-pager { flex-wrap: wrap; gap: 10px; }
+  .library-filters { align-items: stretch; }
+  .library-search { flex: 1 1 100%; }
+  .template-dialog-header, .batch-detail-heading { align-items: flex-start; gap: 12px; }
+  .template-dialog-header > div, .batch-detail-heading > div { min-width: 0; }
+  .template-use-footer, .dialog-actions { flex-wrap: wrap; gap: 8px; }
+  dialog { max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  .studio-dialog, .template-save-dialog { padding: 18px; }
+  .node-action-dialog > footer, .batch-dialog footer, .asset-picker-dialog > footer { flex-wrap: wrap; gap: 8px; }
+  .login-page { padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); }
+  .creative-sheet { min-height: 190px; padding: 18px 20px; border-radius: 16px 16px 0 0; }
+  .creative-heading { margin-top: 20px; }
+  .creative-heading h1 { font-size: 29px; }
+  .creative-heading p { margin-top: 10px; }
+  .login-side { min-width: 0; padding: 28px 20px 64px; border-radius: 0 0 16px 16px; }
+}
+
+/* The canvas gets a small permanent dock; secondary tools open above it. */
+@media (max-width: 600px), (max-height: 500px) and (max-width: 1000px) {
+  .editor-header { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; gap: 6px 10px; padding: calc(6px + env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 8px max(10px, env(safe-area-inset-left)); }
+  .editor-brand, .editor-mode { display: none; }
+  .editor-project-name { min-width: 0; max-width: none; }
+  .editor-project-name input { min-width: 0; height: 44px; font-size: 16px; }
+  .save-indicator { max-width: 82px; margin: 0; font-size: 12px; }
+  .save-indicator small, .save-indicator::before { display: none; }
+  .editor-header-actions { grid-column: 1 / -1; width: 100%; margin: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .editor-header-actions button { width: 100%; min-width: 0; min-height: 44px; padding: 8px 5px; gap: 5px; }
+  .editor-header-actions button:first-child span { display: inline; }
+  .canvas-toolbar { top: auto; left: 50%; bottom: calc(10px + env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; flex-direction: row; gap: 4px; width: max-content; max-width: calc(100% - 20px); max-height: none; padding: 6px; overflow: visible; border-radius: 16px; }
+  .canvas-toolbar > span { display: none; }
+  .canvas-toolbar > button, .canvas-toolbar > button:first-child { width: 48px; height: 54px; min-height: 54px; flex: none; display: flex; flex-direction: column; gap: 4px; }
+  .mobile-tool-label { display: block; font-size: 11px; line-height: 1; }
+  .canvas-tool-overflow { display: none; }
+  .canvas-tool-overflow.is-open { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); position: absolute; bottom: calc(100% + 10px); left: 0; right: 0; border: 1px solid var(--line); border-radius: 14px; padding: 8px; gap: 4px; background: var(--paper); box-shadow: 0 8px 30px #24283724; max-height: min(250px, 50dvh); overflow-y: auto; overscroll-behavior: contain; }
+  .canvas-tool-overflow > span { display: none; }
+  .canvas-tool-overflow button { width: 100%; min-height: 52px; height: auto; display: flex; flex-direction: column; gap: 5px; }
+  .canvas-tool-overflow button::after { content: attr(data-mobile-label); font-size: 11px; }
+  .flow-canvas .vue-flow__controls { bottom: calc(90px + env(safe-area-inset-bottom)); left: 10px; padding: 2px; }
+  .flow-canvas .vue-flow__controls button { width: 44px; height: 44px; }
+  .flow-canvas .vue-flow__minimap { display: none; }
+  .canvas-touch-guide { display: block; position: absolute; top: 10px; left: 12px; right: 12px; text-align: center; margin: 0; color: var(--muted); font-size: 11px; pointer-events: none; z-index: 1; }
+  .node-palette, .editor-inspector, .editor-runs { left: 8px; right: 8px; top: auto; bottom: calc(88px + env(safe-area-inset-bottom)); width: auto; max-width: none; max-height: min(65dvh, calc(100% - 108px)); padding: 14px; border-radius: 16px; z-index: 7; }
+  .editor-inspector, .editor-runs { height: min(65dvh, calc(100% - 108px)); }
+  .node-palette .panel-heading, .editor-inspector .panel-heading { top: -14px; padding-block: 6px; }
+  .canvas-hint { left: 12px; right: 12px; bottom: calc(88px + env(safe-area-inset-bottom)); max-width: none; }
+  .blank-canvas { top: 38%; width: calc(100% - 40px); }
+  .blank-canvas h1 { font-size: 23px; }
+  .editor-alert { max-height: 28dvh; overflow-y: auto; flex-shrink: 0; }
+}
+
+@media (max-width: 900px), (any-pointer: coarse) {
+  button, .icon-button, .text-button, .secondary-button, .primary-button { min-height: 44px; }
+  .icon-button { min-width: 44px; }
+  :is(.studio-layout, .project-editor, .login-page, dialog) :is(input, select, textarea):not([type='checkbox']):not([type='radio']) { font-size: 16px; }
+  input:not([type='checkbox']):not([type='radio']), select { min-height: 44px; }
+  input[type='checkbox'], input[type='radio'] { flex-shrink: 0; }
+  .workflow-node-title { min-height: 48px; touch-action: none; }
+  .workflow-node .vue-flow__handle { width: 18px; height: 18px; }
+  .workflow-node .vue-flow__handle::before { content: ''; position: absolute; inset: -8px; border-radius: 50%; }
+  .manual-connection summary, .palette-advanced, .paid-run-confirm { min-height: 44px; }
+}
+
+@media (max-height: 500px) and (max-width: 1000px) {
+  .creative-sheet { display: none; }
+  .login-page { grid-template-columns: 1fr; }
+  .login-side { padding-top: 20px; }
+  .editor-header { grid-template-columns: 44px minmax(70px, 1fr) auto minmax(270px, 1.5fr); padding-block: 4px; }
+  .editor-header-actions { grid-column: auto; }
+  .canvas-touch-guide, .blank-node-chain, .blank-canvas p { display: none; }
+  .blank-canvas { gap: 10px; }
+  .node-palette, .editor-inspector, .editor-runs { max-height: calc(100% - 94px); }
+  .editor-inspector, .editor-runs { height: calc(100% - 94px); }
+}

@@ -20,6 +20,14 @@ configs/*.local.yml
 /logs/
 /uploadPath/
 .env
+configs/pod.local.yml
+/studio/node_modules/
+/studio/dist/
+/studio/.vite/
+/studio/coverage/
+/studio/.env.local
+/studio/.env.*.local
+/.local/
 
 # IDE
 .idea/

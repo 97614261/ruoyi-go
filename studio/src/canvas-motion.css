@@ -1,0 +1,48 @@
+.project-editor { --wire-color: #919191; --wire-stream: #555; }
+:root[data-theme='dark'] .project-editor { --wire-color: #707070; --wire-stream: #d2d2d2; }
+.workflow-edge { --edge-emphasis: var(--wire-stream); }
+.project-editor .flow-canvas .workflow-edge .vue-flow__edge-path {
+  stroke: var(--wire-color); stroke-width: 1.7; stroke-linecap: round;
+  transition: stroke 160ms ease, stroke-width 160ms ease;
+}
+.workflow-edge-stream {
+  stroke: var(--edge-emphasis); stroke-width: 2.3; stroke-linecap: round;
+  stroke-dasharray: 5 95; opacity: .65;
+  animation: canvas-edge-flow 3.4s linear infinite;
+  animation-delay: var(--edge-phase, 0s);
+  transition: stroke 160ms ease, opacity 160ms ease;
+}
+.workflow-edge-halo { stroke: var(--accent); stroke-width: 8; opacity: 0; transition: opacity 160ms ease; }
+.project-editor .flow-canvas .vue-flow__edge:is(:hover, :focus-visible, .selected) .workflow-edge,
+.workflow-edge.is-related { --edge-emphasis: var(--ink); }
+.project-editor .flow-canvas .vue-flow__edge:is(:hover, :focus-visible, .selected) .workflow-edge .vue-flow__edge-path,
+.project-editor .flow-canvas .workflow-edge.is-related .vue-flow__edge-path { stroke: var(--accent); stroke-width: 2.1; }
+.vue-flow__edge:is(:hover, :focus-visible, .selected) .workflow-edge-halo,
+.workflow-edge.is-related .workflow-edge-halo { opacity: .12; }
+.vue-flow__edge:is(:hover, :focus-visible, .selected) .workflow-edge-stream,
+.workflow-edge.is-related .workflow-edge-stream { opacity: 1; }
+.project-editor .flow-canvas .vue-flow__connection-path {
+  stroke: var(--accent); stroke-width: 2; stroke-linecap: round; stroke-dasharray: 6 5;
+  animation: canvas-connection-flow .6s linear infinite;
+}
+.project-editor :is(.node-palette, .editor-inspector, .editor-runs, .canvas-tool-overflow.is-open) { animation: canvas-panel-appear 160ms ease-out; }
+.project-editor .canvas-toolbar button { transition: background-color 140ms ease, color 140ms ease, scale 120ms ease; }
+.project-editor .canvas-toolbar button:active:not(:disabled) { scale: .94; }
+
+/* Dense graphs keep ambient streams off; interaction still reveals the relevant paths. */
+.canvas-motion-dense .workflow-edge:not(.is-related) .workflow-edge-stream { visibility: hidden; animation-play-state: paused; }
+.canvas-motion-dense .vue-flow__edge:is(:hover, :focus-visible, .selected) .workflow-edge-stream { visibility: visible; animation-play-state: running; }
+.canvas-motion-paused :is(.workflow-edge-stream, .vue-flow__connection-path) { animation-play-state: paused !important; }
+.canvas-motion-off .workflow-edge-stream { display: none; }
+.canvas-motion-off :is(.workflow-edge-stream, .vue-flow__connection-path, .node-palette, .editor-inspector, .editor-runs, .canvas-tool-overflow.is-open) { animation: none; }
+.canvas-motion-off :is(.workflow-edge-halo, .vue-flow__edge-path, .canvas-toolbar button) { transition: none !important; }
+.canvas-motion-off .canvas-toolbar button:active { scale: 1; }
+@keyframes canvas-edge-flow { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+@keyframes canvas-connection-flow { to { stroke-dashoffset: -11; } }
+@keyframes canvas-panel-appear { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .project-editor .workflow-edge-stream { display: none; }
+  .project-editor :is(.workflow-edge-stream, .vue-flow__connection-path, .node-palette, .editor-inspector, .editor-runs, .canvas-tool-overflow.is-open) { animation: none; }
+  .project-editor :is(.workflow-edge-halo, .vue-flow__edge-path, .canvas-toolbar button) { transition: none !important; }
+  .project-editor .canvas-toolbar button:active { scale: 1; }
+}

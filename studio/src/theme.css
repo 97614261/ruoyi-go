@@ -1,0 +1,155 @@
+/* Keep content pixels independent of the workbench appearance. */
+:root {
+  color-scheme: light;
+  color: var(--ink);
+  background: var(--canvas);
+  --paper: #fff;
+  --surface: #fff;
+  --surface-muted: #efefef;
+  --shell: #fafafa;
+  --canvas: #f4f4f4;
+  --ink: #222;
+  --muted: #666;
+  --line: #dedede;
+  --control-line: #aaa;
+  --field: #fafafa;
+  --accent: #076c7c;
+  --accent-hover: #065e6d;
+  --accent-light: #e5f3f5;
+  --action: #222;
+  --action-hover: #3b3b3b;
+  --on-action: #fff;
+  --canvas-dot: #cecece;
+  --success: #286c55;
+  --warning: #8d651c;
+  --danger: #a32937;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --paper: #202020;
+  --surface: #202020;
+  --surface-muted: #292929;
+  --shell: #121212;
+  --canvas: #181818;
+  --ink: #f1f1f1;
+  --muted: #aaa;
+  --line: #353535;
+  --control-line: #666;
+  --field: #191919;
+  --accent: #63d5e8;
+  --accent-hover: #a0e8f3;
+  --accent-light: #183238;
+  --action: #ededed;
+  --action-hover: #fff;
+  --on-action: #151515;
+  --canvas-dot: #393939;
+  --success: #8bd7b6;
+  --warning: #efc383;
+  --danger: #ffabb7;
+  --node-tone: #bbb;
+  --node-wash: #292929;
+}
+
+.primary-button { background: var(--action); border-color: var(--action); color: var(--on-action); }
+.primary-button:hover:not(:disabled) { background: var(--action-hover); border-color: var(--action-hover); }
+.canvas-toolbar > button:first-child, .asset-selected-mark { background: var(--action); }
+
+/* Round the last visible section without clipping the external connection handles. */
+.workflow-node:not(.has-run) > .workflow-port-labels { border-radius: 0 0 13px 13px; }
+.workflow-node > footer { border-radius: 0 0 13px 13px; }
+.node-generation-fields .model-select select { width: 100%; max-width: none; }
+
+.theme-switch { position: relative; flex: none; font-size: 12px; color: var(--muted); }
+.theme-switch > summary { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; list-style: none; cursor: pointer; background: var(--paper); }
+.theme-switch > summary::-webkit-details-marker { display: none; }
+.theme-switch > summary:hover, .theme-switch[open] > summary { color: var(--accent); background: var(--accent-light); }
+.theme-switch > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.theme-switch svg { flex: none; }
+.theme-options { position: absolute; top: calc(100% + 8px); right: 0; min-width: 158px; padding: 5px; border: 1px solid var(--line); border-radius: 10px; background: var(--paper); box-shadow: 0 8px 28px #11192329; z-index: 20; }
+.theme-options button { display: flex; width: 100%; min-height: 40px; padding: 9px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); text-align: left; justify-content: flex-start; }
+.theme-options button > span { flex: 1; }
+.theme-options button:hover, .theme-options button[aria-pressed='true'] { color: var(--accent); background: var(--accent-light); }
+.login-side { position: relative; }
+.login-theme-switch { position: absolute; top: 20px; right: 24px; z-index: 2; }
+.editor-header > .theme-switch { margin-left: auto; }
+.editor-header > .theme-switch + .editor-mode { margin-left: 0; }
+
+:root[data-theme='dark'] :is(.login-page, .creative-sheet, .start-preview, .preset-diagram, .template-graph) {
+  background-color: var(--canvas);
+  background-image: radial-gradient(var(--canvas-dot) .8px, transparent .8px);
+}
+:root[data-theme='dark'] .preset-diagram { border-color: var(--line); }
+:root[data-theme='dark'] :is(.login-side, .sample-prompt, .sample-print, .sample-product, .project-start, .preview-node, .mini-workflow > span, .blank-node-chain > span, .node-card, .node-inspector, .canvas-toolbar, .flow-canvas .vue-flow__controls, .flow-canvas .vue-flow__controls button, .flow-canvas .vue-flow__minimap, .workflow-node, .workflow-node > footer, .node-pick-image, .generation-stage-icon, .asset-cover, .batch-thumbnails img, .node-action-dialog, .creative-library-dialog, .creative-library-dialog > header, .creative-library-dialog nav button, .preset-diagram > span, .editor-runs) {
+  background: var(--paper);
+  border-color: var(--line);
+}
+:root[data-theme='dark'] :is(.secondary-button, .node-polish, .workflow-port-labels, .palette-search, .node-generated-images > .private-image, .asset-trashed, .action-source, .run-impact, .run-node-result pre, .image-run-status) {
+  background: var(--surface-muted);
+  border-color: var(--line);
+  color: var(--ink);
+}
+:root[data-theme='dark'] :is(.getting-started, .usage-receipt) { background: linear-gradient(120deg, var(--paper), var(--surface-muted)); }
+:root[data-theme='dark'] :is(input, textarea, select):not([type='color']):not([type='range']):not([type='checkbox']):not([type='radio']) {
+  background: var(--field);
+  color: var(--ink);
+  border-color: var(--control-line);
+}
+:root[data-theme='dark'] :is(input, textarea)::placeholder { color: var(--muted); opacity: 1; }
+:root[data-theme='dark'] :is(.editor-project-name input, .palette-search input) { background: transparent; }
+:root[data-theme='dark'] input[type='color'] { background: var(--paper); border-color: var(--control-line); }
+:root[data-theme='dark'] option { background: var(--paper); color: var(--ink); }
+:root[data-theme='dark'] :is(.icon-button, .canvas-toolbar button, .canvas-status > svg, .node-config-summary, .workflow-port-labels .port-origin, .creative-heading p, .sample-title, .sample-title svg, .sample-product > span:not(.sample-port), .sheet-footer, .form-note, .login-footer, .future-action > span, .folder-graphic, .preview-caption, .process-strip, .process-strip > svg, .studio-footer, .node-card-ports, .port-section h3, .port > span, .inspector-note, .palette-add, .prompt-list p, .run-row small, .credit-event small, .run-row time, .run-state, .empty-runs, .credit-balances span, .image-settings .muted, .product-layout p, .image-tool-placeholder, .image-tool-caption, .product-layout .image-tool-caption, .compare-panel > header span, .compare-viewport > p, .image-compare-dialog > footer, .result-images figcaption small) { color: var(--muted); }
+:root[data-theme='dark'] :is(.creative-heading h1, .credit-balances strong, .run-node-result pre) { color: var(--ink); }
+:root[data-theme='dark'] :is(.canvas-toolbar button, .flow-canvas .vue-flow__controls button) { fill: currentColor; }
+:root[data-theme='dark'] :is(.secondary-button, .icon-button, .node-pick-image, .flow-canvas .vue-flow__controls button):hover:not(:disabled),
+:root[data-theme='dark'] :is(.project-cover:hover, .new-project-card:hover, .palette-node:hover:not(:disabled), .run-row:hover, .run-row.selected, .runs-tabs > button[aria-pressed='true'], .creative-library-dialog nav button[aria-pressed='true'], .canvas-toolbar button[aria-pressed='true'], .image-tool-actions button[aria-pressed='true'], .polish-result > p, .workflow-node .node-run-output, .canvas-hint, .inspector-future, .test-mode-note, .avatar) {
+  color: var(--accent);
+  background: var(--accent-light);
+  border-color: var(--line);
+}
+:root[data-theme='dark'] :is(.runs-tabs > button[aria-pressed='false'], .secondary-button:disabled, .node-polish:disabled, .canvas-toolbar button:disabled) { color: var(--muted); }
+:root[data-theme='dark'] .primary-button:disabled { background: #333; border-color: #444; color: #999; }
+:root[data-theme='dark'] .secondary-button:disabled { background: var(--surface-muted); }
+:root[data-theme='dark'] :is(.canvas-toolbar > button:first-child, .asset-selected-mark) { color: var(--on-action); background: var(--action); }
+:root[data-theme='dark'] :is(.workflow-node-title, .workflow-port-labels, .node-extra-prompt, .node-specs span, .node-card-ports, .port-section, .inspector-note, .project-tabs, .run-row, .run-node-result, .credit-event, .prompt-list article, .compare-panel, .image-tool-placeholder, .crop-surface, .image-run-status, .mini-workflow > span, .blank-node-chain > span, .node-palette, .editor-inspector, .canvas-toolbar, .flow-canvas .vue-flow__controls, .workflow-node > footer, .action-source, .polish-result > p, .node-action-dialog > header, .creative-library-dialog > header, .node-action-dialog > footer, .compare-toolbar, .image-compare-dialog > footer, .workflow-node .node-run-output) { border-color: var(--line); }
+:root[data-theme='dark'] :is(.node-card.selected, .workflow-node.is-selected, .asset-item.asset-selected) { border-color: var(--accent); }
+:root[data-theme='dark'] :is(.save-indicator, .asset-notice, .run-state[data-state='succeeded']) { color: var(--success); }
+:root[data-theme='dark'] :is(.save-dirty, .save-saving, .image-warning, .run-state[data-state='running'], .run-state[data-state='awaitingReconciliation'], .run-state[data-state='cancelRequested']) { color: var(--warning); }
+:root[data-theme='dark'] :is(.save-error, .save-conflict, .run-node-error, .run-state[data-state='failed'], .run-state[data-state='blocked']) { color: var(--danger); }
+:root[data-theme='dark'] :is(.editor-alert, .eligibility .warning) { background: #3b3020; color: var(--warning); border-color: #715c39; }
+:root[data-theme='dark'] :is(.error-message, .editor-alert.error) { background: #3b2530; color: var(--danger); border-color: #76505d; }
+:root[data-theme='dark'] dialog::backdrop { background: rgb(3 8 17 / 72%); }
+:root[data-theme='dark'] .editor-panel-backdrop { background: rgb(3 8 17 / 56%); }
+:root[data-theme='dark'] .skeleton { background: var(--line); }
+:root[data-theme='dark'] .transparency-grid { background-color: #262626; background-image: conic-gradient(#323232 25%, #262626 0 50%, #323232 0 75%, #262626 0); }
+:root[data-theme='dark'] .workflow-node { --node-tone: #a2b8ff; --node-wash: #283958; }
+:root[data-theme='dark'] :is(.workflow-imageInput, .kind-imageInput) { --node-tone: #8bd7b6; --node-wash: #213c37; }
+:root[data-theme='dark'] :is(.workflow-imageGenerate, .kind-imageGenerate, .workflow-productPreview, .kind-productPreview) { --node-tone: #efc383; --node-wash: #3b3329; }
+:root[data-theme='dark'] :is(.workflow-imageProcess, .workflow-export, .kind-imageProcess, .kind-export) { --node-tone: #9dd2e3; --node-wash: #263b48; }
+:root[data-theme='dark'] .node-icon { background: var(--node-wash, var(--accent-light)); color: var(--node-tone, var(--accent)); }
+:root[data-theme='dark'] :is(.node-image-placeholder, .node-product-placeholder, .generation-stage) { background: var(--surface-muted); border-color: var(--line); color: var(--node-tone); }
+:root[data-theme='dark'] .node-pick-image { color: var(--success); }
+:root[data-theme='dark'] .workflow-node .vue-flow__handle { border-color: var(--paper); }
+:root[data-theme='dark'] .flow-canvas .vue-flow__edge-path { stroke: #858585; }
+:root[data-theme='dark'] .flow-canvas .vue-flow__edge.selected .vue-flow__edge-path { stroke: var(--accent); }
+:root[data-theme='dark'] .vue-flow__minimap-mask { fill: rgb(0 0 0 / 55%); }
+:root[data-theme='dark'] .template-graph rect { fill: var(--paper); stroke: var(--line); }
+:root[data-theme='dark'] .template-wire { stroke: #858585; }
+
+@media (max-width: 900px), (any-pointer: coarse) {
+  .theme-switch > summary { min-height: 44px; min-width: 44px; }
+  .theme-options button { min-height: 44px; }
+}
+@media (max-width: 760px) {
+  .theme-mode-label { display: none; }
+  .theme-switch > summary { width: 44px; height: 44px; padding: 10px; }
+  .login-theme-switch { top: 12px; right: 14px; }
+}
+@media (max-width: 600px), (max-height: 500px) and (max-width: 1000px) {
+  .editor-header { grid-template-columns: 44px minmax(0, 1fr) auto 44px; }
+  .editor-header > .theme-switch { grid-column: 4; grid-row: 1; margin: 0; }
+  .editor-header > .theme-switch .theme-mode-label { display: none; }
+  .editor-header > .theme-switch > summary { width: 44px; height: 44px; padding: 10px; }
+  .editor-header-actions { grid-column: 1 / -1; }
+}

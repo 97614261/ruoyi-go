@@ -1,0 +1,42 @@
+.studio-login-trigger { white-space: nowrap; }
+
+dialog.signin-dialog {
+  width: min(390px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: clamp(18px, 5vw, 26px);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 20px 70px rgb(0 0 0 / 24%);
+}
+.signin-dialog::backdrop { background: rgb(16 18 24 / 50%); }
+.signin-dialog-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 15px;
+}
+.signin-dialog-heading h2 { margin: 0; font-size: 22px; }
+.signin-dialog-heading .icon-button { flex: none; }
+.signin-form .field { margin: 0 0 15px; }
+.signin-form .field input {
+  min-width: 0;
+  height: 46px;
+  font-size: 16px;
+  background: var(--field);
+}
+.signin-form .password-field input { padding-right: 48px; }
+.signin-form .password-field .icon-button {
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.signin-form .captcha-row {
+  grid-template-columns: minmax(0, 1fr) minmax(88px, 32%);
+  gap: 8px;
+}
+.signin-form .captcha-image { height: 46px; border-color: var(--line); background: #fff; }
+.signin-form .signin-submit { width: 100%; min-height: 46px; margin-top: 3px; }

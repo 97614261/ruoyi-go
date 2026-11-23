@@ -1,0 +1,148 @@
+.project-editor .workflow-node {
+  --node-accent: #3d5d9e;
+  --node-tint: #e8eefb;
+  border-color: var(--line);
+  border-radius: 12px;
+  box-shadow: 0 5px 16px rgb(22 30 44 / 7%);
+}
+.project-editor :is(.workflow-imageInput, .workflow-productPreview) { --node-accent: #21715e; --node-tint: #e2f2e9; }
+.project-editor :is(.workflow-imageGenerate, .workflow-textGenerate) { --node-accent: #92541f; --node-tint: #faeedc; }
+.project-editor :is(.workflow-imageProcess, .workflow-export) { --node-accent: #466674; --node-tint: #e6eff1; }
+:root[data-theme='dark'] .project-editor .workflow-node { --node-accent: #a7bcff; --node-tint: #293549; }
+:root[data-theme='dark'] .project-editor :is(.workflow-imageInput, .workflow-productPreview) { --node-accent: #8fdfc2; --node-tint: #244138; }
+:root[data-theme='dark'] .project-editor :is(.workflow-imageGenerate, .workflow-textGenerate) { --node-accent: #f2bf87; --node-tint: #493523; }
+:root[data-theme='dark'] .project-editor :is(.workflow-imageProcess, .workflow-export) { --node-accent: #a5d0dd; --node-tint: #263b42; }
+.project-editor .workflow-node.is-selected,
+:root[data-theme='dark'] .project-editor .workflow-node.is-selected {
+  border-color: var(--node-accent);
+  box-shadow: 0 0 0 2px var(--node-tint), 0 6px 20px rgb(22 30 44 / 12%);
+}
+.project-editor .workflow-node .workflow-node-title {
+  position: relative;
+  inset: auto;
+  min-height: 47px;
+  padding: 6px 9px;
+  border-bottom: 1px solid var(--line);
+  border-radius: 11px 11px 0 0;
+  background: linear-gradient(100deg, var(--node-tint), var(--paper) 80%);
+}
+.project-editor .workflow-node-title .node-icon {
+  width: 29px;
+  height: 29px;
+  border-radius: 7px;
+  color: var(--node-accent);
+  background: var(--node-tint);
+}
+.project-editor .workflow-node-title strong { font-size: 13px; font-weight: 700; }
+.project-editor .workflow-node .node-title-actions { opacity: 0; }
+.project-editor .workflow-node:is(:hover, :focus-within, .is-selected) .node-title-actions { opacity: 1; }
+.project-editor .workflow-node .node-float-tools {
+  position: absolute; z-index: 5; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
+  min-width: max-content; align-items: center; gap: 3px; padding: 3px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--paper); box-shadow: 0 6px 20px rgb(0 0 0 / 12%);
+  pointer-events: none;
+}
+.project-editor .workflow-node:is(:hover, :focus-within, .is-selected) .node-float-tools { pointer-events: auto; }
+.node-float-tools::after { content: ''; position: absolute; inset: 100% 0 auto; height: 9px; }
+.project-editor .node-title-actions .icon-button {
+  color: var(--muted);
+  min-width: 0;
+  min-height: 0;
+  width: 26px;
+  height: 28px;
+}
+.project-editor .node-float-tools .icon-button:has(span) { display: inline-flex; width: auto; align-items: center; gap: 5px; padding: 0 8px; font-size: 12px; }
+.project-editor .workflow-node .workflow-node-content { padding: 12px; }
+.project-editor .workflow-node-content textarea { font-size: 13px; }
+.project-editor .workflow-node .node-generation-preview { min-height: 126px; border: 1px dashed var(--line); border-radius: 9px; background: var(--field); }
+.project-editor .workflow-node .node-run-output { margin-top: 0; }
+.compact-inspector .inspector-node-actions { flex: none; padding: 10px 13px; border-top: 1px solid var(--line); background: var(--paper); }
+.compact-inspector .inspector-node-actions .primary-button { width: 100%; justify-content: center; min-height: 40px; }
+.project-editor .compact-inspector.node-anchored-inspector { bottom: auto; right: auto; z-index: 8; }
+.quick-port-menu { position: absolute; z-index: 10; display: grid; width: min(246px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow: auto; overscroll-behavior: contain; padding: 5px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); box-shadow: 0 12px 30px rgb(0 0 0 / 19%); }
+.quick-port-menu header { display: flex; align-items: center; justify-content: space-between; padding-left: 8px; font-size: 13px; }
+.quick-port-options { display: grid; gap: 2px; }
+.quick-port-options button { display: flex; align-items: center; gap: 9px; min-height: 34px; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); text-align: left; font-size: 13px; }
+.quick-port-options button:hover, .quick-port-options button:focus-visible { background: var(--field); }
+.quick-port-options button > span { flex: 1; }
+.quick-port-options p { margin: 4px 8px; color: var(--muted); font-size: 12px; }
+.quick-port-menu .quick-port-existing { justify-content: flex-start; margin-top: 4px; padding: 8px; border-top: 1px solid var(--line); }
+@media (hover: none), (pointer: coarse) {
+  .compact-inspector .inspector-node-actions .primary-button { min-height: 44px; }
+  .project-editor .workflow-node { --node-port-step: 44px; }
+  .project-editor .node-float-tools .icon-button, .quick-port-menu button { min-height: 44px; }
+}
+
+.project-editor .workflow-node > footer { border-radius: 0 0 11px 11px; }
+
+.project-editor .edge-disconnect {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--control-line);
+  border-radius: 50%;
+  color: var(--danger);
+  background: var(--paper);
+  box-shadow: 0 2px 7px rgb(0 0 0 / 18%);
+  pointer-events: auto;
+  z-index: 1;
+}
+.project-editor .edge-disconnect:hover { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--paper)); }
+.project-editor .connection-hint .text-button { white-space: nowrap; padding: 3px 5px; }
+
+@media (min-width: 820px) {
+  .project-editor .canvas-dock { gap: 3px; border-radius: 13px; padding: 5px; }
+  .project-editor .canvas-dock .canvas-more-toggle { display: none; }
+  .project-editor .canvas-dock .canvas-tool-overflow,
+  .project-editor .canvas-dock .canvas-tool-overflow.is-open {
+    position: static;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    width: auto;
+    max-width: none;
+    max-height: none;
+    padding: 0;
+    border: 0;
+    overflow: visible;
+    transform: none;
+    background: transparent;
+    box-shadow: none;
+    animation: none;
+  }
+  .project-editor .canvas-dock .canvas-tool-overflow::before,
+  .project-editor .canvas-dock .canvas-tool-overflow > span {
+    content: '';
+    display: block;
+    width: 1px;
+    height: 25px;
+    margin: 0 2px;
+    background: var(--line);
+  }
+  .project-editor .canvas-dock > button,
+  .project-editor .canvas-dock > button:first-child,
+  .project-editor .canvas-dock .canvas-tool-overflow button {
+    width: 41px;
+    height: 45px;
+    min-height: 45px;
+    padding: 2px;
+    gap: 5px;
+    border-radius: 8px;
+  }
+}
+@media (min-width: 820px) and (max-width: 1140px) {
+  .project-editor .canvas-status { right: 14px; bottom: 81px; }
+  .project-editor .flow-canvas .vue-flow__controls { bottom: 81px; }
+}
+@media (min-width: 820px) and (pointer: coarse) {
+  .project-editor .flow-canvas .vue-flow__controls { bottom: 81px; }
+}
+@media (hover: none), (pointer: coarse) {
+  .project-editor .node-title-actions .icon-button { width: 36px; height: 37px; }
+  .project-editor .edge-disconnect { width: 44px; height: 44px; }
+}

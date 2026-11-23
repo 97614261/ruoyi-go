@@ -1,0 +1,27 @@
+[Unit]
+Description=POD Studio Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pod
+Group=pod
+WorkingDirectory=/opt/pod
+ExecStartPre=/opt/pod/current/bin/podsetup -mode check -config /etc/pod/pod.yml
+ExecStart=/opt/pod/current/bin/pod-worker -config /etc/pod/pod.yml
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=120
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pod /opt/pod/.local
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

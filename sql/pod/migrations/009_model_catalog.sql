@@ -1,0 +1,86 @@
+-- POD-only catalog. No credentials, model seeds or execution-mode changes.
+CREATE TABLE pod_provider (
+ provider_id BIGINT NOT NULL AUTO_INCREMENT,
+ provider_code VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+ name VARCHAR(100) NOT NULL,
+ adapter_kind VARCHAR(32) NOT NULL,
+ region VARCHAR(32) NOT NULL,
+ endpoint VARCHAR(200) NOT NULL,
+ status VARCHAR(16) NOT NULL DEFAULT 'disabled',
+ revision BIGINT NOT NULL DEFAULT 1,
+ current_credential_version_id BIGINT NULL,
+ create_by VARCHAR(64) NOT NULL,
+ create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+ update_by VARCHAR(64) NOT NULL DEFAULT '',
+ update_time DATETIME(3) NULL,
+ remark VARCHAR(500) NOT NULL DEFAULT '',
+ PRIMARY KEY (provider_id),
+ UNIQUE KEY uk_provider_code (provider_code),
+ KEY idx_provider_status (status,provider_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE pod_provider_credential_version (
+ credential_version_id BIGINT NOT NULL AUTO_INCREMENT,
+ provider_id BIGINT NOT NULL,
+ version BIGINT NOT NULL,
+ source_type VARCHAR(16) NOT NULL,
+ key_id VARCHAR(64) NOT NULL DEFAULT '',
+ nonce VARBINARY(12) NULL,
+ ciphertext VARBINARY(1024) NULL,
+ env_name VARCHAR(64) NOT NULL DEFAULT '',
+ state VARCHAR(16) NOT NULL DEFAULT 'active',
+ create_by VARCHAR(64) NOT NULL,
+ create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+ update_by VARCHAR(64) NOT NULL DEFAULT '',
+ update_time DATETIME(3) NULL,
+ remark VARCHAR(500) NOT NULL DEFAULT '',
+ PRIMARY KEY (credential_version_id),
+ UNIQUE KEY uk_provider_credential_version (provider_id,version),
+ KEY idx_provider_credential_state (provider_id,state,credential_version_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE pod_model (
+ model_id BIGINT NOT NULL AUTO_INCREMENT,
+ model_code VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+ provider_id BIGINT NOT NULL,
+ kind VARCHAR(16) NOT NULL,
+ name VARCHAR(100) NOT NULL,
+ current_version_id BIGINT NULL,
+ status VARCHAR(16) NOT NULL DEFAULT 'disabled',
+ visible TINYINT NOT NULL DEFAULT 0,
+ sort INT NOT NULL DEFAULT 0,
+ revision BIGINT NOT NULL DEFAULT 1,
+ create_by VARCHAR(64) NOT NULL,
+ create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+ update_by VARCHAR(64) NOT NULL DEFAULT '',
+ update_time DATETIME(3) NULL,
+ remark VARCHAR(500) NOT NULL DEFAULT '',
+ PRIMARY KEY (model_id),
+ UNIQUE KEY uk_catalog_model_code (model_code),
+ KEY idx_model_provider_status (provider_id,status,model_id),
+ KEY idx_model_kind_visible_status (kind,visible,status,sort,model_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+
+CREATE TABLE pod_model_version (
+ model_version_id BIGINT NOT NULL AUTO_INCREMENT,
+ model_id BIGINT NOT NULL,
+ version BIGINT NOT NULL,
+ official_model_id VARCHAR(100) NOT NULL,
+ adapter_kind VARCHAR(32) NOT NULL,
+ adapter_version VARCHAR(16) NOT NULL,
+ endpoint VARCHAR(200) NOT NULL,
+ region VARCHAR(32) NOT NULL,
+ capabilities_json JSON NOT NULL,
+ cost_rule_json JSON NOT NULL,
+ point_rule_json JSON NOT NULL,
+ timeout_seconds INT NOT NULL,
+ spec_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+ create_by VARCHAR(64) NOT NULL,
+ create_time DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+ update_by VARCHAR(64) NOT NULL DEFAULT '',
+ update_time DATETIME(3) NULL,
+ remark VARCHAR(500) NOT NULL DEFAULT '',
+ PRIMARY KEY (model_version_id),
+ UNIQUE KEY uk_model_version (model_id,version),
+ KEY idx_model_version_history (model_id,model_version_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

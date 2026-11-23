@@ -13,6 +13,7 @@ import (
 
 // Config 应用配置总入口。
 type Config struct {
+	POD     PODConfig     `mapstructure:"pod"`
 	Server  ServerConfig  `mapstructure:"server"`
 	MySQL   MySQLConfig   `mapstructure:"mysql"`
 	Redis   RedisConfig   `mapstructure:"redis"`
@@ -55,6 +56,7 @@ type CaptchaConfig struct {
 }
 
 type ServerConfig struct {
+	Host            string        `mapstructure:"host"`
 	Port            int           `mapstructure:"port"`
 	Mode            string        `mapstructure:"mode"`
 	ReadTimeout     time.Duration `mapstructure:"readTimeout"`
@@ -130,11 +132,30 @@ func Load(path string) (*Config, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	if cfg.POD.Enabled {
+		if err := ValidatePOD(&cfg); err != nil {
+			return nil, err
+		}
+	}
 	return &cfg, nil
 }
 
 func setDefaults(v *viper.Viper) {
+	v.SetDefault("pod.enabled", false)
+	v.SetDefault("pod.instanceId", "")
+	v.SetDefault("pod.databaseName", "")
+	v.SetDefault("pod.redisDB", -1)
+	v.SetDefault("pod.storageRoot", "")
+	v.SetDefault("pod.maxNodes", 100)
+	v.SetDefault("pod.maxEdges", 300)
+	v.SetDefault("pod.maxGraphBytes", 1<<20)
+	v.SetDefault("pod.qwen.baseURL", "https://dashscope.aliyuncs.com")
+	v.SetDefault("pod.qwen.apiKey", "")
+	v.SetDefault("pod.qwen.apiKeyEnv", "DASHSCOPE_API_KEY")
+	v.SetDefault("pod.qwen.allowPaidCalls", false)
+	v.SetDefault("pod.qwen.budgetFen", 0)
 	v.SetDefault("server.port", 8080)
+	v.SetDefault("server.host", "")
 	v.SetDefault("server.mode", "debug")
 	v.SetDefault("server.readTimeout", "30s")
 	v.SetDefault("server.writeTimeout", "60s")

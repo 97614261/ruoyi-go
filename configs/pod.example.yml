@@ -1,0 +1,49 @@
+# Copy to pod.local.yml or run podsetup -mode prepare. No real secrets here.
+# This example intentionally fails validation until the isolated settings are supplied.
+pod:
+  enabled: true
+  instanceId: pod-local-example
+  databaseName: pod_studio_dev
+  redisDB: 15
+  maxNodes: 100
+  maxEdges: 300
+  maxGraphBytes: 1048576
+  maxUploadBytes: 10485760
+  maxImagePixels: 24000000
+  catalog:
+    keyringFile: "" # Absolute private file path; independent AES/HMAC keys, never JWT. Empty = read-only management.
+    credentialEnvs: [] # Explicit allowlist for environment references; values never returned.
+  execution:
+    mode: simulation # Explicit simulation/qwen/managed; disabled stops new submissions.
+    globalConcurrency: 2
+    userConcurrency: 1
+    providerConcurrency: 2
+    maxPending: 100
+    maxUserPending: 10
+    initialCredits: 1000
+    imageAIURL: "" # Optional self-hosted CPU service, e.g. http://127.0.0.1:18112
+  # managed uses catalog credentials; this block retains the shared paid-call/cost switches.
+  qwen:
+    baseURL: https://dashscope.aliyuncs.com
+    apiKey: "" # Fill only in ignored pod.local.yml; takes priority over the environment.
+    apiKeyEnv: DASHSCOPE_API_KEY # Fallback when apiKey is empty.
+    allowPaidCalls: false
+    budgetFen: 0 # Shared lifetime cost cap for qwen/managed; unknown calls keep their reservation.
+  storageRoot: D:/WorkSpace/CodeX/pod-studio/.local/assets
+server:
+  host: 127.0.0.1
+  port: 18110
+  mode: release
+mysql:
+  dsn: "pod_user:change-me@tcp(127.0.0.1:3306)/pod_studio_dev?charset=utf8mb4&parseTime=true&loc=Asia%2FShanghai"
+  maxOpenConns: 10
+  maxIdleConns: 3
+redis:
+  addr: 127.0.0.1:6379
+  password: ""
+  db: 15
+  poolSize: 8
+jwt:
+  secret: change-me-to-an-independent-random-secret
+upload:
+  path: D:/WorkSpace/CodeX/pod-studio/.local/public
